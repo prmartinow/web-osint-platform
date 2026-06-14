@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Web OSINT Search Result Event",
+  "type": "object",
+  "required": ["schema_version", "collector_run_id", "source_project", "capture_method", "searched_at", "engine", "query", "rank", "url"],
+  "properties": {
+    "schema_version": {"const": "v1"},
+    "collector_run_id": {"type": "string"},
+    "source_project": {"type": "string"},
+    "capture_method": {"type": "string"},
+    "searched_at": {"type": "string", "format": "date-time"},
+    "engine": {"type": "string"},
+    "query": {"type": "string"},
+    "rank": {"type": "integer"},
+    "url": {"type": "string"},
+    "canonical_post_id": {"type": ["string", "null"]},
+    "title": {"type": "string"},
+    "snippet": {"type": "string"},
+    "challenge": {"type": "boolean"}
+  },
+  "additionalProperties": true
+}
+

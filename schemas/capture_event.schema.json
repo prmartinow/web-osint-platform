@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Web OSINT Capture Event",
+  "type": "object",
+  "required": ["schema_version", "collector_run_id", "event_index", "source_project", "capture_method", "captured_at"],
+  "properties": {
+    "schema_version": {"const": "v1"},
+    "collector_run_id": {"type": "string", "minLength": 1},
+    "event_index": {"type": "integer", "minimum": 0},
+    "source_project": {"type": "string"},
+    "capture_method": {"type": "string"},
+    "captured_at": {"type": "string", "format": "date-time"},
+    "page_url": {"type": "string"},
+    "page_title": {"type": "string"},
+    "context": {"type": "object"},
+    "posts": {"type": "array"},
+    "accounts": {"type": "array"},
+    "media": {"type": "array"},
+    "links": {"type": "array"},
+    "quality": {"type": "object"}
+  },
+  "additionalProperties": true
+}
+

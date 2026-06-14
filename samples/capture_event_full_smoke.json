@@ -1,0 +1,73 @@
+{
+  "schema_version": "v1",
+  "collector_run_id": "mac_full_smoke_capture",
+  "event_index": 0,
+  "source_project": "smoke",
+  "capture_method": "manual_full_smoke",
+  "captured_at": "2026-06-14T00:00:00.000Z",
+  "page_url": "https://x.com/example/status/1234567890",
+  "page_title": "Smoke X Post",
+  "context": {
+    "query": "agent harness smoke",
+    "engine": "google"
+  },
+  "posts": [
+    {
+      "post_id": "1234567890",
+      "canonical_url": "https://x.com/example/status/1234567890",
+      "author_handle": "example",
+      "author_name": "Example Account",
+      "posted_at": "2026-06-14T00:00:00.000Z",
+      "text": "Smoke post about an agent harness with benchmark evidence.",
+      "links": [
+        "https://example.com/agent-harness"
+      ],
+      "media_ids": [
+        "smoke-media-1"
+      ],
+      "topics": [
+        "agent harness",
+        "benchmark"
+      ],
+      "entities": [
+        "Example Harness"
+      ]
+    }
+  ],
+  "accounts": [
+    {
+      "handle": "example",
+      "display_name": "Example Account",
+      "bio": "Smoke account for web-osint ingestion.",
+      "profile_url": "https://x.com/example",
+      "website_urls": [
+        "https://example.com"
+      ]
+    }
+  ],
+  "media": [
+    {
+      "media_id": "smoke-media-1",
+      "media_kind": "image",
+      "url": "https://example.com/smoke.png",
+      "ocr_text": "Benchmark: 99% smoke pass rate",
+      "caption": "Smoke benchmark screenshot"
+    }
+  ],
+  "search_results": [
+    {
+      "rank": 1,
+      "url": "https://example.com/agent-harness",
+      "title": "Example Agent Harness",
+      "snippet": "Smoke search result for the agent harness pipeline."
+    }
+  ],
+  "links": [
+    "https://example.com/agent-harness"
+  ],
+  "quality": {
+    "challenge": false,
+    "login_prompt_visible": false,
+    "partial": false
+  }
+}

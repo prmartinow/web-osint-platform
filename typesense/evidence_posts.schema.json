@@ -1,0 +1,24 @@
+{
+  "name": "evidence_posts",
+  "enable_nested_fields": true,
+  "fields": [
+    {"name": "id", "type": "string"},
+    {"name": "canonical_url", "type": "string", "facet": false, "optional": true},
+    {"name": "author_handle", "type": "string", "facet": true, "optional": true},
+    {"name": "author_name", "type": "string", "facet": true, "optional": true},
+    {"name": "source_projects", "type": "string[]", "facet": true, "optional": true},
+    {"name": "source_kind", "type": "string", "facet": true, "optional": true},
+    {"name": "topics", "type": "string[]", "facet": true, "optional": true},
+    {"name": "entities", "type": "string[]", "facet": true, "optional": true},
+    {"name": "captured_at", "type": "int64", "facet": true},
+    {"name": "posted_at", "type": "int64", "facet": true, "optional": true},
+    {"name": "text", "type": "string", "optional": true},
+    {"name": "links", "type": "string[]", "optional": true},
+    {"name": "link_hosts", "type": "string[]", "facet": true, "optional": true},
+    {"name": "media_kinds", "type": "string[]", "facet": true, "optional": true},
+    {"name": "has_screenshot", "type": "bool", "facet": true, "optional": true},
+    {"name": "has_ocr", "type": "bool", "facet": true, "optional": true},
+    {"name": "quality_flags", "type": "string[]", "facet": true, "optional": true}
+  ],
+  "default_sorting_field": "captured_at"
+}

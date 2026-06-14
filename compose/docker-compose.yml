@@ -1,0 +1,126 @@
+name: web-osint-platform
+
+services:
+  redpanda:
+    image: docker.redpanda.com/redpandadata/redpanda:latest
+    container_name: web-osint-redpanda
+    command:
+      - redpanda
+      - start
+      - --smp
+      - "2"
+      - --memory
+      - 2G
+      - --reserve-memory
+      - 0M
+      - --overprovisioned
+      - --node-id
+      - "0"
+      - --check=false
+      - --kafka-addr
+      - internal://0.0.0.0:9092,external://0.0.0.0:19092
+      - --advertise-kafka-addr
+      - internal://web-osint-redpanda:9092,external://127.0.0.1:19092
+      - --pandaproxy-addr
+      - internal://0.0.0.0:8082,external://0.0.0.0:18082
+      - --advertise-pandaproxy-addr
+      - internal://web-osint-redpanda:8082,external://127.0.0.1:18082
+      - --schema-registry-addr
+      - internal://0.0.0.0:8081,external://0.0.0.0:18081
+      - --rpc-addr
+      - 0.0.0.0:33145
+      - --advertise-rpc-addr
+      - web-osint-redpanda:33145
+    ports:
+      - "127.0.0.1:19092:19092"
+      - "127.0.0.1:18081:18081"
+      - "127.0.0.1:18082:18082"
+      - "127.0.0.1:19644:9644"
+    volumes:
+      - ${WEB_OSINT_DATA_ROOT:-/mnt/data/web-osint-platform}/redpanda:/var/lib/redpanda/data
+    healthcheck:
+      test: ["CMD-SHELL", "rpk cluster health | grep -q 'Healthy: *true'"]
+      interval: 20s
+      timeout: 10s
+      retries: 12
+      start_period: 30s
+    restart: unless-stopped
+
+  typesense:
+    image: typesense/typesense:30.0
+    container_name: web-osint-typesense
+    env_file:
+      - ../.env
+    command:
+      - --data-dir
+      - /data
+      - --api-key
+      - ${TYPESENSE_API_KEY}
+      - --listen-port
+      - "8108"
+      - --enable-cors
+    ports:
+      - "127.0.0.1:18108:8108"
+    volumes:
+      - ${WEB_OSINT_DATA_ROOT:-/mnt/data/web-osint-platform}/typesense:/data
+    restart: unless-stopped
+
+  qdrant:
+    image: qdrant/qdrant:latest
+    container_name: web-osint-qdrant
+    ports:
+      - "127.0.0.1:16333:6333"
+      - "127.0.0.1:16334:6334"
+    volumes:
+      - ${WEB_OSINT_DATA_ROOT:-/mnt/data/web-osint-platform}/qdrant:/qdrant/storage
+    restart: unless-stopped
+
+  clickhouse:
+    image: clickhouse/clickhouse-server:latest
+    container_name: web-osint-clickhouse
+    env_file:
+      - ../.env
+    environment:
+      CLICKHOUSE_DB: web_osint
+      CLICKHOUSE_USER: web_osint
+      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD}
+      CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: "1"
+    ports:
+      - "127.0.0.1:18123:8123"
+      - "127.0.0.1:19000:9000"
+    ulimits:
+      nofile:
+        soft: 262144
+        hard: 262144
+    volumes:
+      - ${WEB_OSINT_DATA_ROOT:-/mnt/data/web-osint-platform}/clickhouse/data:/var/lib/clickhouse
+      - ${WEB_OSINT_DATA_ROOT:-/mnt/data/web-osint-platform}/clickhouse/logs:/var/log/clickhouse-server
+    restart: unless-stopped
+
+  normalizer:
+    build:
+      context: ../workers/normalizer
+    container_name: web-osint-normalizer
+    env_file:
+      - ../.env
+    environment:
+      KAFKA_BROKERS: web-osint-redpanda:9092
+      KAFKA_GROUP_ID: web-osint-normalizer-v1
+      TYPESENSE_URL: http://web-osint-typesense:8108
+      QDRANT_URL: http://web-osint-qdrant:6333
+      QDRANT_COLLECTION: web_osint_evidence_v1
+      CLICKHOUSE_URL: http://web-osint-clickhouse:8123
+      CLICKHOUSE_DATABASE: web_osint
+      CLICKHOUSE_USER: web_osint
+      PEBBLE_DIR: /data/pebble
+      HTTP_ADDR: :8090
+    ports:
+      - "127.0.0.1:18090:8090"
+    volumes:
+      - ${WEB_OSINT_DATA_ROOT:-/mnt/data/web-osint-platform}/state/pebble:/data/pebble
+    depends_on:
+      - redpanda
+      - typesense
+      - qdrant
+      - clickhouse
+    restart: unless-stopped

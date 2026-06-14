@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Web OSINT Post Observed Event",
+  "type": "object",
+  "required": ["schema_version", "observation_id", "collector_run_id", "source_project", "capture_method", "captured_at", "post_id", "canonical_url"],
+  "properties": {
+    "schema_version": {"const": "v1"},
+    "observation_id": {"type": "string"},
+    "collector_run_id": {"type": "string"},
+    "source_project": {"type": "string"},
+    "capture_method": {"type": "string"},
+    "captured_at": {"type": "string", "format": "date-time"},
+    "post_id": {"type": "string"},
+    "canonical_url": {"type": "string"},
+    "raw_urls": {"type": "array", "items": {"type": "string"}},
+    "author_handle": {"type": "string"},
+    "author_name": {"type": "string"},
+    "posted_at": {"type": ["string", "null"], "format": "date-time"},
+    "text": {"type": "string"},
+    "lang": {"type": ["string", "null"]},
+    "links": {"type": "array"},
+    "media_ids": {"type": "array"},
+    "quoted_post_id": {"type": ["string", "null"]},
+    "reply_to_post_id": {"type": ["string", "null"]},
+    "repost_of_post_id": {"type": ["string", "null"]},
+    "metrics": {"type": "object"},
+    "topics": {"type": "array", "items": {"type": "string"}},
+    "entities": {"type": "array"},
+    "quality": {"type": "object"}
+  },
+  "additionalProperties": true
+}
+

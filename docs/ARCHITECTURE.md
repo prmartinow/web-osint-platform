@@ -7,6 +7,8 @@ Web OSINT Platform is a streaming evidence infrastructure stack for automated in
 ```text
 Collection
   Browser/API collectors extract complete evidence records.
+  Website pages, search results, social posts, media, and user notes share
+  the same capture envelope.
 
 Ingress
   A local outbox and producer publish records to Redpanda.
@@ -42,6 +44,8 @@ evidence.posts.observed.v1
 evidence.accounts.observed.v1
 evidence.media.observed.v1
 evidence.search.results.v1
+evidence.web.documents.observed.v1
+evidence.user.inputs.observed.v1
 ```
 
 Compacted state topics:
@@ -50,6 +54,8 @@ Compacted state topics:
 evidence.posts.state.v1
 evidence.accounts.state.v1
 evidence.media.state.v1
+evidence.web.documents.state.v1
+evidence.user.inputs.state.v1
 ```
 
 Error topic:
@@ -93,7 +99,7 @@ osint.state.wiki_page_current.v1
 
 Redpanda is the durable replay source. It is not the query database.
 
-Pebble is a rebuildable exact-lookup view for stable IDs such as `post/<post_id>`, `account/<handle>`, `media/<media_id>`, and `capture/<collector_run_id>:<event_index>`.
+Pebble is a rebuildable exact-lookup view for stable IDs such as `post/<post_id>`, `account/<handle>`, `media/<media_id>`, `web_document/<document_id>`, `user_input/<input_id>`, and `capture/<collector_run_id>:<event_index>`.
 
 Typesense is the interactive lexical and faceted search layer.
 
@@ -102,6 +108,19 @@ Qdrant is the semantic retrieval layer. The initial collection uses named vector
 ClickHouse is the analytics layer for evidence events, entities, claims, labels, source activity, timelines, and collector health.
 
 Large media and OCR artifacts should live on the filesystem with content-addressed paths. Store paths and hashes in event/state records.
+
+## Evidence Inputs
+
+Collectors should emit one `capture_event` to `evidence.capture.events.v1` for each coherent browser/API collection step. A capture event can include:
+
+- `posts`: social posts/statuses, usually from X.
+- `accounts`: social account/profile observations.
+- `media`: images, videos, screenshots, OCR artifacts, or other media objects.
+- `search_results`: search result rows from Google or another search engine.
+- `web_documents`: opened pages, articles, blog posts, documentation pages, model cards, leaderboards, PDFs, and table snapshots.
+- `user_inputs`: user-supplied notes, corrections, pasted research, attachments, seeds, and instructions that should become queryable evidence.
+
+The normalizer materializes all of these into shared serving stores while preserving source-specific fields inside the raw JSON. Website content and user input are not side channels; they are first-class evidence with provenance and Meaning Layer annotations.
 
 ## Meaning Layer
 

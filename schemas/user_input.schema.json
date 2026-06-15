@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Web OSINT User Input Observation",
+  "type": "object",
+  "required": ["schema_version", "collector_run_id", "source_project", "capture_method", "captured_at", "text"],
+  "properties": {
+    "schema_version": {"const": "v1"},
+    "observation_id": {"type": "string"},
+    "collector_run_id": {"type": "string", "minLength": 1},
+    "source_project": {"type": "string"},
+    "capture_method": {"type": "string"},
+    "captured_at": {"type": "string", "format": "date-time"},
+    "input_id": {"type": "string"},
+    "evidence_id": {"type": "string"},
+    "input_kind": {"type": "string"},
+    "author": {"type": "string"},
+    "title": {"type": "string"},
+    "text": {"type": "string"},
+    "canonical_url": {"type": "string"},
+    "links": {"type": "array", "items": {"type": "string"}},
+    "topics": {"type": "array", "items": {"type": "string"}},
+    "entities": {"type": "array", "items": {"type": "string"}},
+    "attachments": {"type": "array"},
+    "context": {"type": "object"},
+    "quality": {"type": "object"},
+    "vectors": {"type": "object"},
+    "raw": {"type": "object"}
+  },
+  "additionalProperties": true
+}

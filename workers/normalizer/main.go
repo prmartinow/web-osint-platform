@@ -25,17 +25,21 @@ import (
 )
 
 const (
-	captureTopic     = "evidence.capture.events.v1"
-	postsObserved    = "evidence.posts.observed.v1"
-	accountsObserved = "evidence.accounts.observed.v1"
-	mediaObserved    = "evidence.media.observed.v1"
-	searchObserved   = "evidence.search.results.v1"
-	semanticLabels   = "osint.label.proposed.v1"
-	postsState       = "evidence.posts.state.v1"
-	accountsState    = "evidence.accounts.state.v1"
-	mediaState       = "evidence.media.state.v1"
-	labelsState      = "osint.state.current_labels_by_target.v1"
-	indexErrors      = "evidence.index.errors.v1"
+	captureTopic       = "evidence.capture.events.v1"
+	postsObserved      = "evidence.posts.observed.v1"
+	accountsObserved   = "evidence.accounts.observed.v1"
+	mediaObserved      = "evidence.media.observed.v1"
+	searchObserved     = "evidence.search.results.v1"
+	webDocsObserved    = "evidence.web.documents.observed.v1"
+	userInputsObserved = "evidence.user.inputs.observed.v1"
+	semanticLabels     = "osint.label.proposed.v1"
+	postsState         = "evidence.posts.state.v1"
+	accountsState      = "evidence.accounts.state.v1"
+	mediaState         = "evidence.media.state.v1"
+	webDocsState       = "evidence.web.documents.state.v1"
+	userInputsState    = "evidence.user.inputs.state.v1"
+	labelsState        = "osint.state.current_labels_by_target.v1"
+	indexErrors        = "evidence.index.errors.v1"
 )
 
 const (
@@ -62,18 +66,20 @@ type config struct {
 }
 
 type app struct {
-	cfg             config
-	db              *pebble.DB
-	client          *http.Client
-	reader          *kafka.Reader
-	writers         map[string]*kafka.Writer
-	processed       atomic.Uint64
-	failed          atomic.Uint64
-	postsIndexed    atomic.Uint64
-	accountsIndexed atomic.Uint64
-	mediaIndexed    atomic.Uint64
-	searchIndexed   atomic.Uint64
-	labelsEmitted   atomic.Uint64
+	cfg               config
+	db                *pebble.DB
+	client            *http.Client
+	reader            *kafka.Reader
+	writers           map[string]*kafka.Writer
+	processed         atomic.Uint64
+	failed            atomic.Uint64
+	postsIndexed      atomic.Uint64
+	accountsIndexed   atomic.Uint64
+	mediaIndexed      atomic.Uint64
+	searchIndexed     atomic.Uint64
+	webDocsIndexed    atomic.Uint64
+	userInputsIndexed atomic.Uint64
+	labelsEmitted     atomic.Uint64
 }
 
 type captureEvent struct {
@@ -89,6 +95,8 @@ type captureEvent struct {
 	Posts          []map[string]any `json:"posts"`
 	Accounts       []map[string]any `json:"accounts"`
 	Media          []map[string]any `json:"media"`
+	WebDocuments   []map[string]any `json:"web_documents"`
+	UserInputs     []map[string]any `json:"user_inputs"`
 	Links          []any            `json:"links"`
 	Quality        map[string]any   `json:"quality"`
 	Raw            map[string]any   `json:"-"`
@@ -156,7 +164,7 @@ func main() {
 		client:  &http.Client{Timeout: 15 * time.Second},
 		writers: map[string]*kafka.Writer{},
 	}
-	for _, topic := range []string{postsObserved, accountsObserved, mediaObserved, searchObserved, semanticLabels, postsState, accountsState, mediaState, labelsState, indexErrors} {
+	for _, topic := range []string{postsObserved, accountsObserved, mediaObserved, searchObserved, webDocsObserved, userInputsObserved, semanticLabels, postsState, accountsState, mediaState, webDocsState, userInputsState, labelsState, indexErrors} {
 		a.writers[topic] = &kafka.Writer{
 			Addr:         kafka.TCP(cfg.Brokers...),
 			Topic:        topic,
@@ -305,6 +313,16 @@ func (a *app) processMessage(ctx context.Context, msg kafka.Message) error {
 	}
 	for i, result := range searchResultsFrom(ev.Raw, ev.Context) {
 		if err := a.handleSearchResult(ctx, ev, msg, i, result); err != nil {
+			return err
+		}
+	}
+	for i, document := range webDocumentsFrom(ev.Raw, ev.Context, ev.WebDocuments) {
+		if err := a.handleWebDocument(ctx, ev, msg, i, document); err != nil {
+			return err
+		}
+	}
+	for i, input := range userInputsFrom(ev.Raw, ev.Context, ev.UserInputs) {
+		if err := a.handleUserInput(ctx, ev, msg, i, input); err != nil {
 			return err
 		}
 	}
@@ -633,6 +651,210 @@ func (a *app) handleSearchResult(ctx context.Context, ev captureEvent, msg kafka
 	return nil
 }
 
+func (a *app) handleWebDocument(ctx context.Context, ev captureEvent, msg kafka.Message, idx int, document map[string]any) error {
+	canonicalURL := firstString(document, "canonical_url", "url", "source_url", "page_url", "href", "link")
+	documentID := firstString(document, "document_id", "id")
+	if documentID == "" {
+		documentID = stableHash(canonicalURL, firstString(document, "text_hash", "sha256"), firstString(document, "title"), firstString(document, "text", "content", "body", "markdown", "summary"), strconv.Itoa(idx))[:24]
+	}
+	evidenceID := "web_document/" + documentID
+	observationID := stableHash(ev.CollectorRunID, strconv.Itoa(ev.EventIndex), "web_document", documentID, strconv.Itoa(idx))
+	capturedAt := firstString(document, "captured_at", "retrieved_at", "extracted_at")
+	if capturedAt == "" {
+		capturedAt = ev.CapturedAt
+	}
+	links := linksFromPost(document)
+	topics := asStringSlice(document["topics"])
+	entities := entitiesFrom(document["entities"])
+	text := firstString(document, "text", "content", "body", "markdown", "summary", "extracted_text")
+	title := firstString(document, "title", "page_title", "headline")
+	domain := firstString(document, "domain", "host")
+	if domain == "" {
+		domain = hostOf(canonicalURL)
+	}
+	hasOCR := asBool(document["has_ocr"]) || firstString(document, "ocr_text") != ""
+	mediaIDs := asStringSlice(firstNonNil(document, "media_ids", "media"))
+
+	observed := map[string]any{
+		"schema_version":   "v1",
+		"observation_id":   observationID,
+		"collector_run_id": ev.CollectorRunID,
+		"source_project":   ev.SourceProject,
+		"capture_method":   ev.CaptureMethod,
+		"captured_at":      normalizeTimeString(capturedAt),
+		"document_id":      documentID,
+		"evidence_id":      evidenceID,
+		"canonical_url":    canonicalURL,
+		"domain":           domain,
+		"title":            title,
+		"text":             text,
+		"content_type":     firstString(document, "content_type", "mime_type"),
+		"document_kind":    firstString(document, "document_kind", "kind", "content_form"),
+		"published_at":     optionalTime(firstString(document, "published_at", "posted_at", "created_at", "date")),
+		"links":            links,
+		"media_ids":        mediaIDs,
+		"topics":           topics,
+		"entities":         entities,
+		"artifact_paths":   asStringSlice(firstNonNil(document, "artifact_paths", "local_paths", "paths")),
+		"tables":           firstNonNil(document, "tables", "table_snapshots"),
+		"quality":          firstMap(document, "quality"),
+		"raw":              document,
+	}
+	if document["vectors"] != nil {
+		observed["vectors"] = document["vectors"]
+	}
+	if err := a.publishJSON(ctx, webDocsObserved, evidenceID, observed); err != nil {
+		return err
+	}
+	state := map[string]any{
+		"document_id":    documentID,
+		"evidence_id":    evidenceID,
+		"canonical_url":  canonicalURL,
+		"domain":         domain,
+		"title":          title,
+		"text":           text,
+		"topics":         topics,
+		"entities":       entities,
+		"last_seen_at":   normalizeTimeString(capturedAt),
+		"source_project": ev.SourceProject,
+		"observation":    observed,
+	}
+	if err := a.publishJSON(ctx, webDocsState, evidenceID, state); err != nil {
+		return err
+	}
+	if err := a.setPebble("web_document/"+documentID, envelope("web_document", evidenceID, state, msg)); err != nil {
+		return err
+	}
+	row := chEvidenceRow{
+		EventID:        observationID,
+		SchemaVersion:  "v1",
+		CollectorRunID: ev.CollectorRunID,
+		SourceProject:  ev.SourceProject,
+		CaptureMethod:  ev.CaptureMethod,
+		SourceKind:     "web_page",
+		EvidenceID:     evidenceID,
+		CanonicalURL:   canonicalURL,
+		Domain:         domain,
+		Title:          title,
+		Text:           text,
+		Topics:         topics,
+		Entities:       entities,
+		Links:          links,
+		HasMedia:       boolByte(len(mediaIDs) > 0 || hasAny(document, "media", "images", "videos", "screenshots")),
+		HasOCR:         boolByte(hasOCR),
+		PostedAt:       optionalTime(firstString(document, "published_at", "posted_at", "created_at", "date")),
+		CapturedAt:     normalizeTimeString(capturedAt),
+		RawJSON:        mustJSON(observed),
+	}
+	if err := a.insertClickEvidence(ctx, []chEvidenceRow{row}); err != nil {
+		return err
+	}
+	if err := a.upsertTypesenseEvidence(ctx, row, observed); err != nil {
+		return err
+	}
+	if err := a.emitSemanticAnnotations(ctx, msg, row, observed); err != nil {
+		return err
+	}
+	_ = a.upsertQdrantIfVector(ctx, evidenceID, observed)
+	a.webDocsIndexed.Add(1)
+	return nil
+}
+
+func (a *app) handleUserInput(ctx context.Context, ev captureEvent, msg kafka.Message, idx int, input map[string]any) error {
+	inputID := firstString(input, "input_id", "note_id", "id")
+	text := firstString(input, "text", "content", "note", "body", "markdown", "summary")
+	if inputID == "" {
+		inputID = stableHash(ev.CollectorRunID, strconv.Itoa(ev.EventIndex), "user_input", text, strconv.Itoa(idx))[:24]
+	}
+	evidenceID := "user_input/" + inputID
+	observationID := stableHash(ev.CollectorRunID, strconv.Itoa(ev.EventIndex), "user_input", inputID, strconv.Itoa(idx))
+	capturedAt := firstString(input, "captured_at", "created_at", "observed_at")
+	if capturedAt == "" {
+		capturedAt = ev.CapturedAt
+	}
+	links := linksFromPost(input)
+	topics := asStringSlice(input["topics"])
+	entities := entitiesFrom(input["entities"])
+	title := firstString(input, "title", "subject", "heading")
+	observed := map[string]any{
+		"schema_version":   "v1",
+		"observation_id":   observationID,
+		"collector_run_id": ev.CollectorRunID,
+		"source_project":   ev.SourceProject,
+		"capture_method":   ev.CaptureMethod,
+		"captured_at":      normalizeTimeString(capturedAt),
+		"input_id":         inputID,
+		"evidence_id":      evidenceID,
+		"input_kind":       firstString(input, "input_kind", "kind", "type"),
+		"author":           firstString(input, "author", "user", "created_by"),
+		"title":            title,
+		"text":             text,
+		"links":            links,
+		"topics":           topics,
+		"entities":         entities,
+		"attachments":      firstNonNil(input, "attachments", "files"),
+		"context":          firstMap(input, "context"),
+		"quality":          firstMap(input, "quality"),
+		"raw":              input,
+	}
+	if input["vectors"] != nil {
+		observed["vectors"] = input["vectors"]
+	}
+	if err := a.publishJSON(ctx, userInputsObserved, evidenceID, observed); err != nil {
+		return err
+	}
+	state := map[string]any{
+		"input_id":       inputID,
+		"evidence_id":    evidenceID,
+		"title":          title,
+		"text":           text,
+		"topics":         topics,
+		"entities":       entities,
+		"last_seen_at":   normalizeTimeString(capturedAt),
+		"source_project": ev.SourceProject,
+		"observation":    observed,
+	}
+	if err := a.publishJSON(ctx, userInputsState, evidenceID, state); err != nil {
+		return err
+	}
+	if err := a.setPebble("user_input/"+inputID, envelope("user_input", evidenceID, state, msg)); err != nil {
+		return err
+	}
+	row := chEvidenceRow{
+		EventID:        observationID,
+		SchemaVersion:  "v1",
+		CollectorRunID: ev.CollectorRunID,
+		SourceProject:  ev.SourceProject,
+		CaptureMethod:  ev.CaptureMethod,
+		SourceKind:     "user_input",
+		EvidenceID:     evidenceID,
+		CanonicalURL:   firstString(input, "canonical_url", "url", "source_url"),
+		AuthorHandle:   firstString(input, "author", "user", "created_by"),
+		Domain:         hostOf(firstString(input, "canonical_url", "url", "source_url")),
+		Title:          title,
+		Text:           text,
+		Topics:         topics,
+		Entities:       entities,
+		Links:          links,
+		HasMedia:       boolByte(hasAny(input, "attachments", "files", "media")),
+		HasOCR:         boolByte(asBool(input["has_ocr"]) || firstString(input, "ocr_text") != ""),
+		CapturedAt:     normalizeTimeString(capturedAt),
+		RawJSON:        mustJSON(observed),
+	}
+	if err := a.insertClickEvidence(ctx, []chEvidenceRow{row}); err != nil {
+		return err
+	}
+	if err := a.upsertTypesenseEvidence(ctx, row, observed); err != nil {
+		return err
+	}
+	if err := a.emitSemanticAnnotations(ctx, msg, row, observed); err != nil {
+		return err
+	}
+	_ = a.upsertQdrantIfVector(ctx, evidenceID, observed)
+	a.userInputsIndexed.Add(1)
+	return nil
+}
+
 func (a *app) publishJSON(ctx context.Context, topic, key string, v any) error {
 	payload, err := json.Marshal(v)
 	if err != nil {
@@ -701,7 +923,7 @@ func (a *app) insertCollectorRun(ctx context.Context, ev captureEvent) error {
 		"finished_at":      nil,
 		"status":           "observed",
 		"records_seen":     uint64(1),
-		"records_emitted":  uint64(len(ev.Posts) + len(ev.Accounts) + len(ev.Media)),
+		"records_emitted":  uint64(len(ev.Posts) + len(ev.Accounts) + len(ev.Media) + len(webDocumentsFrom(ev.Raw, ev.Context, ev.WebDocuments)) + len(userInputsFrom(ev.Raw, ev.Context, ev.UserInputs))),
 		"challenge":        boolByte(challengeFlag(ev.Quality)),
 		"partial":          boolByte(asBool(ev.Quality["partial"])),
 		"notes":            "",
@@ -911,13 +1133,15 @@ func (a *app) serveHTTP() {
 	})
 	mux.HandleFunc("/stats", func(w http.ResponseWriter, _ *http.Request) {
 		writeJSON(w, map[string]any{
-			"processed":        a.processed.Load(),
-			"failed":           a.failed.Load(),
-			"posts_indexed":    a.postsIndexed.Load(),
-			"accounts_indexed": a.accountsIndexed.Load(),
-			"media_indexed":    a.mediaIndexed.Load(),
-			"search_indexed":   a.searchIndexed.Load(),
-			"labels_emitted":   a.labelsEmitted.Load(),
+			"processed":             a.processed.Load(),
+			"failed":                a.failed.Load(),
+			"posts_indexed":         a.postsIndexed.Load(),
+			"accounts_indexed":      a.accountsIndexed.Load(),
+			"media_indexed":         a.mediaIndexed.Load(),
+			"search_indexed":        a.searchIndexed.Load(),
+			"web_documents_indexed": a.webDocsIndexed.Load(),
+			"user_inputs_indexed":   a.userInputsIndexed.Load(),
+			"labels_emitted":        a.labelsEmitted.Load(),
 		})
 	})
 	mux.HandleFunc("/pebble", func(w http.ResponseWriter, r *http.Request) {
@@ -1195,6 +1419,8 @@ func sourceLabelID(sourceKind string) string {
 		return "source.search.result"
 	case "web_page":
 		return "source.web.page"
+	case "user_input":
+		return "source.user.input"
 	case "media":
 		return "source.media"
 	case "capture":
@@ -1247,6 +1473,8 @@ func contentFormLabel(row chEvidenceRow) (string, float32) {
 		return "form.search_result", 1.0
 	case "media":
 		return "form.media_artifact", 0.95
+	case "user_input":
+		return "form.user_note", 1.0
 	case "capture":
 		return "form.capture", 0.9
 	}
@@ -1284,6 +1512,9 @@ func qualityLabelIDs(row chEvidenceRow, observed map[string]any) []string {
 	if row.CanonicalURL != "" && row.SourceKind == "web_page" {
 		labels = append(labels, "quality.direct_web_capture")
 	}
+	if row.SourceKind == "user_input" {
+		labels = append(labels, "quality.user_supplied")
+	}
 	return cleanStrings(labels)
 }
 
@@ -1302,6 +1533,9 @@ func actionabilityLabelIDs(row chEvidenceRow, observed map[string]any) []string 
 	}
 	if row.SourceKind == "search_result" || len(row.Links) > 0 {
 		labels = append(labels, "action.collect_more")
+	}
+	if row.SourceKind == "user_input" {
+		labels = append(labels, "action.review")
 	}
 	return cleanStrings(labels)
 }
@@ -1706,6 +1940,42 @@ func dayString(raw string) string {
 func searchResultsFrom(raw map[string]any, context map[string]any) []map[string]any {
 	for _, source := range []map[string]any{raw, context} {
 		for _, key := range []string{"search_results", "results"} {
+			if list, ok := source[key].([]any); ok {
+				var out []map[string]any
+				for _, item := range list {
+					if m, ok := item.(map[string]any); ok {
+						out = append(out, m)
+					}
+				}
+				if len(out) > 0 {
+					return out
+				}
+			}
+		}
+	}
+	return nil
+}
+
+func webDocumentsFrom(raw map[string]any, context map[string]any, direct []map[string]any) []map[string]any {
+	if len(direct) > 0 {
+		return direct
+	}
+	return firstMapList([]map[string]any{raw, context}, "web_documents", "documents", "pages", "web_pages", "articles")
+}
+
+func userInputsFrom(raw map[string]any, context map[string]any, direct []map[string]any) []map[string]any {
+	if len(direct) > 0 {
+		return direct
+	}
+	return firstMapList([]map[string]any{raw, context}, "user_inputs", "user_notes", "notes", "research_notes", "manual_inputs")
+}
+
+func firstMapList(sources []map[string]any, keys ...string) []map[string]any {
+	for _, source := range sources {
+		if source == nil {
+			continue
+		}
+		for _, key := range keys {
 			if list, ok := source[key].([]any); ok {
 				var out []map[string]any
 				for _, item := range list {

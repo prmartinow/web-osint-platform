@@ -53,6 +53,47 @@ func TestDeterministicAnnotationsForXPost(t *testing.T) {
 	assertLabel(t, labels, "action.verify", true)
 }
 
+func TestDeterministicAnnotationsForUserInput(t *testing.T) {
+	row := chEvidenceRow{
+		EventID:    "evt-3",
+		SourceKind: "user_input",
+		EvidenceID: "user_input/research-note",
+		Title:      "Research direction",
+		Text:       "Investigate agent harness benchmarks and collect more sources.",
+		Topics:     []string{"Agent Harnesses"},
+		RawJSON:    `{"input_id":"research-note"}`,
+	}
+
+	annotations := deterministicAnnotations(row, map[string]any{"quality": map[string]any{}})
+	labels := annotationLabels(annotations)
+
+	assertLabel(t, labels, "source.user.input", true)
+	assertLabel(t, labels, "form.user_note", true)
+	assertLabel(t, labels, "quality.user_supplied", true)
+	assertLabel(t, labels, "action.review", true)
+	assertLabel(t, labels, "action.compare", true)
+}
+
+func TestEvidenceArrayAliases(t *testing.T) {
+	raw := map[string]any{
+		"documents": []any{
+			map[string]any{"title": "Article"},
+		},
+		"research_notes": []any{
+			map[string]any{"text": "User supplied note"},
+		},
+	}
+
+	docs := webDocumentsFrom(raw, nil, nil)
+	if len(docs) != 1 || firstString(docs[0], "title") != "Article" {
+		t.Fatalf("webDocumentsFrom() = %#v", docs)
+	}
+	inputs := userInputsFrom(raw, nil, nil)
+	if len(inputs) != 1 || firstString(inputs[0], "text") != "User supplied note" {
+		t.Fatalf("userInputsFrom() = %#v", inputs)
+	}
+}
+
 func TestSlugLabel(t *testing.T) {
 	got := slugLabel("MCP Security Risks / Agentic Browsing")
 	want := "mcp_security_risks_agentic_browsing"

@@ -20,6 +20,8 @@ create_topic evidence.posts.observed.v1 delete
 create_topic evidence.accounts.observed.v1 delete
 create_topic evidence.media.observed.v1 delete
 create_topic evidence.search.results.v1 delete
+create_topic evidence.web.documents.observed.v1 delete
+create_topic evidence.user.inputs.observed.v1 delete
 create_topic osint.semantic.segmented.v1 delete
 create_topic osint.label.proposed.v1 delete
 create_topic osint.label.feedback.v1 delete
@@ -39,6 +41,8 @@ create_topic osint.semantic.deadletter.v1 delete
 create_topic evidence.posts.state.v1 compact
 create_topic evidence.accounts.state.v1 compact
 create_topic evidence.media.state.v1 compact
+create_topic evidence.web.documents.state.v1 compact
+create_topic evidence.user.inputs.state.v1 compact
 create_topic osint.state.current_labels_by_target.v1 compact
 create_topic osint.state.entity_by_alias.v1 compact
 create_topic osint.state.entity_current.v1 compact

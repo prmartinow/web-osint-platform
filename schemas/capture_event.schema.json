@@ -16,9 +16,10 @@
     "posts": {"type": "array"},
     "accounts": {"type": "array"},
     "media": {"type": "array"},
+    "web_documents": {"type": "array"},
+    "user_inputs": {"type": "array"},
     "links": {"type": "array"},
     "quality": {"type": "object"}
   },
   "additionalProperties": true
 }
-

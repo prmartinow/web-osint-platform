@@ -126,6 +126,7 @@ function stageLabel(kind) {
     x_page: 'X page/search',
     web_page: 'Opened page',
     search_result: 'Search result',
+    user_input: 'User input',
     x_post: 'X post',
     x_account: 'X account',
     media: 'Media',

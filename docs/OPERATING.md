@@ -41,6 +41,8 @@ Exact lookup keys currently use these prefixes:
 - `account/<normalized_handle>`
 - `media/<media_id>`
 - `search/<sha256>`
+- `web_document/<document_id>`
+- `user_input/<input_id>`
 - `annotation/<evidence_id>/<label_id>/<annotation_id>`
 
 ## Topics
@@ -52,12 +54,16 @@ Observed event topics:
 - `evidence.accounts.observed.v1`
 - `evidence.media.observed.v1`
 - `evidence.search.results.v1`
+- `evidence.web.documents.observed.v1`
+- `evidence.user.inputs.observed.v1`
 
 Compacted state topics:
 
 - `evidence.posts.state.v1`
 - `evidence.accounts.state.v1`
 - `evidence.media.state.v1`
+- `evidence.web.documents.state.v1`
+- `evidence.user.inputs.state.v1`
 
 Error topic:
 
@@ -81,6 +87,8 @@ Meaning Layer topics:
 
 Redpanda topics are durable replay source. Pebble state, Typesense, Qdrant, and ClickHouse are rebuildable views. Media and OCR artifacts live under the configured data root.
 
-The normalizer consumes `evidence.capture.events.v1`, emits observed/state topics, writes materialized records to Pebble, inserts analytics rows into ClickHouse, upserts post text into Typesense, emits deterministic semantic annotations, and passes Qdrant named vectors through when a collector or enrichment worker includes them.
+The normalizer consumes `evidence.capture.events.v1`, emits observed/state topics, writes materialized records to Pebble, inserts analytics rows into ClickHouse, upserts evidence text into Typesense, emits deterministic semantic annotations, and passes Qdrant named vectors through when a collector or enrichment worker includes them.
+
+Collector events may include `web_documents` for opened pages, articles, documentation, PDFs, leaderboards, and table captures. They may include `user_inputs` for user notes, pasted research, corrections, attachments, or research seeds. These records use the same replay, search, analytics, and labeling path as X and Google evidence.
 
 The dashboard includes a `Meaning` tab backed by `/api/stage/meaning`. It is read-only and surfaces annotation activity, label families, recent annotations, research questions, autonomous tasks, and research signals from ClickHouse. Empty tables are treated as an empty Meaning Layer so the dashboard can run before the new schema is initialized.

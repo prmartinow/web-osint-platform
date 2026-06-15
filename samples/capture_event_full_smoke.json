@@ -62,6 +62,49 @@
       "snippet": "Smoke search result for the agent harness pipeline."
     }
   ],
+  "web_documents": [
+    {
+      "document_id": "smoke-web-doc-1",
+      "canonical_url": "https://example.com/agent-harness",
+      "title": "Example Agent Harness",
+      "document_kind": "blog_post",
+      "text": "Example launch blog post with a benchmark table for an agent harness.",
+      "links": [
+        "https://example.com/agent-harness/docs"
+      ],
+      "topics": [
+        "agent harness",
+        "benchmark"
+      ],
+      "entities": [
+        "Example Harness"
+      ],
+      "tables": [
+        {
+          "table_id": "smoke-table-1",
+          "caption": "Benchmark scores"
+        }
+      ]
+    }
+  ],
+  "user_inputs": [
+    {
+      "input_id": "smoke-user-note-1",
+      "input_kind": "research_note",
+      "author": "user",
+      "title": "Smoke user research note",
+      "text": "Look into this agent harness benchmark and compare it with other recent systems.",
+      "links": [
+        "https://example.com/agent-harness"
+      ],
+      "topics": [
+        "agent harness"
+      ],
+      "entities": [
+        "Example Harness"
+      ]
+    }
+  ],
   "links": [
     "https://example.com/agent-harness"
   ],

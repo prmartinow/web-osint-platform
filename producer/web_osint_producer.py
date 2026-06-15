@@ -44,8 +44,14 @@ def infer_key(topic: str, value: dict[str, Any]) -> str:
     if topic == "evidence.search.results.v1":
         key_material = f"{value.get('query', '')}\n{value.get('url', '')}\n{value.get('searched_at', '')}"
         return sha256_text(key_material)
+    if topic == "evidence.web.documents.observed.v1":
+        key_material = value.get("evidence_id") or value.get("document_id") or value.get("canonical_url") or stable_json(value)
+        return str(key_material)
+    if topic == "evidence.user.inputs.observed.v1":
+        key_material = value.get("evidence_id") or value.get("input_id") or value.get("note_id") or stable_json(value)
+        return str(key_material)
     if topic.endswith(".state.v1"):
-        return str(value.get("post_id") or value.get("normalized_handle") or value.get("media_id") or value.get("sha256"))
+        return str(value.get("post_id") or value.get("normalized_handle") or value.get("media_id") or value.get("document_id") or value.get("input_id") or value.get("sha256"))
     return sha256_text(stable_json(value))
 
 
@@ -138,4 +144,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

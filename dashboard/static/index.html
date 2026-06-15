@@ -1,0 +1,249 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Web OSINT Pipeline Dashboard</title>
+  <script>
+    (() => {
+      const stored = localStorage.getItem('web-osint-dashboard-theme');
+      const theme = stored || (matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark');
+      document.documentElement.dataset.theme = theme;
+    })();
+  </script>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <header class="app-header">
+    <div>
+      <h1>Web OSINT Pipeline Dashboard</h1>
+      <p class="subtle">Inspect flow from collectors through Redpanda, materialization, filesystem artifacts, Pebble, Typesense, Qdrant, and ClickHouse.</p>
+    </div>
+    <div class="header-controls">
+      <select id="frameSelect" title="Timeframe">
+        <option value="15m">15m</option>
+        <option value="1h">1h</option>
+        <option value="6h">6h</option>
+        <option value="24h">24h</option>
+        <option value="7d" selected>7d</option>
+        <option value="30d">30d</option>
+      </select>
+      <button id="refreshAll">Refresh</button>
+      <button id="themeSwitch" class="theme-switch" role="switch" aria-checked="false" aria-label="Toggle light and dark mode" title="Toggle theme">
+        <span class="sun" aria-hidden="true"></span>
+        <span class="moon" aria-hidden="true"></span>
+        <span class="knob" aria-hidden="true"></span>
+      </button>
+    </div>
+  </header>
+
+  <nav class="tabs" aria-label="Pipeline sections">
+    <button class="tab active" data-view="live">Live Health</button>
+    <button class="tab" data-view="collectors">Collectors</button>
+    <button class="tab" data-view="stream">Redpanda + Worker</button>
+    <button class="tab" data-view="filesystem">Filesystem</button>
+    <button class="tab" data-view="pebble">Pebble</button>
+    <button class="tab" data-view="typesense">Typesense</button>
+    <button class="tab" data-view="qdrant">Qdrant</button>
+    <button class="tab" data-view="clickhouse">ClickHouse</button>
+  </nav>
+
+  <main>
+    <section id="live" class="view active">
+      <div class="cards" id="liveCards"></div>
+      <section class="panel">
+        <h2>Pipeline Flow</h2>
+        <div id="flowRail" class="flow-rail"></div>
+      </section>
+      <section class="panel">
+        <h2>Ingest Activity</h2>
+        <div id="liveHistogram"></div>
+      </section>
+      <div class="panel-grid">
+        <section class="panel">
+          <h2>Stage Rows</h2>
+          <div id="liveStageRows"></div>
+        </section>
+        <section class="panel">
+          <h2>Latest Collector Runs</h2>
+          <div id="liveRuns"></div>
+        </section>
+      </div>
+    </section>
+
+    <section id="collectors" class="view">
+      <div class="cards" id="collectorCards"></div>
+      <section class="panel">
+        <h2>Collector Activity</h2>
+        <div id="collectorHistogram"></div>
+      </section>
+      <div class="panel-grid">
+        <section class="panel">
+          <h2>Runs</h2>
+          <div id="collectorRuns"></div>
+        </section>
+        <section class="panel">
+          <h2>Methods</h2>
+          <div id="collectorMethods"></div>
+        </section>
+      </div>
+    </section>
+
+    <section id="stream" class="view">
+      <div class="cards" id="streamCards"></div>
+      <section class="panel">
+        <h2>Stream Activity</h2>
+        <div id="streamHistogram"></div>
+      </section>
+      <div class="panel-grid">
+        <section class="panel">
+          <h2>Topics</h2>
+          <div id="streamTopics"></div>
+        </section>
+        <section class="panel">
+          <h2>Normalizer / Materializer</h2>
+          <div id="streamWorker" class="kv-list"></div>
+        </section>
+      </div>
+      <section class="panel">
+        <h2>Redpanda Metrics</h2>
+        <div id="streamMetrics"></div>
+      </section>
+    </section>
+
+    <section id="filesystem" class="view">
+      <div class="cards" id="fsCards"></div>
+      <section class="panel">
+        <h2>File Activity</h2>
+        <div id="fsHistogram"></div>
+      </section>
+      <div class="fs-layout">
+        <section class="panel fs-tree-panel">
+          <h2>Tree</h2>
+          <div id="fsCrumbs" class="meta-line"></div>
+          <div id="fsTree" class="tree-list"></div>
+        </section>
+        <section class="panel fs-viewer-panel">
+          <h2>Viewer</h2>
+          <div id="fsViewer" class="file-viewer"></div>
+        </section>
+      </div>
+      <section class="panel">
+        <h2>Recent Files / Gallery</h2>
+        <div id="fsGallery" class="media-grid"></div>
+      </section>
+    </section>
+
+    <section id="pebble" class="view">
+      <div class="cards" id="pebbleCards"></div>
+      <div class="panel-grid">
+        <section class="panel">
+          <h2>Key Prefixes</h2>
+          <div id="pebblePrefixes"></div>
+        </section>
+        <section class="panel">
+          <h2>Sample Keys</h2>
+          <div id="pebbleKeys"></div>
+        </section>
+      </div>
+      <section class="panel">
+        <h2>Pebble Metrics Raw</h2>
+        <pre id="pebbleRaw" class="json-box"></pre>
+      </section>
+    </section>
+
+    <section id="typesense" class="view">
+      <div class="cards" id="typesenseCards"></div>
+      <section class="panel">
+        <h2>Index Activity</h2>
+        <div id="typesenseHistogram"></div>
+      </section>
+      <div class="toolbar multi">
+        <input id="typesenseQ" type="search" value="embedding" placeholder="Search Typesense">
+        <select id="typesenseProject"><option value="">All projects</option></select>
+        <select id="typesenseKind"><option value="">All steps</option></select>
+        <button id="typesenseGo">Search</button>
+      </div>
+      <div id="typesenseMeta" class="meta-line"></div>
+      <div id="typesenseTable"></div>
+      <section class="panel">
+        <h2>Schema / Metrics</h2>
+        <div id="typesenseSchema"></div>
+      </section>
+    </section>
+
+    <section id="qdrant" class="view">
+      <div class="cards" id="qdrantCards"></div>
+      <section class="panel">
+        <h2>Vector Activity</h2>
+        <div id="qdrantHistogram"></div>
+      </section>
+      <div class="panel-grid">
+        <section class="panel">
+          <h2>Named Vectors</h2>
+          <div id="qdrantVectors"></div>
+        </section>
+        <section class="panel">
+          <h2>Payload Indexes</h2>
+          <div id="qdrantPayload"></div>
+        </section>
+      </div>
+      <section class="panel">
+        <h2>Metrics</h2>
+        <div id="qdrantMetrics"></div>
+      </section>
+    </section>
+
+    <section id="clickhouse" class="view">
+      <div class="cards" id="clickhouseCards"></div>
+      <section class="panel">
+        <h2>Analytics Activity</h2>
+        <div id="clickhouseHistogram"></div>
+      </section>
+      <div class="panel-grid">
+        <section class="panel">
+          <h2>Tables</h2>
+          <div id="clickhouseTables"></div>
+        </section>
+        <section class="panel">
+          <h2>Metrics</h2>
+          <div id="clickhouseMetrics"></div>
+        </section>
+      </div>
+      <section class="panel">
+        <h2>Data Inspector</h2>
+        <textarea id="chQuery" class="sql-box">SELECT source_project, source_kind, count() AS rows
+FROM evidence_events
+GROUP BY source_project, source_kind
+ORDER BY rows DESC
+LIMIT 50</textarea>
+        <div class="toolbar">
+          <button id="chRun">Run Query</button>
+          <button id="chPlay">Open Play</button>
+          <button id="chDashboard">Open Dashboard</button>
+          <button id="chClickstack">Open ClickStack</button>
+        </div>
+        <div id="chQueryMeta" class="meta-line"></div>
+        <div id="chQueryTable"></div>
+      </section>
+      <section class="panel">
+        <h2>Embedded ClickHouse UI</h2>
+        <iframe id="clickhouseFrame" class="embedded-ui" src="/clickhouse/dashboard" title="ClickHouse UI"></iframe>
+      </section>
+    </section>
+  </main>
+
+  <aside id="detailDrawer" class="drawer" aria-hidden="true">
+    <div class="drawer-head">
+      <div>
+        <h2 id="detailTitle">Detail</h2>
+        <div id="detailMeta" class="meta-line"></div>
+      </div>
+      <button id="detailClose" class="icon-button" aria-label="Close detail">×</button>
+    </div>
+    <pre id="detailBody" class="json-box"></pre>
+  </aside>
+
+  <script src="/app.js"></script>
+</body>
+</html>

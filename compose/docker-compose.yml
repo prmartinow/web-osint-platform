@@ -124,3 +124,35 @@ services:
       - qdrant
       - clickhouse
     restart: unless-stopped
+
+  dashboard:
+    build:
+      context: ../dashboard
+    container_name: web-osint-dashboard
+    env_file:
+      - ../.env
+    environment:
+      CLICKHOUSE_URL: http://web-osint-clickhouse:8123
+      CLICKHOUSE_DATABASE: web_osint
+      CLICKHOUSE_USER: web_osint
+      TYPESENSE_URL: http://web-osint-typesense:8108
+      QDRANT_URL: http://web-osint-qdrant:6333
+      QDRANT_COLLECTION: web_osint_evidence_v1
+      NORMALIZER_URL: http://web-osint-normalizer:8090
+      REDPANDA_PROXY_URL: http://web-osint-redpanda:8082
+      REDPANDA_ADMIN_URL: http://web-osint-redpanda:9644
+      MEDIA_ROOT: ${WEB_OSINT_DATA_ROOT:-/mnt/data/web-osint-platform}/media
+      OCR_ROOT: ${WEB_OSINT_DATA_ROOT:-/mnt/data/web-osint-platform}/ocr
+      DASHBOARD_HOST: 0.0.0.0
+      DASHBOARD_PORT: "8091"
+    ports:
+      - "${WEB_OSINT_DASHBOARD_BIND:-127.0.0.1}:18191:8091"
+    volumes:
+      - ${WEB_OSINT_DATA_ROOT:-/mnt/data/web-osint-platform}:${WEB_OSINT_DATA_ROOT:-/mnt/data/web-osint-platform}:ro
+    depends_on:
+      - redpanda
+      - typesense
+      - qdrant
+      - clickhouse
+      - normalizer
+    restart: unless-stopped

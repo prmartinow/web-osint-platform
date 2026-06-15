@@ -244,6 +244,9 @@ func (a *app) processMessage(ctx context.Context, msg kafka.Message) error {
 	if err := a.insertClickEvidence(ctx, []chEvidenceRow{rootRow}); err != nil {
 		return err
 	}
+	if err := a.upsertTypesenseEvidence(ctx, rootRow, map[string]any{"quality": ev.Quality}); err != nil {
+		return err
+	}
 	if err := a.insertCollectorRun(ctx, ev); err != nil {
 		return err
 	}
@@ -371,7 +374,7 @@ func (a *app) handlePost(ctx context.Context, ev captureEvent, msg kafka.Message
 	if err := a.insertClickEvidence(ctx, []chEvidenceRow{row}); err != nil {
 		return err
 	}
-	if err := a.upsertTypesensePost(ctx, row, observed); err != nil {
+	if err := a.upsertTypesenseEvidence(ctx, row, observed); err != nil {
 		return err
 	}
 	_ = a.upsertQdrantIfVector(ctx, postID, observed)
@@ -438,6 +441,9 @@ func (a *app) handleAccount(ctx context.Context, ev captureEvent, msg kafka.Mess
 		RawJSON:        mustJSON(observed),
 	}
 	if err := a.insertClickEvidence(ctx, []chEvidenceRow{row}); err != nil {
+		return err
+	}
+	if err := a.upsertTypesenseEvidence(ctx, row, observed); err != nil {
 		return err
 	}
 	_ = a.upsertQdrantIfVector(ctx, "account/"+handle, observed)
@@ -508,6 +514,9 @@ func (a *app) handleMedia(ctx context.Context, ev captureEvent, msg kafka.Messag
 	if err := a.insertClickEvidence(ctx, []chEvidenceRow{row}); err != nil {
 		return err
 	}
+	if err := a.upsertTypesenseEvidence(ctx, row, observed); err != nil {
+		return err
+	}
 	_ = a.upsertQdrantIfVector(ctx, "media/"+mediaID, observed)
 	a.mediaIndexed.Add(1)
 	return nil
@@ -566,6 +575,9 @@ func (a *app) handleSearchResult(ctx context.Context, ev captureEvent, msg kafka
 		RawJSON:        mustJSON(observed),
 	}
 	if err := a.insertClickEvidence(ctx, []chEvidenceRow{row}); err != nil {
+		return err
+	}
+	if err := a.upsertTypesenseEvidence(ctx, row, observed); err != nil {
 		return err
 	}
 	a.searchIndexed.Add(1)
@@ -681,16 +693,23 @@ func (a *app) clickhousePost(ctx context.Context, query string, body io.Reader) 
 	return nil
 }
 
-func (a *app) upsertTypesensePost(ctx context.Context, row chEvidenceRow, observed map[string]any) error {
+func (a *app) upsertTypesenseEvidence(ctx context.Context, row chEvidenceRow, observed map[string]any) error {
 	if a.cfg.TypesenseKey == "" || row.EvidenceID == "" {
 		return nil
+	}
+	authorName := stringFromAny(observed["author_name"])
+	if authorName == "" {
+		authorName = stringFromAny(observed["display_name"])
+	}
+	if authorName == "" && row.SourceKind == "x_account" {
+		authorName = row.Title
 	}
 	doc := map[string]any{
 		"id":              row.EvidenceID,
 		"canonical_url":   row.CanonicalURL,
 		"author_handle":   row.AuthorHandle,
-		"author_name":     observed["author_name"],
-		"source_projects": []string{row.SourceProject},
+		"author_name":     authorName,
+		"source_projects": cleanStrings([]string{row.SourceProject}),
 		"source_kind":     row.SourceKind,
 		"topics":          row.Topics,
 		"entities":        row.Entities,
@@ -705,7 +724,15 @@ func (a *app) upsertTypesensePost(ctx context.Context, row chEvidenceRow, observ
 		doc["posted_at"] = unixSeconds(*row.PostedAt)
 	}
 	if row.HasMedia == 1 {
-		doc["media_kinds"] = []string{"unknown"}
+		mediaKind := stringFromAny(observed["media_kind"])
+		if mediaKind == "" {
+			mediaKind = stringFromAny(observed["kind"])
+		}
+		if mediaKind == "" {
+			mediaKind = "unknown"
+		}
+		doc["media_kinds"] = []string{mediaKind}
+		doc["has_screenshot"] = strings.Contains(strings.ToLower(mediaKind), "screenshot")
 	}
 	payload, err := json.Marshal(doc)
 	if err != nil {
@@ -782,6 +809,23 @@ func (a *app) serveHTTP() {
 			"search_indexed":   a.searchIndexed.Load(),
 		})
 	})
+	mux.HandleFunc("/pebble", func(w http.ResponseWriter, r *http.Request) {
+		limit := 250
+		if raw := r.URL.Query().Get("limit"); raw != "" {
+			if parsed, err := strconv.Atoi(raw); err == nil && parsed > 0 {
+				limit = parsed
+			}
+		}
+		if limit > 2000 {
+			limit = 2000
+		}
+		info, err := a.pebbleInfo(limit)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		writeJSON(w, info)
+	})
 	mux.HandleFunc("/lookup", func(w http.ResponseWriter, r *http.Request) {
 		key := r.URL.Query().Get("key")
 		if key == "" {
@@ -805,6 +849,66 @@ func (a *app) serveHTTP() {
 	if err := http.ListenAndServe(a.cfg.HTTPAddr, mux); err != nil {
 		log.Fatalf("http: %v", err)
 	}
+}
+
+func (a *app) pebbleInfo(limit int) (map[string]any, error) {
+	iter, err := a.db.NewIter(&pebble.IterOptions{})
+	if err != nil {
+		return nil, err
+	}
+	defer iter.Close()
+
+	type prefixStats struct {
+		Prefix     string   `json:"prefix"`
+		Keys       uint64   `json:"keys"`
+		ValueBytes uint64   `json:"value_bytes"`
+		Samples    []string `json:"samples"`
+	}
+
+	prefixes := map[string]*prefixStats{}
+	samples := []string{}
+	var totalKeys uint64
+	var totalValueBytes uint64
+
+	for ok := iter.First(); ok; ok = iter.Next() {
+		key := string(iter.Key())
+		valueBytes := uint64(len(iter.Value()))
+		prefix := key
+		if parts := strings.SplitN(key, "/", 2); len(parts) > 1 {
+			prefix = parts[0] + "/"
+		}
+		stat := prefixes[prefix]
+		if stat == nil {
+			stat = &prefixStats{Prefix: prefix}
+			prefixes[prefix] = stat
+		}
+		stat.Keys++
+		stat.ValueBytes += valueBytes
+		if len(stat.Samples) < 8 {
+			stat.Samples = append(stat.Samples, key)
+		}
+		if len(samples) < limit {
+			samples = append(samples, key)
+		}
+		totalKeys++
+		totalValueBytes += valueBytes
+	}
+	if err := iter.Error(); err != nil {
+		return nil, err
+	}
+
+	prefixRows := make([]prefixStats, 0, len(prefixes))
+	for _, stat := range prefixes {
+		prefixRows = append(prefixRows, *stat)
+	}
+	return map[string]any{
+		"metrics":           a.db.Metrics(),
+		"total_keys":        totalKeys,
+		"total_value_bytes": totalValueBytes,
+		"prefixes":          prefixRows,
+		"sample_keys":       samples,
+		"sample_limit":      limit,
+	}, nil
 }
 
 func writeJSON(w http.ResponseWriter, v any) {

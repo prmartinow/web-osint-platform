@@ -1,0 +1,1183 @@
+#!/usr/bin/env python3
+import base64
+import json
+import mimetypes
+import os
+import posixpath
+import re
+import urllib.error
+import urllib.parse
+import urllib.request
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
+
+
+APP_DIR = Path(__file__).resolve().parent
+STATIC_DIR = APP_DIR / "static"
+MEDIA_ROOT = Path(os.environ.get("MEDIA_ROOT", "/mnt/data/web-osint-platform/media")).resolve()
+OCR_ROOT = Path(os.environ.get("OCR_ROOT", "/mnt/data/web-osint-platform/ocr")).resolve()
+
+CLICKHOUSE_URL = os.environ.get("CLICKHOUSE_URL", "http://web-osint-clickhouse:8123").rstrip("/")
+CLICKHOUSE_DB = os.environ.get("CLICKHOUSE_DATABASE", "web_osint")
+CLICKHOUSE_USER = os.environ.get("CLICKHOUSE_USER", "web_osint")
+CLICKHOUSE_PASSWORD = os.environ.get("CLICKHOUSE_PASSWORD", "")
+TYPESENSE_URL = os.environ.get("TYPESENSE_URL", "http://web-osint-typesense:8108").rstrip("/")
+TYPESENSE_KEY = os.environ.get("TYPESENSE_API_KEY", "")
+NORMALIZER_URL = os.environ.get("NORMALIZER_URL", "http://web-osint-normalizer:8090").rstrip("/")
+QDRANT_URL = os.environ.get("QDRANT_URL", "http://web-osint-qdrant:6333").rstrip("/")
+QDRANT_COLLECTION = os.environ.get("QDRANT_COLLECTION", "web_osint_evidence_v1")
+REDPANDA_PROXY_URL = os.environ.get("REDPANDA_PROXY_URL", "http://web-osint-redpanda:8082").rstrip("/")
+REDPANDA_ADMIN_URL = os.environ.get("REDPANDA_ADMIN_URL", "http://web-osint-redpanda:9644").rstrip("/")
+
+MAX_LIMIT = 500
+MAX_FILE_PREVIEW_BYTES = 1_000_000
+PROM_SAMPLE_RE = re.compile(r"^([a-zA-Z_:][a-zA-Z0-9_:]*)(?:\{([^}]*)\})?\s+(-?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?)$")
+SAFE_SQL_PREFIXES = ("select", "with", "show", "describe", "desc", "exists")
+BLOCKED_SQL_WORDS = {
+    "alter", "attach", "create", "delete", "detach", "drop", "insert", "kill", "optimize",
+    "rename", "replace", "restart", "set", "truncate", "update", "use",
+}
+
+
+class DashboardError(Exception):
+    def __init__(self, status, message):
+        super().__init__(message)
+        self.status = status
+        self.message = message
+
+
+def json_bytes(value):
+    return json.dumps(value, ensure_ascii=False, indent=2, default=str).encode("utf-8")
+
+
+def sql_string(value):
+    text = str(value)
+    return "'" + text.replace("\\", "\\\\").replace("'", "\\'") + "'"
+
+
+def sql_int(value, default, min_value=0, max_value=MAX_LIMIT):
+    try:
+        n = int(value)
+    except (TypeError, ValueError):
+        n = default
+    return max(min_value, min(max_value, n))
+
+
+def parse_boolish(value):
+    if value is None or value == "":
+        return None
+    return str(value).lower() in {"1", "true", "yes", "on"}
+
+
+def ch_query(query):
+    params = {
+        "database": CLICKHOUSE_DB,
+        "query": query,
+        "default_format": "JSON",
+        "date_time_output_format": "iso",
+    }
+    url = CLICKHOUSE_URL + "/?" + urllib.parse.urlencode(params)
+    request = urllib.request.Request(url, method="POST")
+    if CLICKHOUSE_PASSWORD:
+        token = base64.b64encode(f"{CLICKHOUSE_USER}:{CLICKHOUSE_PASSWORD}".encode()).decode()
+        request.add_header("Authorization", f"Basic {token}")
+    try:
+        with urllib.request.urlopen(request, timeout=20) as response:
+            return json.loads(response.read().decode("utf-8"))
+    except urllib.error.HTTPError as exc:
+        detail = exc.read().decode("utf-8", errors="replace")[:2000]
+        raise DashboardError(502, f"ClickHouse error {exc.code}: {detail}")
+    except Exception as exc:
+        raise DashboardError(502, f"ClickHouse request failed: {exc}")
+
+
+def http_json(url, headers=None, timeout=10):
+    request = urllib.request.Request(url, headers=headers or {})
+    try:
+        with urllib.request.urlopen(request, timeout=timeout) as response:
+            return json.loads(response.read().decode("utf-8"))
+    except urllib.error.HTTPError as exc:
+        detail = exc.read().decode("utf-8", errors="replace")[:1000]
+        raise DashboardError(exc.code, detail or str(exc))
+    except Exception as exc:
+        raise DashboardError(502, str(exc))
+
+
+def http_text(url, headers=None, timeout=10):
+    request = urllib.request.Request(url, headers=headers or {})
+    try:
+        with urllib.request.urlopen(request, timeout=timeout) as response:
+            return response.read().decode("utf-8", errors="replace")
+    except urllib.error.HTTPError as exc:
+        detail = exc.read().decode("utf-8", errors="replace")[:1000]
+        raise DashboardError(exc.code, detail or str(exc))
+    except Exception as exc:
+        raise DashboardError(502, str(exc))
+
+
+def ch_data(query):
+    return ch_query(query).get("data", [])
+
+
+def safe_order(value, allowed, default):
+    return value if value in allowed else default
+
+
+def timeframe(params):
+    raw = params.get("frame", ["24h"])[0]
+    frames = {
+        "15m": ("15 MINUTE", 1),
+        "1h": ("1 HOUR", 2),
+        "6h": ("6 HOUR", 10),
+        "24h": ("24 HOUR", 30),
+        "7d": ("7 DAY", 240),
+        "30d": ("30 DAY", 1440),
+    }
+    return raw if raw in frames else "24h", frames.get(raw, frames["24h"])
+
+
+def activity_rows(frame="24h", kind_filter="", project_filter=""):
+    _, (window, bucket_minutes) = timeframe({"frame": [frame]})
+    clauses = [f"ingested_at >= now64() - INTERVAL {window}"]
+    if kind_filter:
+        clauses.append(f"source_kind = {sql_string(kind_filter)}")
+    if project_filter:
+        clauses.append(f"source_project = {sql_string(project_filter)}")
+    where = " AND ".join(clauses)
+    return ch_data(
+        f"""
+        SELECT
+          toStartOfInterval(ingested_at, INTERVAL {bucket_minutes} MINUTE) AS bucket,
+          count() AS rows,
+          uniqExact(evidence_id) AS unique_evidence
+        FROM evidence_events
+        WHERE {where}
+        GROUP BY bucket
+        ORDER BY bucket ASC
+        """
+    )
+
+
+def activity_by_kind(frame="24h"):
+    _, (window, bucket_minutes) = timeframe({"frame": [frame]})
+    return ch_data(
+        f"""
+        SELECT
+          toStartOfInterval(ingested_at, INTERVAL {bucket_minutes} MINUTE) AS bucket,
+          source_kind,
+          count() AS rows
+        FROM evidence_events
+        WHERE ingested_at >= now64() - INTERVAL {window}
+        GROUP BY bucket, source_kind
+        ORDER BY bucket ASC, source_kind ASC
+        LIMIT 1000
+        """
+    )
+
+
+def parse_prometheus(text, prefixes=()):
+    samples = []
+    for line in text.splitlines():
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        match = PROM_SAMPLE_RE.match(line)
+        if not match:
+            continue
+        name, raw_labels, raw_value = match.groups()
+        if prefixes and not any(name.startswith(prefix) for prefix in prefixes):
+            continue
+        labels = {}
+        if raw_labels:
+            for part in re.finditer(r'([a-zA-Z_][a-zA-Z0-9_]*)="((?:[^"\\]|\\.)*)"', raw_labels):
+                labels[part.group(1)] = part.group(2).replace(r'\"', '"')
+        try:
+            value = float(raw_value)
+        except ValueError:
+            continue
+        samples.append({"name": name, "labels": labels, "value": value})
+    return samples
+
+
+def prom_sum(samples, name, label_key=None):
+    totals = {}
+    for sample in samples:
+        if sample.get("name") != name:
+            continue
+        key = sample.get("labels", {}).get(label_key, "total") if label_key else "total"
+        totals[key] = totals.get(key, 0) + sample.get("value", 0)
+    return [{"key": key, "value": value} for key, value in sorted(totals.items())]
+
+
+def service_json(name, fn):
+    try:
+        return {"ok": True, "data": fn()}
+    except DashboardError as exc:
+        return {"ok": False, "error": exc.message}
+    except Exception as exc:
+        return {"ok": False, "error": str(exc)}
+
+
+def build_where(params):
+    clauses = []
+    exact_fields = ["source_project", "source_kind", "capture_method", "collector_run_id", "domain", "author_handle"]
+    for field in exact_fields:
+        value = params.get(field, [""])[0].strip()
+        if value:
+            clauses.append(f"{field} = {sql_string(value)}")
+    has_media = parse_boolish(params.get("has_media", [""])[0])
+    if has_media is not None:
+        clauses.append(f"has_media = {1 if has_media else 0}")
+    has_ocr = parse_boolish(params.get("has_ocr", [""])[0])
+    if has_ocr is not None:
+        clauses.append(f"has_ocr = {1 if has_ocr else 0}")
+    q = params.get("q", [""])[0].strip()
+    if q:
+        haystack = "concat(title, ' ', text, ' ', canonical_url, ' ', author_handle, ' ', domain, ' ', arrayStringConcat(topics, ' '), ' ', arrayStringConcat(entities, ' '))"
+        clauses.append(f"positionCaseInsensitive({haystack}, {sql_string(q)}) > 0")
+    date_from = params.get("date_from", [""])[0].strip()
+    if date_from:
+        clauses.append(f"captured_at >= parseDateTimeBestEffort({sql_string(date_from)})")
+    date_to = params.get("date_to", [""])[0].strip()
+    if date_to:
+        clauses.append(f"captured_at <= parseDateTimeBestEffort({sql_string(date_to)})")
+    return " AND ".join(clauses) if clauses else "1"
+
+
+def overview():
+    totals = ch_data(
+        """
+        SELECT
+          count() AS evidence_rows,
+          uniqExact(collector_run_id) AS collector_runs,
+          uniqExact(evidence_id) AS unique_evidence,
+          min(captured_at) AS first_capture,
+          max(captured_at) AS last_capture,
+          sum(has_media) AS media_marked_rows,
+          sum(has_ocr) AS ocr_marked_rows
+        FROM evidence_events
+        """
+    )[0]
+    by_project_kind = ch_data(
+        """
+        SELECT source_project, source_kind, count() AS rows, uniqExact(evidence_id) AS unique_evidence
+        FROM evidence_events
+        GROUP BY source_project, source_kind
+        ORDER BY source_project ASC, rows DESC
+        """
+    )
+    latest_runs = ch_data(
+        """
+        SELECT
+          collector_run_id,
+          anyLast(source_project) AS source_project,
+          anyLast(capture_method) AS capture_method,
+          min(started_at) AS started_at,
+          max(updated_at) AS updated_at,
+          sum(records_seen) AS records_seen,
+          sum(records_emitted) AS records_emitted,
+          max(challenge) AS challenge,
+          max(partial) AS partial,
+          count() AS run_rows
+        FROM collector_runs
+        GROUP BY collector_run_id
+        ORDER BY started_at DESC
+        LIMIT 100
+        """
+    )
+    daily = ch_data(
+        """
+        SELECT toDate(captured_at) AS day, source_project, source_kind, count() AS rows
+        FROM evidence_events
+        GROUP BY day, source_project, source_kind
+        ORDER BY day DESC, source_project ASC, rows DESC
+        LIMIT 500
+        """
+    )
+    normalizer = {}
+    typesense = {}
+    qdrant = {}
+    redpanda = {}
+    try:
+        normalizer = http_json(f"{NORMALIZER_URL}/stats")
+    except DashboardError as exc:
+        normalizer = {"error": exc.message}
+    try:
+        typesense = http_json(
+            f"{TYPESENSE_URL}/collections/evidence_posts",
+            headers={"X-TYPESENSE-API-KEY": TYPESENSE_KEY},
+        )
+    except DashboardError as exc:
+        typesense = {"error": exc.message}
+    try:
+        qdrant = http_json(f"{QDRANT_URL}/collections/{QDRANT_COLLECTION}")
+    except DashboardError as exc:
+        qdrant = {"error": exc.message}
+    try:
+        redpanda = http_json(f"{REDPANDA_PROXY_URL}/brokers")
+    except DashboardError as exc:
+        redpanda = {"error": exc.message}
+    return {
+        "totals": totals,
+        "by_project_kind": by_project_kind,
+        "latest_runs": latest_runs,
+        "daily": daily,
+        "services": {
+            "normalizer": normalizer,
+            "typesense": {
+                "num_documents": typesense.get("num_documents"),
+                "name": typesense.get("name"),
+                "error": typesense.get("error"),
+            },
+            "qdrant": qdrant.get("result", qdrant),
+            "redpanda": redpanda,
+        },
+    }
+
+
+def live_dashboard(params):
+    frame = params.get("frame", ["24h"])[0]
+    totals = ch_data(
+        """
+        SELECT
+          count() AS evidence_rows,
+          uniqExact(evidence_id) AS unique_evidence,
+          uniqExact(collector_run_id) AS collector_runs,
+          max(ingested_at) AS last_ingested_at,
+          max(captured_at) AS last_captured_at,
+          dateDiff('second', max(ingested_at), now64()) AS ingest_age_seconds,
+          sum(has_media) AS media_marked_rows,
+          sum(has_ocr) AS ocr_marked_rows
+        FROM evidence_events
+        """
+    )[0]
+    by_kind = ch_data(
+        """
+        SELECT source_kind, count() AS rows, max(ingested_at) AS last_ingested_at
+        FROM evidence_events
+        GROUP BY source_kind
+        ORDER BY rows DESC
+        """
+    )
+    latest_runs = ch_data(
+        """
+        SELECT collector_run_id, source_project, capture_method, started_at, updated_at,
+               records_seen, records_emitted, challenge, partial
+        FROM collector_runs
+        ORDER BY updated_at DESC
+        LIMIT 12
+        """
+    )
+    return {
+        "generated_at": ch_data("SELECT now64() AS now")[0]["now"],
+        "totals": totals,
+        "stage_rows": by_kind,
+        "histogram": activity_rows(frame),
+        "histogram_by_kind": activity_by_kind(frame),
+        "latest_runs": latest_runs,
+        "services": {
+            "redpanda": service_json("redpanda", lambda: http_json(f"{REDPANDA_PROXY_URL}/brokers")),
+            "normalizer": service_json("normalizer", lambda: http_json(f"{NORMALIZER_URL}/stats")),
+            "typesense": service_json("typesense", lambda: http_json(
+                f"{TYPESENSE_URL}/collections/evidence_posts",
+                headers={"X-TYPESENSE-API-KEY": TYPESENSE_KEY},
+            )),
+            "qdrant": service_json("qdrant", lambda: http_json(f"{QDRANT_URL}/collections/{QDRANT_COLLECTION}")),
+            "clickhouse": service_json("clickhouse", lambda: ch_data("SELECT 1 AS ok")[0]),
+            "filesystem": service_json("filesystem", lambda: filesystem_metrics(frame, shallow=True)),
+        },
+    }
+
+
+def collector_stage(params):
+    frame = params.get("frame", ["24h"])[0]
+    runs = ch_data(
+        """
+        SELECT collector_run_id, source_project, capture_method,
+               min(started_at) AS started_at, max(updated_at) AS updated_at,
+               sum(records_seen) AS records_seen, sum(records_emitted) AS records_emitted,
+               max(challenge) AS challenge, max(partial) AS partial, count() AS observations
+        FROM collector_runs
+        GROUP BY collector_run_id, source_project, capture_method
+        ORDER BY updated_at DESC
+        LIMIT 300
+        """
+    )
+    by_method = ch_data(
+        """
+        SELECT source_project, capture_method, count() AS run_rows,
+               sum(records_seen) AS records_seen, sum(records_emitted) AS records_emitted,
+               max(updated_at) AS last_seen
+        FROM collector_runs
+        GROUP BY source_project, capture_method
+        ORDER BY last_seen DESC
+        """
+    )
+    return {
+        "runs": runs,
+        "by_method": by_method,
+        "histogram": activity_rows(frame),
+    }
+
+
+def facets():
+    return {
+        "source_project": ch_data("SELECT source_project AS value, count() AS rows FROM evidence_events GROUP BY source_project ORDER BY rows DESC, value ASC"),
+        "source_kind": ch_data("SELECT source_kind AS value, count() AS rows FROM evidence_events GROUP BY source_kind ORDER BY rows DESC, value ASC"),
+        "capture_method": ch_data("SELECT capture_method AS value, count() AS rows FROM evidence_events GROUP BY capture_method ORDER BY rows DESC, value ASC LIMIT 200"),
+        "domain": ch_data("SELECT domain AS value, count() AS rows FROM evidence_events WHERE domain != '' GROUP BY domain ORDER BY rows DESC, value ASC LIMIT 200"),
+        "author_handle": ch_data("SELECT author_handle AS value, count() AS rows FROM evidence_events WHERE author_handle != '' GROUP BY author_handle ORDER BY rows DESC, value ASC LIMIT 200"),
+    }
+
+
+def events(params):
+    limit = sql_int(params.get("limit", ["100"])[0], 100, 1, MAX_LIMIT)
+    offset = sql_int(params.get("offset", ["0"])[0], 0, 0, 1_000_000)
+    sort = safe_order(params.get("sort", ["captured_at"])[0], {
+        "captured_at", "ingested_at", "source_project", "source_kind", "capture_method", "collector_run_id",
+        "evidence_id", "domain", "author_handle", "title",
+    }, "captured_at")
+    direction = "ASC" if params.get("direction", ["DESC"])[0].upper() == "ASC" else "DESC"
+    where = build_where(params)
+    query = f"""
+      SELECT
+        event_id,
+        collector_run_id,
+        source_project,
+        capture_method,
+        source_kind,
+        evidence_id,
+        canonical_url,
+        author_handle,
+        domain,
+        title,
+        substring(text, 1, 1600) AS text,
+        topics,
+        entities,
+        links,
+        has_media,
+        has_ocr,
+        posted_at,
+        captured_at,
+        ingested_at
+      FROM evidence_events
+      WHERE {where}
+      ORDER BY {sort} {direction}, event_id ASC
+      LIMIT {limit}
+      OFFSET {offset}
+    """
+    count_query = f"SELECT count() AS rows FROM evidence_events WHERE {where}"
+    return {"rows": ch_data(query), "total": ch_data(count_query)[0]["rows"], "limit": limit, "offset": offset}
+
+
+def raw_event(params):
+    event_id = params.get("event_id", [""])[0].strip()
+    if not event_id:
+        raise DashboardError(400, "event_id is required")
+    rows = ch_data(
+        f"""
+        SELECT *
+        FROM evidence_events
+        WHERE event_id = {sql_string(event_id)}
+        ORDER BY ingested_at DESC
+        LIMIT 1
+        """
+    )
+    if not rows:
+        raise DashboardError(404, "event not found")
+    row = rows[0]
+    parsed = None
+    try:
+        parsed = json.loads(row.get("raw_json") or "{}")
+    except json.JSONDecodeError:
+        parsed = row.get("raw_json")
+    return {"row": row, "raw": parsed}
+
+
+def run_trace(params):
+    run_id = params.get("collector_run_id", [""])[0].strip()
+    if not run_id:
+        raise DashboardError(400, "collector_run_id is required")
+    rows = ch_data(
+        f"""
+        SELECT
+          event_id, source_project, capture_method, source_kind, evidence_id, canonical_url,
+          author_handle, domain, title, substring(text, 1, 1200) AS text, topics, entities,
+          has_media, has_ocr, captured_at, ingested_at
+        FROM evidence_events
+        WHERE collector_run_id = {sql_string(run_id)}
+        ORDER BY captured_at ASC, source_kind ASC, event_id ASC
+        LIMIT 1000
+        """
+    )
+    return {"collector_run_id": run_id, "rows": rows}
+
+
+def type_search(params):
+    q = params.get("q", ["*"])[0].strip() or "*"
+    per_page = sql_int(params.get("per_page", ["25"])[0], 25, 1, 100)
+    page = sql_int(params.get("page", ["1"])[0], 1, 1, 10000)
+    filter_by = params.get("filter_by", [""])[0].strip()
+    query = {
+        "q": q,
+        "query_by": "text,canonical_url,author_handle,author_name,entities,topics,links",
+        "per_page": str(per_page),
+        "page": str(page),
+    }
+    if filter_by:
+        query["filter_by"] = filter_by
+    url = f"{TYPESENSE_URL}/collections/evidence_posts/documents/search?{urllib.parse.urlencode(query)}"
+    return http_json(url, headers={"X-TYPESENSE-API-KEY": TYPESENSE_KEY})
+
+
+def lookup(params):
+    key = params.get("key", [""])[0].strip()
+    if not key:
+        raise DashboardError(400, "key is required")
+    return http_json(f"{NORMALIZER_URL}/lookup?{urllib.parse.urlencode({'key': key})}")
+
+
+def media_path_from_row(row):
+    raw = row.get("raw_json") or "{}"
+    try:
+        parsed = json.loads(raw)
+    except json.JSONDecodeError:
+        parsed = {}
+    for key in ("storage_path", "local_path", "path"):
+        value = parsed.get(key)
+        if value:
+            return value
+    raw_obj = parsed.get("raw") if isinstance(parsed.get("raw"), dict) else {}
+    for key in ("storage_path", "local_path", "path"):
+        value = raw_obj.get(key)
+        if value:
+            return value
+    return ""
+
+
+def safe_media_path(raw_path):
+    if not raw_path:
+        raise DashboardError(404, "media path not found")
+    candidate = Path(raw_path).resolve()
+    try:
+        candidate.relative_to(MEDIA_ROOT)
+    except ValueError:
+        raise DashboardError(403, "media path outside allowed root")
+    if not candidate.is_file():
+        raise DashboardError(404, "media file not found on disk")
+    return candidate
+
+
+def media_response(params):
+    media_id = params.get("id", [""])[0].strip()
+    raw_path = params.get("path", [""])[0].strip()
+    if media_id and not raw_path:
+        rows = ch_data(
+            f"""
+            SELECT evidence_id, raw_json
+            FROM evidence_events
+            WHERE source_kind = 'media' AND evidence_id = {sql_string(media_id)}
+            ORDER BY ingested_at DESC
+            LIMIT 1
+            """
+        )
+        if not rows:
+            raise DashboardError(404, "media row not found")
+        raw_path = media_path_from_row(rows[0])
+    path = safe_media_path(raw_path)
+    content_type = mimetypes.guess_type(path.name)[0] or "application/octet-stream"
+    return path, content_type
+
+
+def media_index(params):
+    limit = sql_int(params.get("limit", ["100"])[0], 100, 1, MAX_LIMIT)
+    where = build_where(params)
+    rows = ch_data(
+        f"""
+        SELECT event_id, evidence_id, title, canonical_url, substring(text, 1, 500) AS text,
+               captured_at, raw_json
+        FROM evidence_events
+        WHERE source_kind = 'media' AND {where}
+        ORDER BY captured_at DESC
+        LIMIT {limit}
+        """
+    )
+    out = []
+    for row in rows:
+        media_path = media_path_from_row(row)
+        out.append({
+            "event_id": row.get("event_id"),
+            "evidence_id": row.get("evidence_id"),
+            "title": row.get("title"),
+            "text": row.get("text"),
+            "captured_at": row.get("captured_at"),
+            "path": media_path,
+            "url": f"/api/media?id={urllib.parse.quote(row.get('evidence_id', ''))}" if media_path else "",
+        })
+    return {"rows": out}
+
+
+def allowed_fs_roots():
+    return [MEDIA_ROOT, OCR_ROOT]
+
+
+def safe_fs_path(raw_path=""):
+    if raw_path:
+        candidate = Path(raw_path).resolve()
+    else:
+        candidate = MEDIA_ROOT
+    for root in allowed_fs_roots():
+        try:
+            candidate.relative_to(root)
+            return candidate
+        except ValueError:
+            continue
+    raise DashboardError(403, "path outside allowed filesystem roots")
+
+
+def human_kind(path):
+    suffix = path.suffix.lower()
+    if suffix in {".png", ".jpg", ".jpeg", ".webp", ".gif"}:
+        return "image"
+    if suffix in {".json", ".jsonl"}:
+        return "json"
+    if suffix in {".txt", ".md", ".csv", ".log"}:
+        return "text"
+    return suffix.lstrip(".") or "file"
+
+
+def filesystem_metrics(frame="24h", shallow=False):
+    roots = allowed_fs_roots()
+    total_files = 0
+    total_bytes = 0
+    by_root = []
+    by_kind = {}
+    recent = []
+    hist = {}
+    now = ch_data("SELECT now64() AS now")[0]["now"]
+    _, (window, bucket_minutes) = timeframe({"frame": [frame]})
+    cutoff_rows = ch_data(f"SELECT now() - INTERVAL {window} AS cutoff")
+    cutoff = cutoff_rows[0]["cutoff"] if cutoff_rows else ""
+
+    for root in roots:
+        root_files = 0
+        root_bytes = 0
+        if not root.exists():
+            by_root.append({"root": str(root), "files": 0, "bytes": 0, "exists": False})
+            continue
+        for dirpath, dirnames, filenames in os.walk(root):
+            if shallow and Path(dirpath).relative_to(root).parts and len(Path(dirpath).relative_to(root).parts) > 2:
+                dirnames[:] = []
+                continue
+            for filename in filenames:
+                path = Path(dirpath) / filename
+                try:
+                    stat = path.stat()
+                except OSError:
+                    continue
+                kind = human_kind(path)
+                root_files += 1
+                root_bytes += stat.st_size
+                total_files += 1
+                total_bytes += stat.st_size
+                by_kind[kind] = by_kind.get(kind, {"kind": kind, "files": 0, "bytes": 0})
+                by_kind[kind]["files"] += 1
+                by_kind[kind]["bytes"] += stat.st_size
+                mtime = stat.st_mtime
+                recent.append({
+                    "path": str(path),
+                    "name": path.name,
+                    "kind": kind,
+                    "bytes": stat.st_size,
+                    "modified_at": mtime,
+                })
+                bucket = int(mtime // (bucket_minutes * 60)) * bucket_minutes * 60
+                hist[bucket] = hist.get(bucket, {"bucket_epoch": bucket, "files": 0, "bytes": 0})
+                hist[bucket]["files"] += 1
+                hist[bucket]["bytes"] += stat.st_size
+        by_root.append({"root": str(root), "files": root_files, "bytes": root_bytes, "exists": True})
+    recent.sort(key=lambda row: row["modified_at"], reverse=True)
+    for row in recent[:200]:
+        row["modified_at"] = datetime_from_epoch(row["modified_at"])
+    histogram = sorted(hist.values(), key=lambda row: row["bucket_epoch"])
+    for row in histogram:
+        row["bucket"] = datetime_from_epoch(row["bucket_epoch"])
+    return {
+        "generated_at": now,
+        "cutoff": cutoff,
+        "roots": by_root,
+        "total_files": total_files,
+        "total_bytes": total_bytes,
+        "by_kind": sorted(by_kind.values(), key=lambda row: row["bytes"], reverse=True),
+        "recent": recent[:80],
+        "histogram": histogram[-240:],
+    }
+
+
+def datetime_from_epoch(value):
+    import datetime
+    return datetime.datetime.fromtimestamp(value, datetime.timezone.utc).isoformat().replace("+00:00", "Z")
+
+
+def filesystem_tree(params):
+    root = safe_fs_path(params.get("path", [""])[0].strip())
+    if not root.exists():
+        raise DashboardError(404, "path not found")
+    if root.is_file():
+        root = root.parent
+    entries = []
+    try:
+        children = sorted(root.iterdir(), key=lambda p: (p.is_file(), p.name.lower()))
+    except OSError as exc:
+        raise DashboardError(403, str(exc))
+    for child in children[:500]:
+        try:
+            stat = child.stat()
+        except OSError:
+            continue
+        entries.append({
+            "name": child.name,
+            "path": str(child),
+            "type": "dir" if child.is_dir() else "file",
+            "kind": human_kind(child) if child.is_file() else "dir",
+            "bytes": stat.st_size if child.is_file() else None,
+            "modified_at": datetime_from_epoch(stat.st_mtime),
+        })
+    return {"root": str(root), "parent": str(root.parent) if root != root.anchor else "", "entries": entries}
+
+
+def filesystem_file(params):
+    path = safe_fs_path(params.get("path", [""])[0].strip())
+    if not path.is_file():
+        raise DashboardError(404, "file not found")
+    content_type = mimetypes.guess_type(path.name)[0] or "application/octet-stream"
+    if content_type.startswith("image/"):
+        return {"mode": "binary", "path": path, "content_type": content_type}
+    size = path.stat().st_size
+    if size > MAX_FILE_PREVIEW_BYTES:
+        return {
+            "mode": "preview",
+            "path": str(path),
+            "content_type": content_type,
+            "bytes": size,
+            "text": path.read_bytes()[:MAX_FILE_PREVIEW_BYTES].decode("utf-8", errors="replace"),
+            "truncated": True,
+        }
+    return {
+        "mode": "preview",
+        "path": str(path),
+        "content_type": content_type,
+        "bytes": size,
+        "text": path.read_text(encoding="utf-8", errors="replace"),
+        "truncated": False,
+    }
+
+
+def qdrant_status():
+    return http_json(f"{QDRANT_URL}/collections/{QDRANT_COLLECTION}")
+
+
+def pebble_stage():
+    return http_json(f"{NORMALIZER_URL}/pebble?limit=200")
+
+
+def typesense_stage(params):
+    frame = params.get("frame", ["24h"])[0]
+    collection = http_json(
+        f"{TYPESENSE_URL}/collections/evidence_posts",
+        headers={"X-TYPESENSE-API-KEY": TYPESENSE_KEY},
+    )
+    stats = http_json(
+        f"{TYPESENSE_URL}/stats.json",
+        headers={"X-TYPESENSE-API-KEY": TYPESENSE_KEY},
+    )
+    try:
+        metrics_text = http_text(
+            f"{TYPESENSE_URL}/metrics.json",
+            headers={"X-TYPESENSE-API-KEY": TYPESENSE_KEY},
+        )
+    except DashboardError as exc:
+        metrics_text = json.dumps({"error": exc.message})
+    by_project = ch_data(
+        """
+        SELECT source_project, count() AS rows, uniqExact(evidence_id) AS unique_evidence
+        FROM evidence_events
+        GROUP BY source_project
+        ORDER BY rows DESC
+        """
+    )
+    return {
+        "health": http_json(f"{TYPESENSE_URL}/health", headers={"X-TYPESENSE-API-KEY": TYPESENSE_KEY}),
+        "collection": collection,
+        "stats": stats,
+        "metrics_text": metrics_text[:12000],
+        "by_project": by_project,
+        "histogram": activity_rows(frame),
+    }
+
+
+def qdrant_stage(params):
+    frame = params.get("frame", ["24h"])[0]
+    collection = qdrant_status()
+    try:
+        metrics = parse_prometheus(http_text(f"{QDRANT_URL}/metrics"), (
+            "app_info",
+            "collections_total",
+            "collection_vectors",
+            "collection_points",
+            "collection_running_optimizations",
+            "rest_responses_total",
+            "grpc_responses_total",
+        ))
+    except DashboardError as exc:
+        metrics = [{"error": exc.message}]
+    return {
+        "collection": collection,
+        "metrics": metrics,
+        "histogram": activity_rows(frame),
+    }
+
+
+def clickhouse_stage(params):
+    frame = params.get("frame", ["24h"])[0]
+    totals = ch_data(
+        """
+        SELECT count() AS evidence_rows, uniqExact(evidence_id) AS unique_evidence,
+               uniqExact(collector_run_id) AS collector_runs,
+               max(ingested_at) AS last_ingested_at
+        FROM evidence_events
+        """
+    )[0]
+    tables = ch_data(
+        """
+        SELECT name, total_rows, total_bytes
+        FROM system.tables
+        WHERE database = currentDatabase()
+        ORDER BY total_bytes DESC
+        """
+    )
+    metrics = ch_data(
+        """
+        SELECT metric AS name, value
+        FROM system.metrics
+        WHERE metric IN ('Query', 'Merge', 'ReadonlyReplica', 'MemoryTracking', 'HTTPConnection', 'TCPConnection')
+        ORDER BY name
+        """
+    )
+    async_metrics = ch_data(
+        """
+        SELECT metric AS name, value
+        FROM system.asynchronous_metrics
+        WHERE metric IN ('Uptime', 'FilesystemMainAvailableSpace', 'FilesystemMainTotalSpace', 'MaxPartCountForPartition', 'NumberOfDatabases', 'NumberOfTables')
+        ORDER BY name
+        """
+    )
+    query_log = []
+    try:
+        query_log = ch_data(
+            """
+            SELECT event_time, query_duration_ms, read_rows, read_bytes, result_rows,
+                   substring(query, 1, 240) AS query
+            FROM system.query_log
+            WHERE type = 'QueryFinish'
+            ORDER BY event_time DESC
+            LIMIT 50
+            """
+        )
+    except DashboardError:
+        query_log = []
+    return {
+        "totals": totals,
+        "tables": tables,
+        "metrics": metrics,
+        "asynchronous_metrics": async_metrics,
+        "query_log": query_log,
+        "histogram": activity_rows(frame),
+        "histogram_by_kind": activity_by_kind(frame),
+        "builtin_interfaces": [
+            {"name": "ClickHouse Play", "path": "/clickhouse/play"},
+            {"name": "ClickHouse Dashboard", "path": "/clickhouse/dashboard"},
+            {"name": "ClickStack", "path": "/clickhouse/clickstack"},
+        ],
+    }
+
+
+def safe_clickhouse_query(raw):
+    query = (raw or "").strip()
+    if not query:
+        raise DashboardError(400, "query is required")
+    if ";" in query.rstrip(";"):
+        raise DashboardError(400, "only one statement is allowed")
+    query = query.rstrip(";").strip()
+    lower = re.sub(r"\s+", " ", query.lower())
+    first = lower.split(" ", 1)[0]
+    if not lower.startswith(SAFE_SQL_PREFIXES):
+        raise DashboardError(400, "only read-only SELECT/WITH/SHOW/DESCRIBE/EXISTS queries are allowed")
+    tokens = set(re.findall(r"[a-z_]+", lower))
+    if tokens & BLOCKED_SQL_WORDS:
+        raise DashboardError(400, "query contains a blocked keyword")
+    if first in {"select", "with"} and " limit " not in f" {lower} ":
+        query += "\nLIMIT 200"
+    return ch_query(query)
+
+
+def clickhouse_proxy(path, query=""):
+    ch_path = path.removeprefix("/clickhouse") or "/"
+    url = CLICKHOUSE_URL + ch_path
+    if query:
+        url += "?" + query
+    request = urllib.request.Request(url)
+    if CLICKHOUSE_PASSWORD:
+        token = base64.b64encode(f"{CLICKHOUSE_USER}:{CLICKHOUSE_PASSWORD}".encode()).decode()
+        request.add_header("Authorization", f"Basic {token}")
+    try:
+        with urllib.request.urlopen(request, timeout=20) as response:
+            payload = response.read()
+            content_type = response.headers.get("Content-Type") or mimetypes.guess_type(ch_path)[0] or "application/octet-stream"
+            content_encoding = response.headers.get("Content-Encoding")
+            return payload, content_type, content_encoding
+    except urllib.error.HTTPError as exc:
+        detail = exc.read()[:2000]
+        raise DashboardError(exc.code, detail.decode("utf-8", errors="replace"))
+    except Exception as exc:
+        raise DashboardError(502, f"ClickHouse proxy failed: {exc}")
+
+
+def redpanda_status():
+    try:
+        topics = http_json(f"{REDPANDA_PROXY_URL}/topics")
+    except DashboardError as exc:
+        topics = {"error": exc.message}
+    try:
+        partitions = http_json(f"{REDPANDA_ADMIN_URL}/v1/partitions")
+    except DashboardError as exc:
+        partitions = [{"error": exc.message}]
+    try:
+        brokers = http_json(f"{REDPANDA_ADMIN_URL}/v1/brokers")
+    except DashboardError as exc:
+        brokers = [{"error": exc.message}]
+
+    topic_set = set(topics if isinstance(topics, list) else [])
+    topic_rows = {}
+    for topic in topic_set:
+        topic_rows[topic] = {
+            "topic": topic,
+            "namespace": "kafka",
+            "partitions": 0,
+            "leaders": [],
+            "cores": [],
+            "materialized_partitions": 0,
+            "internal": topic.startswith("__"),
+        }
+    for part in partitions if isinstance(partitions, list) else []:
+        topic = part.get("topic")
+        if not topic:
+            continue
+        row = topic_rows.setdefault(topic, {
+            "topic": topic,
+            "namespace": part.get("ns", ""),
+            "partitions": 0,
+            "leaders": [],
+            "cores": [],
+            "materialized_partitions": 0,
+            "internal": topic.startswith("__") or part.get("ns") != "kafka",
+        })
+        row["namespace"] = part.get("ns", row.get("namespace", ""))
+        row["partitions"] += 1
+        leader = part.get("leader")
+        core = part.get("core")
+        if leader is not None and leader not in row["leaders"]:
+            row["leaders"].append(leader)
+        if core is not None and core not in row["cores"]:
+            row["cores"].append(core)
+        if part.get("materialized"):
+            row["materialized_partitions"] += 1
+    rows = sorted(topic_rows.values(), key=lambda r: (r["internal"], r["topic"]))
+    for row in rows:
+        row["leaders"] = ",".join(str(x) for x in sorted(row["leaders"]))
+        row["cores"] = ",".join(str(x) for x in sorted(row["cores"]))
+    try:
+        metrics_text = http_text(f"{REDPANDA_ADMIN_URL}/public_metrics", timeout=10)
+        metrics = parse_prometheus(metrics_text, (
+            "redpanda_application_uptime",
+            "redpanda_kafka_consumer_group",
+            "redpanda_kafka_partitions",
+            "redpanda_kafka_request_bytes_total",
+        ))
+    except DashboardError as exc:
+        metrics = [{"error": exc.message}]
+    return {
+        "topics": rows,
+        "brokers": brokers,
+        "partitions": partitions,
+        "metrics": metrics,
+        "bytes_by_topic": prom_sum(metrics if isinstance(metrics, list) else [], "redpanda_kafka_request_bytes_total", "redpanda_topic"),
+        "activity": activity_rows("24h"),
+        "normalizer": service_json("normalizer", lambda: http_json(f"{NORMALIZER_URL}/stats")),
+        "pebble": service_json("pebble", lambda: http_json(f"{NORMALIZER_URL}/pebble?limit=80")),
+    }
+
+
+def latest_runs():
+    return ch_data(
+        """
+        SELECT collector_run_id, anyLast(source_project) AS source_project, anyLast(capture_method) AS capture_method,
+               min(started_at) AS started_at, max(updated_at) AS updated_at, sum(records_seen) AS records_seen,
+               sum(records_emitted) AS records_emitted, max(challenge) AS challenge, max(partial) AS partial
+        FROM collector_runs
+        GROUP BY collector_run_id
+        ORDER BY started_at DESC
+        LIMIT 300
+        """
+    )
+
+
+class Handler(BaseHTTPRequestHandler):
+    server_version = "WebOSINTDashboard/0.1"
+
+    def log_message(self, fmt, *args):
+        print("%s - - [%s] %s" % (self.client_address[0], self.log_date_time_string(), fmt % args))
+
+    def send_json(self, value, status=200):
+        payload = json_bytes(value)
+        self.send_response(status)
+        self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("Content-Length", str(len(payload)))
+        self.end_headers()
+        self.wfile.write(payload)
+
+    def send_static(self, route):
+        if route == "/":
+            route = "/index.html"
+        normalized = posixpath.normpath(urllib.parse.unquote(route)).lstrip("/")
+        path = (STATIC_DIR / normalized).resolve()
+        try:
+            path.relative_to(STATIC_DIR.resolve())
+        except ValueError:
+            raise DashboardError(403, "invalid static path")
+        if not path.is_file():
+            raise DashboardError(404, "not found")
+        content_type = mimetypes.guess_type(path.name)[0] or "application/octet-stream"
+        payload = path.read_bytes()
+        self.send_response(200)
+        self.send_header("Content-Type", content_type)
+        self.send_header("Cache-Control", "no-cache")
+        self.send_header("Content-Length", str(len(payload)))
+        self.end_headers()
+        self.wfile.write(payload)
+
+    def do_GET(self):
+        parsed = urllib.parse.urlparse(self.path)
+        params = urllib.parse.parse_qs(parsed.query)
+        try:
+            if parsed.path == "/api/health":
+                return self.send_json({"ok": True})
+            if parsed.path == "/api/live":
+                return self.send_json(live_dashboard(params))
+            if parsed.path == "/api/overview":
+                return self.send_json(overview())
+            if parsed.path == "/api/stage/collectors":
+                return self.send_json(collector_stage(params))
+            if parsed.path == "/api/stage/redpanda":
+                return self.send_json(redpanda_status())
+            if parsed.path == "/api/stage/filesystem":
+                return self.send_json(filesystem_metrics(params.get("frame", ["24h"])[0]))
+            if parsed.path == "/api/stage/fs-tree":
+                return self.send_json(filesystem_tree(params))
+            if parsed.path == "/api/stage/fs-file":
+                result = filesystem_file(params)
+                if result.get("mode") == "binary":
+                    file_path = result["path"]
+                    payload = file_path.read_bytes()
+                    self.send_response(200)
+                    self.send_header("Content-Type", result["content_type"])
+                    self.send_header("Cache-Control", "private, max-age=300")
+                    self.send_header("Content-Length", str(len(payload)))
+                    self.end_headers()
+                    self.wfile.write(payload)
+                    return
+                return self.send_json(result)
+            if parsed.path == "/api/stage/pebble":
+                return self.send_json(pebble_stage())
+            if parsed.path == "/api/stage/typesense":
+                return self.send_json(typesense_stage(params))
+            if parsed.path == "/api/stage/qdrant":
+                return self.send_json(qdrant_stage(params))
+            if parsed.path == "/api/stage/clickhouse":
+                return self.send_json(clickhouse_stage(params))
+            if parsed.path == "/api/facets":
+                return self.send_json(facets())
+            if parsed.path == "/api/events":
+                return self.send_json(events(params))
+            if parsed.path == "/api/raw":
+                return self.send_json(raw_event(params))
+            if parsed.path == "/api/run":
+                return self.send_json(run_trace(params))
+            if parsed.path == "/api/runs":
+                return self.send_json({"rows": latest_runs()})
+            if parsed.path == "/api/search":
+                return self.send_json(type_search(params))
+            if parsed.path == "/api/lookup":
+                return self.send_json(lookup(params))
+            if parsed.path == "/api/media-index":
+                return self.send_json(media_index(params))
+            if parsed.path == "/api/media":
+                file_path, content_type = media_response(params)
+                payload = file_path.read_bytes()
+                self.send_response(200)
+                self.send_header("Content-Type", content_type)
+                self.send_header("Cache-Control", "private, max-age=300")
+                self.send_header("Content-Length", str(len(payload)))
+                self.end_headers()
+                self.wfile.write(payload)
+                return
+            if parsed.path == "/api/qdrant":
+                return self.send_json(qdrant_status())
+            if parsed.path == "/api/redpanda":
+                return self.send_json(redpanda_status())
+            if parsed.path.startswith("/clickhouse"):
+                payload, content_type, content_encoding = clickhouse_proxy(parsed.path, parsed.query)
+                self.send_response(200)
+                self.send_header("Content-Type", content_type)
+                if content_encoding:
+                    self.send_header("Content-Encoding", content_encoding)
+                self.send_header("Cache-Control", "private, max-age=60")
+                self.send_header("Content-Length", str(len(payload)))
+                self.end_headers()
+                self.wfile.write(payload)
+                return
+            return self.send_static(parsed.path)
+        except DashboardError as exc:
+            return self.send_json({"error": exc.message}, exc.status)
+        except Exception as exc:
+            return self.send_json({"error": str(exc)}, 500)
+
+    def do_POST(self):
+        parsed = urllib.parse.urlparse(self.path)
+        try:
+            if parsed.path != "/api/clickhouse/query":
+                raise DashboardError(404, "not found")
+            length = min(int(self.headers.get("Content-Length", "0") or "0"), 100_000)
+            payload = self.rfile.read(length)
+            try:
+                body = json.loads(payload.decode("utf-8") or "{}")
+            except json.JSONDecodeError:
+                raise DashboardError(400, "invalid JSON body")
+            return self.send_json(safe_clickhouse_query(body.get("query", "")))
+        except DashboardError as exc:
+            return self.send_json({"error": exc.message}, exc.status)
+        except Exception as exc:
+            return self.send_json({"error": str(exc)}, 500)
+
+
+def main():
+    host = os.environ.get("DASHBOARD_HOST", "0.0.0.0")
+    port = int(os.environ.get("DASHBOARD_PORT", "8091"))
+    httpd = ThreadingHTTPServer((host, port), Handler)
+    print(f"web osint dashboard listening on {host}:{port}")
+    httpd.serve_forever()
+
+
+if __name__ == "__main__":
+    main()

@@ -24,5 +24,9 @@ echo "Normalizer:"
 curl -fsS http://127.0.0.1:18090/healthz
 echo
 
+echo "Research planner:"
+curl -fsS http://127.0.0.1:18091/healthz
+echo
+
 echo "Containers:"
 docker ps --filter 'name=web-osint' --format 'table {{.Names}}\t{{.Status}}\t{{.Ports}}'

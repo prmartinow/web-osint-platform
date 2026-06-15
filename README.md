@@ -14,6 +14,7 @@ It is designed for automated research workflows where browser or API collectors 
 - Qdrant semantic/vector retrieval with named vectors.
 - ClickHouse analytics tables for rollups, trend analysis, and report data marts.
 - Filesystem-backed media and OCR artifact storage.
+- Deterministic research-planning worker that promotes labels into research signals, questions, and autonomous task seeds.
 
 ## Architecture
 
@@ -27,6 +28,7 @@ Collectors
   -> Qdrant vectors
   -> ClickHouse analytics
   -> filesystem media/OCR artifacts
+  -> research planner
   -> agents, reports, dashboards, and research tools
 ```
 
@@ -74,4 +76,4 @@ curl 'http://127.0.0.1:18090/lookup?key=post/1234567890'
 
 ## Status
 
-This is an early infrastructure baseline. The current implementation includes the streaming backbone, materializer, exact lookup, search, vector-store initialization, analytics schema, and smoke-test producer path. Real collectors and enrichment workers should be added on top of the existing event schemas.
+This is an early infrastructure baseline. The current implementation includes the streaming backbone, materializer, exact lookup, search, vector-store initialization, analytics schema, deterministic labeling, research-planning seed generation, and smoke-test producer path. Real collectors and richer enrichment workers should be added on top of the existing event schemas.

@@ -18,6 +18,8 @@ Event Log
 
 Processing
   The normalizer/materializer validates, normalizes, and fans records out.
+  The research planner derives research signals, questions, and task seeds
+  from recent semantic annotations and evidence.
 
 Serving Stores
   Pebble: exact lookup
@@ -156,3 +158,5 @@ quality
 The labels inside each family are versioned concepts in `label_concepts`. Unknown content should become an emerging topic, taxonomy gap, or review action rather than a permanent `misc` bucket.
 
 High-value extracted objects are promoted from the generic annotation ledger into typed ClickHouse tables such as `claim_assertions`, `relation_assertions`, `benchmark_facts`, `release_signals`, `research_signals`, `research_questions`, and `autonomous_tasks`. Generated wiki pages are derived projections and must keep backlinks to source evidence and annotation IDs.
+
+The initial research planner is deliberately deterministic. It scans recent evidence and annotations, identifies actionable signals such as user-supplied seeds, comparison opportunities, verification needs, and source-expansion leads, then writes deduped rows to `research_signals`, `research_questions`, and `autonomous_tasks` while also publishing replay events to the matching `osint.*` topics. Later LLM or human feedback loops can replace or augment this planner without changing the storage contract.

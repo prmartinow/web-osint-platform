@@ -30,10 +30,18 @@ const (
 	accountsObserved = "evidence.accounts.observed.v1"
 	mediaObserved    = "evidence.media.observed.v1"
 	searchObserved   = "evidence.search.results.v1"
+	semanticLabels   = "osint.label.proposed.v1"
 	postsState       = "evidence.posts.state.v1"
 	accountsState    = "evidence.accounts.state.v1"
 	mediaState       = "evidence.media.state.v1"
+	labelsState      = "osint.state.current_labels_by_target.v1"
 	indexErrors      = "evidence.index.errors.v1"
+)
+
+const (
+	semanticLabelerName    = "deterministic_semantic_labeler"
+	semanticLabelerVersion = "0.1.0"
+	semanticTaxonomyV1     = uint32(1)
 )
 
 var statusURLPattern = regexp.MustCompile(`(?i)(?:x|twitter)\.com/([^/?#]+)/status/([0-9]+)`)
@@ -65,6 +73,7 @@ type app struct {
 	accountsIndexed atomic.Uint64
 	mediaIndexed    atomic.Uint64
 	searchIndexed   atomic.Uint64
+	labelsEmitted   atomic.Uint64
 }
 
 type captureEvent struct {
@@ -108,6 +117,31 @@ type chEvidenceRow struct {
 	RawJSON        string   `json:"raw_json"`
 }
 
+type chSemanticAnnotationRow struct {
+	AnnotationID         string  `json:"annotation_id"`
+	EvidenceID           string  `json:"evidence_id"`
+	ArtifactID           string  `json:"artifact_id"`
+	ChunkID              string  `json:"chunk_id"`
+	TargetType           string  `json:"target_type"`
+	TargetID             string  `json:"target_id"`
+	SelectorType         string  `json:"selector_type"`
+	SelectorJSON         string  `json:"selector_json"`
+	AnnotationFamily     string  `json:"annotation_family"`
+	LabelID              string  `json:"label_id"`
+	LabelScheme          string  `json:"label_scheme"`
+	TaxonomyVersion      uint32  `json:"taxonomy_version"`
+	ValueJSON            string  `json:"value_json"`
+	Confidence           float32 `json:"confidence"`
+	ScoreComponentsJSON  string  `json:"score_components_json"`
+	Status               string  `json:"status"`
+	SpanText             string  `json:"span_text"`
+	ProducedByActivityID string  `json:"produced_by_activity_id"`
+	ProducerName         string  `json:"producer_name"`
+	ProducerVersion      string  `json:"producer_version"`
+	InputHash            string  `json:"input_hash"`
+	CreatedAt            string  `json:"created_at"`
+}
+
 func main() {
 	cfg := loadConfig()
 	db, err := openPebble(cfg.PebbleDir)
@@ -122,7 +156,7 @@ func main() {
 		client:  &http.Client{Timeout: 15 * time.Second},
 		writers: map[string]*kafka.Writer{},
 	}
-	for _, topic := range []string{postsObserved, accountsObserved, mediaObserved, searchObserved, postsState, accountsState, mediaState, indexErrors} {
+	for _, topic := range []string{postsObserved, accountsObserved, mediaObserved, searchObserved, semanticLabels, postsState, accountsState, mediaState, labelsState, indexErrors} {
 		a.writers[topic] = &kafka.Writer{
 			Addr:         kafka.TCP(cfg.Brokers...),
 			Topic:        topic,
@@ -245,6 +279,9 @@ func (a *app) processMessage(ctx context.Context, msg kafka.Message) error {
 		return err
 	}
 	if err := a.upsertTypesenseEvidence(ctx, rootRow, map[string]any{"quality": ev.Quality}); err != nil {
+		return err
+	}
+	if err := a.emitSemanticAnnotations(ctx, msg, rootRow, map[string]any{"quality": ev.Quality}); err != nil {
 		return err
 	}
 	if err := a.insertCollectorRun(ctx, ev); err != nil {
@@ -377,6 +414,9 @@ func (a *app) handlePost(ctx context.Context, ev captureEvent, msg kafka.Message
 	if err := a.upsertTypesenseEvidence(ctx, row, observed); err != nil {
 		return err
 	}
+	if err := a.emitSemanticAnnotations(ctx, msg, row, observed); err != nil {
+		return err
+	}
 	_ = a.upsertQdrantIfVector(ctx, postID, observed)
 	a.postsIndexed.Add(1)
 	return nil
@@ -444,6 +484,9 @@ func (a *app) handleAccount(ctx context.Context, ev captureEvent, msg kafka.Mess
 		return err
 	}
 	if err := a.upsertTypesenseEvidence(ctx, row, observed); err != nil {
+		return err
+	}
+	if err := a.emitSemanticAnnotations(ctx, msg, row, observed); err != nil {
 		return err
 	}
 	_ = a.upsertQdrantIfVector(ctx, "account/"+handle, observed)
@@ -517,6 +560,9 @@ func (a *app) handleMedia(ctx context.Context, ev captureEvent, msg kafka.Messag
 	if err := a.upsertTypesenseEvidence(ctx, row, observed); err != nil {
 		return err
 	}
+	if err := a.emitSemanticAnnotations(ctx, msg, row, observed); err != nil {
+		return err
+	}
 	_ = a.upsertQdrantIfVector(ctx, "media/"+mediaID, observed)
 	a.mediaIndexed.Add(1)
 	return nil
@@ -578,6 +624,9 @@ func (a *app) handleSearchResult(ctx context.Context, ev captureEvent, msg kafka
 		return err
 	}
 	if err := a.upsertTypesenseEvidence(ctx, row, observed); err != nil {
+		return err
+	}
+	if err := a.emitSemanticAnnotations(ctx, msg, row, observed); err != nil {
 		return err
 	}
 	a.searchIndexed.Add(1)
@@ -663,6 +712,67 @@ func (a *app) insertCollectorRun(ctx context.Context, ev captureEvent) error {
 	}
 	payload = append(payload, '\n')
 	return a.clickhousePost(ctx, "INSERT INTO collector_runs FORMAT JSONEachRow", bytes.NewReader(payload))
+}
+
+func (a *app) emitSemanticAnnotations(ctx context.Context, msg kafka.Message, row chEvidenceRow, observed map[string]any) error {
+	annotations := deterministicAnnotations(row, observed)
+	if len(annotations) == 0 {
+		return nil
+	}
+	event := map[string]any{
+		"schema_version":   "v1",
+		"evidence_id":      row.EvidenceID,
+		"source_kind":      row.SourceKind,
+		"source_project":   row.SourceProject,
+		"collector_run_id": row.CollectorRunID,
+		"captured_at":      row.CapturedAt,
+		"producer": map[string]any{
+			"name":    semanticLabelerName,
+			"version": semanticLabelerVersion,
+		},
+		"annotations": annotationEvents(annotations),
+	}
+	if err := a.publishJSON(ctx, semanticLabels, row.EvidenceID, event); err != nil {
+		return err
+	}
+	state := map[string]any{
+		"schema_version": "v1",
+		"evidence_id":    row.EvidenceID,
+		"target_type":    "evidence",
+		"target_id":      row.EvidenceID,
+		"labels":         annotationState(annotations),
+		"updated_at":     time.Now().UTC().Format(time.RFC3339Nano),
+	}
+	if err := a.publishJSON(ctx, labelsState, row.EvidenceID, state); err != nil {
+		return err
+	}
+	for _, ann := range annotations {
+		key := fmt.Sprintf("annotation/%s/%s/%s", row.EvidenceID, ann.LabelID, ann.AnnotationID)
+		if err := a.setPebble(key, envelope("semantic_annotation", ann.AnnotationID, ann, msg)); err != nil {
+			return err
+		}
+	}
+	if err := a.insertSemanticAnnotations(ctx, annotations); err != nil {
+		return err
+	}
+	a.labelsEmitted.Add(uint64(len(annotations)))
+	return nil
+}
+
+func (a *app) insertSemanticAnnotations(ctx context.Context, rows []chSemanticAnnotationRow) error {
+	if len(rows) == 0 || a.cfg.ClickPassword == "" {
+		return nil
+	}
+	var buf bytes.Buffer
+	for _, row := range rows {
+		b, err := json.Marshal(row)
+		if err != nil {
+			return err
+		}
+		buf.Write(b)
+		buf.WriteByte('\n')
+	}
+	return a.clickhousePost(ctx, "INSERT INTO semantic_annotations FORMAT JSONEachRow", &buf)
 }
 
 func (a *app) clickhousePost(ctx context.Context, query string, body io.Reader) error {
@@ -807,6 +917,7 @@ func (a *app) serveHTTP() {
 			"accounts_indexed": a.accountsIndexed.Load(),
 			"media_indexed":    a.mediaIndexed.Load(),
 			"search_indexed":   a.searchIndexed.Load(),
+			"labels_emitted":   a.labelsEmitted.Load(),
 		})
 	})
 	mux.HandleFunc("/pebble", func(w http.ResponseWriter, r *http.Request) {
@@ -909,6 +1020,337 @@ func (a *app) pebbleInfo(limit int) (map[string]any, error) {
 		"sample_keys":       samples,
 		"sample_limit":      limit,
 	}, nil
+}
+
+func deterministicAnnotations(row chEvidenceRow, observed map[string]any) []chSemanticAnnotationRow {
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	inputHash := stableHash(row.RawJSON)
+	activityID := shortID("act", "semantic", row.EventID, row.EvidenceID, inputHash)
+	base := semanticBase{
+		EvidenceID: row.EvidenceID,
+		TargetID:   row.EvidenceID,
+		InputHash:  inputHash,
+		ActivityID: activityID,
+		CreatedAt:  now,
+	}
+
+	var out []chSemanticAnnotationRow
+	add := func(family, labelID, status string, confidence float32, value map[string]any) {
+		out = append(out, makeAnnotation(base, family, labelID, status, confidence, value))
+	}
+
+	sourceLabel := sourceLabelID(row.SourceKind)
+	if sourceLabel != "" {
+		add("source", sourceLabel, "accepted", 1.0, map[string]any{
+			"source_kind": row.SourceKind,
+		})
+	}
+	for _, labelID := range modalityLabelIDs(row, observed) {
+		add("modality", labelID, "accepted", 0.95, map[string]any{
+			"source_kind": row.SourceKind,
+		})
+	}
+	if labelID, confidence := contentFormLabel(row); labelID != "" {
+		status := "proposed"
+		if confidence >= 0.95 {
+			status = "accepted"
+		}
+		add("content_form", labelID, status, confidence, map[string]any{
+			"source_kind": row.SourceKind,
+			"domain":      row.Domain,
+		})
+	}
+	for _, topic := range row.Topics {
+		if slug := slugLabel(topic); slug != "" {
+			add("topic", "topic."+slug, "proposed", 0.72, map[string]any{
+				"topic_text": topic,
+			})
+		}
+	}
+	for _, entity := range row.Entities {
+		if entity == "" {
+			continue
+		}
+		add("entity", "entity.mentioned", "proposed", 0.7, map[string]any{
+			"entity_text": entity,
+		})
+	}
+	for _, labelID := range qualityLabelIDs(row, observed) {
+		add("evidence_quality", labelID, "accepted", 0.9, map[string]any{
+			"source_kind": row.SourceKind,
+		})
+	}
+	for _, labelID := range actionabilityLabelIDs(row, observed) {
+		add("actionability", labelID, "proposed", 0.72, map[string]any{
+			"source_kind": row.SourceKind,
+		})
+	}
+	return out
+}
+
+type semanticBase struct {
+	EvidenceID string
+	TargetID   string
+	InputHash  string
+	ActivityID string
+	CreatedAt  string
+}
+
+func makeAnnotation(base semanticBase, family, labelID, status string, confidence float32, value map[string]any) chSemanticAnnotationRow {
+	if value == nil {
+		value = map[string]any{}
+	}
+	selector := map[string]any{"selector_type": "whole_document"}
+	score := map[string]any{"deterministic_signal_score": confidence}
+	valueJSON := mustJSON(value)
+	annotationID := shortID("ann", base.EvidenceID, family, labelID, valueJSON, base.InputHash)
+	return chSemanticAnnotationRow{
+		AnnotationID:         annotationID,
+		EvidenceID:           base.EvidenceID,
+		TargetType:           "evidence",
+		TargetID:             base.TargetID,
+		SelectorType:         "whole_document",
+		SelectorJSON:         mustJSON(selector),
+		AnnotationFamily:     family,
+		LabelID:              labelID,
+		LabelScheme:          family,
+		TaxonomyVersion:      semanticTaxonomyV1,
+		ValueJSON:            valueJSON,
+		Confidence:           confidence,
+		ScoreComponentsJSON:  mustJSON(score),
+		Status:               status,
+		ProducedByActivityID: base.ActivityID,
+		ProducerName:         semanticLabelerName,
+		ProducerVersion:      semanticLabelerVersion,
+		InputHash:            base.InputHash,
+		CreatedAt:            base.CreatedAt,
+	}
+}
+
+func annotationEvents(rows []chSemanticAnnotationRow) []map[string]any {
+	out := make([]map[string]any, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, map[string]any{
+			"annotation_id":     row.AnnotationID,
+			"evidence_id":       row.EvidenceID,
+			"artifact_id":       emptyToNil(row.ArtifactID),
+			"chunk_id":          emptyToNil(row.ChunkID),
+			"target":            annotationTarget(row),
+			"annotation_family": row.AnnotationFamily,
+			"label_id":          row.LabelID,
+			"label_scheme":      row.LabelScheme,
+			"taxonomy_version":  row.TaxonomyVersion,
+			"value":             jsonObject(row.ValueJSON),
+			"confidence":        row.Confidence,
+			"score_components":  jsonObject(row.ScoreComponentsJSON),
+			"status":            row.Status,
+			"span_text":         row.SpanText,
+			"input_hash":        row.InputHash,
+			"producer": map[string]any{
+				"name":        row.ProducerName,
+				"version":     row.ProducerVersion,
+				"activity_id": row.ProducedByActivityID,
+			},
+			"created_at": row.CreatedAt,
+		})
+	}
+	return out
+}
+
+func annotationState(rows []chSemanticAnnotationRow) []map[string]any {
+	out := make([]map[string]any, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, map[string]any{
+			"annotation_id":     row.AnnotationID,
+			"annotation_family": row.AnnotationFamily,
+			"label_id":          row.LabelID,
+			"confidence":        row.Confidence,
+			"status":            row.Status,
+			"taxonomy_version":  row.TaxonomyVersion,
+			"value":             jsonObject(row.ValueJSON),
+		})
+	}
+	return out
+}
+
+func annotationTarget(row chSemanticAnnotationRow) map[string]any {
+	return map[string]any{
+		"target_type": row.TargetType,
+		"target_id":   row.TargetID,
+		"selector":    jsonObject(row.SelectorJSON),
+	}
+}
+
+func sourceLabelID(sourceKind string) string {
+	switch sourceKind {
+	case "x_post":
+		return "source.x.post"
+	case "x_account":
+		return "source.x.profile"
+	case "x_page":
+		return "source.x.page"
+	case "google_search_page":
+		return "source.google.serp"
+	case "search_result":
+		return "source.search.result"
+	case "web_page":
+		return "source.web.page"
+	case "media":
+		return "source.media"
+	case "capture":
+		return "source.capture"
+	default:
+		if sourceKind != "" {
+			return "source." + slugLabel(sourceKind)
+		}
+		return ""
+	}
+}
+
+func modalityLabelIDs(row chEvidenceRow, observed map[string]any) []string {
+	labels := []string{}
+	text := strings.ToLower(row.Text + " " + row.Title + " " + row.CanonicalURL)
+	mediaKind := strings.ToLower(firstString(observed, "media_kind", "kind", "type"))
+	if row.Text != "" || row.Title != "" {
+		labels = append(labels, "modality.text")
+	}
+	if row.HasMedia == 1 || containsAny(mediaKind, "image", "photo", "screenshot") || containsAny(text, ".png", ".jpg", ".jpeg", ".webp", ".gif") {
+		labels = append(labels, "modality.image")
+	}
+	if containsAny(mediaKind, "video", "mp4", "mov") || containsAny(text, ".mp4", ".mov", ".webm") {
+		labels = append(labels, "modality.video")
+	}
+	if strings.Contains(text, ".pdf") || strings.Contains(mediaKind, "pdf") {
+		labels = append(labels, "modality.pdf")
+	}
+	if containsAny(text, "table", "leaderboard", "rank", "score") {
+		labels = append(labels, "modality.table")
+	}
+	if containsAny(text, "github.com", ".go", ".py", ".js", "```") {
+		labels = append(labels, "modality.code")
+	}
+	return cleanStrings(labels)
+}
+
+func contentFormLabel(row chEvidenceRow) (string, float32) {
+	haystack := strings.ToLower(strings.Join([]string{row.SourceKind, row.Domain, row.CanonicalURL, row.Title, row.Text}, " "))
+	switch row.SourceKind {
+	case "x_post":
+		return "form.social_post", 1.0
+	case "x_account":
+		return "form.social_profile", 1.0
+	case "x_page":
+		return "form.social_page", 0.95
+	case "google_search_page":
+		return "form.search_page", 0.95
+	case "search_result":
+		return "form.search_result", 1.0
+	case "media":
+		return "form.media_artifact", 0.95
+	case "capture":
+		return "form.capture", 0.9
+	}
+	switch {
+	case strings.Contains(haystack, ".pdf"):
+		return "form.pdf", 0.94
+	case strings.Contains(row.Domain, "github.com") && containsAny(haystack, "/blob/", "/tree/"):
+		return "form.github_file", 0.9
+	case strings.Contains(row.Domain, "github.com"):
+		return "form.github_repo", 0.84
+	case containsAny(haystack, "leaderboard", "rank", "score", "benchmark"):
+		return "form.leaderboard", 0.82
+	case containsAny(haystack, "docs", "documentation", "api reference", "reference"):
+		return "form.docs_page", 0.78
+	case containsAny(haystack, "pricing", "price", "$/mo", "free plan", "enterprise plan"):
+		return "form.pricing_page", 0.78
+	case containsAny(haystack, "model card", "model-card"):
+		return "form.model_card", 0.8
+	case containsAny(haystack, "blog", "release notes", "announcing", "launching"):
+		return "form.blog_post", 0.7
+	default:
+		return "form.web_page", 0.6
+	}
+}
+
+func qualityLabelIDs(row chEvidenceRow, observed map[string]any) []string {
+	labels := []string{}
+	quality := firstMap(observed, "quality")
+	for _, flag := range qualityFlags(quality) {
+		labels = append(labels, "quality."+slugLabel(flag))
+	}
+	if row.HasOCR == 1 {
+		labels = append(labels, "quality.has_ocr")
+	}
+	if row.CanonicalURL != "" && row.SourceKind == "web_page" {
+		labels = append(labels, "quality.direct_web_capture")
+	}
+	return cleanStrings(labels)
+}
+
+func actionabilityLabelIDs(row chEvidenceRow, observed map[string]any) []string {
+	labels := []string{}
+	haystack := strings.ToLower(strings.Join([]string{row.SourceKind, row.Title, row.Text, strings.Join(row.Topics, " ")}, " "))
+	quality := firstMap(observed, "quality")
+	if challengeFlag(quality) {
+		labels = append(labels, "action.review_capture")
+	}
+	if containsAny(haystack, "benchmark", "leaderboard", "score", "rank") {
+		labels = append(labels, "action.compare")
+	}
+	if containsAny(haystack, "launch", "release", "announcing", "available", "model card") {
+		labels = append(labels, "action.verify")
+	}
+	if row.SourceKind == "search_result" || len(row.Links) > 0 {
+		labels = append(labels, "action.collect_more")
+	}
+	return cleanStrings(labels)
+}
+
+func jsonObject(raw string) map[string]any {
+	var out map[string]any
+	if err := json.Unmarshal([]byte(raw), &out); err != nil {
+		return map[string]any{}
+	}
+	return out
+}
+
+func emptyToNil(s string) any {
+	if s == "" {
+		return nil
+	}
+	return s
+}
+
+func shortID(prefix string, parts ...string) string {
+	return prefix + "_" + stableHash(parts...)[:24]
+}
+
+func slugLabel(value string) string {
+	value = strings.ToLower(strings.TrimSpace(value))
+	var b strings.Builder
+	lastUnderscore := false
+	for _, r := range value {
+		isWord := (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9')
+		if isWord {
+			b.WriteRune(r)
+			lastUnderscore = false
+			continue
+		}
+		if !lastUnderscore {
+			b.WriteByte('_')
+			lastUnderscore = true
+		}
+	}
+	return strings.Trim(b.String(), "_")
+}
+
+func containsAny(s string, needles ...string) bool {
+	for _, needle := range needles {
+		if strings.Contains(s, strings.ToLower(needle)) {
+			return true
+		}
+	}
+	return false
 }
 
 func writeJSON(w http.ResponseWriter, v any) {

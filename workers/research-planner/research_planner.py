@@ -6,6 +6,7 @@ import json
 import os
 import threading
 import time
+import urllib.error
 import urllib.parse
 import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -107,8 +108,12 @@ def ch_request(cfg: Config, query: str, body: bytes | None = None) -> dict[str, 
     if cfg.clickhouse_password:
         token = base64.b64encode(f"{cfg.clickhouse_user}:{cfg.clickhouse_password}".encode()).decode()
         req.add_header("Authorization", f"Basic {token}")
-    with urllib.request.urlopen(req, timeout=30) as response:
-        raw = response.read()
+    try:
+        with urllib.request.urlopen(req, timeout=30) as response:
+            raw = response.read()
+    except urllib.error.HTTPError as exc:
+        detail = exc.read().decode("utf-8", errors="replace")[:2000]
+        raise RuntimeError(f"ClickHouse HTTP {exc.code}: {detail}") from exc
     return json.loads(raw.decode("utf-8")) if raw else {}
 
 
@@ -162,11 +167,11 @@ def recent_evidence(cfg: Config) -> list[dict[str, Any]]:
           arrayDistinct(arrayFlatten(groupArray(topics))) AS topics,
           arrayDistinct(arrayFlatten(groupArray(entities))) AS entities,
           max(captured_at) AS captured_at,
-          max(ingested_at) AS ingested_at
+          max(ingested_at) AS last_ingested_at
         FROM evidence_events
         WHERE ingested_at >= now64() - INTERVAL {cfg.lookback_hours} HOUR
         GROUP BY evidence_id
-        ORDER BY ingested_at DESC
+        ORDER BY last_ingested_at DESC
         LIMIT {cfg.candidate_limit}
         """,
     )

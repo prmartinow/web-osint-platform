@@ -1,0 +1,53 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Web OSINT Autonomous Task Event",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "task_id",
+    "question_id",
+    "task_type",
+    "task_payload",
+    "priority",
+    "budget",
+    "dedupe_key",
+    "status",
+    "rationale",
+    "created_at"
+  ],
+  "properties": {
+    "schema_version": {"const": "v1"},
+    "task_id": {"type": "string", "minLength": 1},
+    "question_id": {"type": "string"},
+    "task_type": {
+      "type": "string",
+      "enum": [
+        "google_search",
+        "open_url",
+        "search_x",
+        "monitor_entity",
+        "fetch_github",
+        "extract_pdf",
+        "compare_benchmarks",
+        "verify_claim",
+        "update_wiki",
+        "review_label"
+      ]
+    },
+    "task_payload": {"type": "object"},
+    "seed_evidence_ids": {"type": "array", "items": {"type": "string"}},
+    "seed_entity_ids": {"type": "array", "items": {"type": "string"}},
+    "priority": {"type": "number", "minimum": 0, "maximum": 1},
+    "budget": {"type": "object"},
+    "dedupe_key": {"type": "string", "minLength": 1},
+    "ttl_until": {"type": ["string", "null"], "format": "date-time"},
+    "status": {
+      "type": "string",
+      "enum": ["proposed", "queued", "running", "done", "failed", "cancelled", "expired"]
+    },
+    "rationale": {"type": "string", "minLength": 1},
+    "created_at": {"type": "string", "format": "date-time"},
+    "updated_at": {"type": "string", "format": "date-time"}
+  },
+  "additionalProperties": true
+}

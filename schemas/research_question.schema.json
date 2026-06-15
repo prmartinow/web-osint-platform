@@ -1,0 +1,59 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Web OSINT Research Question Event",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "question_id",
+    "question_text",
+    "question_type",
+    "trigger_signal_ids",
+    "seed_evidence_ids",
+    "priority",
+    "status",
+    "created_at"
+  ],
+  "properties": {
+    "schema_version": {"const": "v1"},
+    "question_id": {"type": "string", "minLength": 1},
+    "question_text": {"type": "string", "minLength": 1},
+    "question_type": {
+      "type": "string",
+      "enum": [
+        "verify_claim",
+        "explain_change",
+        "compare_entities",
+        "track_topic",
+        "fill_evidence_gap",
+        "classify_unknown",
+        "monitor_source",
+        "update_wiki"
+      ]
+    },
+    "trigger_signal_ids": {"type": "array", "items": {"type": "string"}},
+    "seed_evidence_ids": {"type": "array", "items": {"type": "string"}},
+    "seed_entity_ids": {"type": "array", "items": {"type": "string"}},
+    "seed_label_ids": {"type": "array", "items": {"type": "string"}},
+    "rationale": {"type": "string"},
+    "priority": {"type": "number", "minimum": 0, "maximum": 1},
+    "expected_value": {"type": "number", "minimum": 0, "maximum": 1},
+    "uncertainty": {"type": "number", "minimum": 0, "maximum": 1},
+    "status": {
+      "type": "string",
+      "enum": ["proposed", "active", "answered", "rejected", "stale"]
+    },
+    "suggested_tasks": {"type": "array", "items": {"type": "object"}},
+    "generator": {
+      "type": "object",
+      "properties": {
+        "name": {"type": "string"},
+        "version": {"type": "string"},
+        "activity_id": {"type": "string"}
+      },
+      "additionalProperties": true
+    },
+    "created_at": {"type": "string", "format": "date-time"},
+    "updated_at": {"type": "string", "format": "date-time"}
+  },
+  "additionalProperties": true
+}

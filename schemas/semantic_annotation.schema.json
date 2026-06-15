@@ -1,0 +1,93 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Web OSINT Semantic Annotation Event",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "annotation_id",
+    "evidence_id",
+    "target",
+    "annotation_family",
+    "label_id",
+    "taxonomy_version",
+    "confidence",
+    "status",
+    "producer",
+    "created_at"
+  ],
+  "properties": {
+    "schema_version": {"const": "v1"},
+    "annotation_id": {"type": "string", "minLength": 1},
+    "evidence_id": {"type": "string", "minLength": 1},
+    "artifact_id": {"type": ["string", "null"]},
+    "chunk_id": {"type": ["string", "null"]},
+    "target": {
+      "type": "object",
+      "required": ["target_type"],
+      "properties": {
+        "target_type": {
+          "type": "string",
+          "enum": [
+            "evidence",
+            "artifact",
+            "chunk",
+            "text_span",
+            "table_cell",
+            "table_row",
+            "image_region",
+            "video_segment",
+            "audio_segment",
+            "url",
+            "user_note_span"
+          ]
+        },
+        "target_id": {"type": "string"},
+        "selector": {"type": "object"}
+      },
+      "additionalProperties": true
+    },
+    "annotation_family": {
+      "type": "string",
+      "enum": [
+        "source",
+        "modality",
+        "content_form",
+        "topic",
+        "entity",
+        "semantic_act",
+        "claim_type",
+        "relation",
+        "stance",
+        "sentiment",
+        "evidence_quality",
+        "novelty_signal",
+        "actionability",
+        "quality"
+      ]
+    },
+    "label_id": {"type": "string", "minLength": 1},
+    "label_scheme": {"type": "string"},
+    "taxonomy_version": {"type": "integer", "minimum": 1},
+    "value": {"type": "object"},
+    "confidence": {"type": "number", "minimum": 0, "maximum": 1},
+    "score_components": {"type": "object"},
+    "status": {
+      "type": "string",
+      "enum": ["proposed", "accepted", "rejected", "superseded", "needs_review"]
+    },
+    "span_text": {"type": "string"},
+    "input_hash": {"type": "string"},
+    "producer": {
+      "type": "object",
+      "required": ["name", "version"],
+      "properties": {
+        "name": {"type": "string", "minLength": 1},
+        "version": {"type": "string", "minLength": 1},
+        "activity_id": {"type": "string"}
+      },
+      "additionalProperties": true
+    },
+    "created_at": {"type": "string", "format": "date-time"}
+  },
+  "additionalProperties": true
+}

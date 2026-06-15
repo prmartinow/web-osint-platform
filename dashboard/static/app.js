@@ -298,6 +298,7 @@ function renderFlow(data) {
     ['Redpanda', services.redpanda?.ok, 'topics'],
     ['Worker', services.normalizer?.ok, 'materialize'],
     ['Meaning', services.normalizer?.ok, `${fmtNum(services.normalizer?.data?.labels_emitted || 0)} labels`],
+    ['Research', services.research_planner?.ok, `${fmtNum(services.research_planner?.data?.tasks_created || 0)} tasks`],
     ['Filesystem', services.filesystem?.ok, 'media/OCR'],
     ['Pebble', services.normalizer?.ok, 'exact lookup'],
     ['Typesense', services.typesense?.ok, 'keyword'],
@@ -349,11 +350,13 @@ async function loadCollectors() {
 async function loadStream() {
   const data = await api('/api/stage/redpanda');
   const normalizer = data.normalizer?.data || {};
+  const planner = data.research_planner?.data || {};
   $('#streamCards').innerHTML = [
     card('Topics', fmtNum((data.topics || []).filter(t => !t.internal).length), 'Kafka namespace'),
     card('Brokers', fmtNum((data.brokers || []).length), 'active nodes'),
     card('Processed', fmtNum(normalizer.processed), 'worker counter'),
     card('Failures', fmtNum(normalizer.failed), 'worker counter', Number(normalizer.failed || 0) ? 'bad-card' : 'good-card'),
+    card('Planner tasks', fmtNum(planner.tasks_created), `${fmtNum(planner.signals_created)} signals`),
     card('Pebble keys', fmtNum(data.pebble?.data?.total_keys), 'materialized exact state'),
   ].join('');
   renderHistogram($('#streamHistogram'), data.activity || []);
@@ -372,6 +375,12 @@ async function loadStream() {
     ['Media indexed', fmtNum(normalizer.media_indexed)],
     ['Search indexed', fmtNum(normalizer.search_indexed)],
     ['Labels emitted', fmtNum(normalizer.labels_emitted)],
+    ['Planner runs', fmtNum(planner.runs)],
+    ['Planner failed', fmtNum(planner.failed), planner.failed ? 'status-error' : 'status-ok'],
+    ['Signals created', fmtNum(planner.signals_created)],
+    ['Questions created', fmtNum(planner.questions_created)],
+    ['Tasks created', fmtNum(planner.tasks_created)],
+    ['Planner last run', fmtDate(planner.last_run_at)],
   ]);
   renderTable($('#streamMetrics'), [
     { key: 'key', label: 'Topic', width: 280 },

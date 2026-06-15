@@ -24,6 +24,7 @@ CLICKHOUSE_PASSWORD = os.environ.get("CLICKHOUSE_PASSWORD", "")
 TYPESENSE_URL = os.environ.get("TYPESENSE_URL", "http://web-osint-typesense:8108").rstrip("/")
 TYPESENSE_KEY = os.environ.get("TYPESENSE_API_KEY", "")
 NORMALIZER_URL = os.environ.get("NORMALIZER_URL", "http://web-osint-normalizer:8090").rstrip("/")
+RESEARCH_PLANNER_URL = os.environ.get("RESEARCH_PLANNER_URL", "http://web-osint-research-planner:8092").rstrip("/")
 QDRANT_URL = os.environ.get("QDRANT_URL", "http://web-osint-qdrant:6333").rstrip("/")
 QDRANT_COLLECTION = os.environ.get("QDRANT_COLLECTION", "web_osint_evidence_v1")
 REDPANDA_PROXY_URL = os.environ.get("REDPANDA_PROXY_URL", "http://web-osint-redpanda:8082").rstrip("/")
@@ -302,6 +303,7 @@ def overview():
         """
     )
     normalizer = {}
+    planner = {}
     typesense = {}
     qdrant = {}
     redpanda = {}
@@ -309,6 +311,10 @@ def overview():
         normalizer = http_json(f"{NORMALIZER_URL}/stats")
     except DashboardError as exc:
         normalizer = {"error": exc.message}
+    try:
+        planner = http_json(f"{RESEARCH_PLANNER_URL}/stats")
+    except DashboardError as exc:
+        planner = {"error": exc.message}
     try:
         typesense = http_json(
             f"{TYPESENSE_URL}/collections/evidence_posts",
@@ -331,6 +337,7 @@ def overview():
         "daily": daily,
         "services": {
             "normalizer": normalizer,
+            "research_planner": planner,
             "typesense": {
                 "num_documents": typesense.get("num_documents"),
                 "name": typesense.get("name"),
@@ -385,6 +392,7 @@ def live_dashboard(params):
         "services": {
             "redpanda": service_json("redpanda", lambda: http_json(f"{REDPANDA_PROXY_URL}/brokers")),
             "normalizer": service_json("normalizer", lambda: http_json(f"{NORMALIZER_URL}/stats")),
+            "research_planner": service_json("research_planner", lambda: http_json(f"{RESEARCH_PLANNER_URL}/stats")),
             "typesense": service_json("typesense", lambda: http_json(
                 f"{TYPESENSE_URL}/collections/evidence_posts",
                 headers={"X-TYPESENSE-API-KEY": TYPESENSE_KEY},
@@ -1167,6 +1175,7 @@ def redpanda_status():
         "bytes_by_topic": prom_sum(metrics if isinstance(metrics, list) else [], "redpanda_kafka_request_bytes_total", "redpanda_topic"),
         "activity": activity_rows("24h"),
         "normalizer": service_json("normalizer", lambda: http_json(f"{NORMALIZER_URL}/stats")),
+        "research_planner": service_json("research_planner", lambda: http_json(f"{RESEARCH_PLANNER_URL}/stats")),
         "pebble": service_json("pebble", lambda: http_json(f"{NORMALIZER_URL}/pebble?limit=80")),
     }
 

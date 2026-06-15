@@ -45,6 +45,7 @@
     <button class="tab" data-view="pebble">Pebble</button>
     <button class="tab" data-view="typesense">Typesense</button>
     <button class="tab" data-view="qdrant">Qdrant</button>
+    <button class="tab" data-view="meaning">Meaning</button>
     <button class="tab" data-view="clickhouse">ClickHouse</button>
   </nav>
 
@@ -191,6 +192,42 @@
       <section class="panel">
         <h2>Metrics</h2>
         <div id="qdrantMetrics"></div>
+      </section>
+    </section>
+
+    <section id="meaning" class="view">
+      <div class="cards" id="meaningCards"></div>
+      <section class="panel">
+        <h2>Annotation Activity</h2>
+        <div id="meaningHistogram"></div>
+      </section>
+      <div class="panel-grid">
+        <section class="panel">
+          <h2>Label Families</h2>
+          <div id="meaningFamilies"></div>
+        </section>
+        <section class="panel">
+          <h2>Top Labels</h2>
+          <div id="meaningLabels"></div>
+        </section>
+      </div>
+      <section class="panel">
+        <h2>Recent Annotations</h2>
+        <div id="meaningRecent"></div>
+      </section>
+      <div class="panel-grid">
+        <section class="panel">
+          <h2>Research Questions</h2>
+          <div id="meaningQuestions"></div>
+        </section>
+        <section class="panel">
+          <h2>Autonomous Tasks</h2>
+          <div id="meaningTasks"></div>
+        </section>
+      </div>
+      <section class="panel">
+        <h2>Research Signals</h2>
+        <div id="meaningSignals"></div>
       </section>
     </section>
 

@@ -41,6 +41,7 @@ Exact lookup keys currently use these prefixes:
 - `account/<normalized_handle>`
 - `media/<media_id>`
 - `search/<sha256>`
+- `annotation/<evidence_id>/<label_id>/<annotation_id>`
 
 ## Topics
 
@@ -62,8 +63,24 @@ Error topic:
 
 - `evidence.index.errors.v1`
 
+Meaning Layer topics:
+
+- `osint.label.proposed.v1`
+- `osint.state.current_labels_by_target.v1`
+- `osint.entity.mentioned.v1`
+- `osint.claim.extracted.v1`
+- `osint.relation.extracted.v1`
+- `osint.benchmark_fact.extracted.v1`
+- `osint.release_signal.detected.v1`
+- `osint.research_signal.detected.v1`
+- `osint.research_question.proposed.v1`
+- `osint.research_task.created.v1`
+- `osint.wiki.page_materialized.v1`
+
 ## Data Ownership
 
 Redpanda topics are durable replay source. Pebble state, Typesense, Qdrant, and ClickHouse are rebuildable views. Media and OCR artifacts live under the configured data root.
 
-The normalizer consumes `evidence.capture.events.v1`, emits observed/state topics, writes materialized records to Pebble, inserts analytics rows into ClickHouse, upserts post text into Typesense, and passes Qdrant named vectors through when a collector or enrichment worker includes them.
+The normalizer consumes `evidence.capture.events.v1`, emits observed/state topics, writes materialized records to Pebble, inserts analytics rows into ClickHouse, upserts post text into Typesense, emits deterministic semantic annotations, and passes Qdrant named vectors through when a collector or enrichment worker includes them.
+
+The dashboard includes a `Meaning` tab backed by `/api/stage/meaning`. It is read-only and surfaces annotation activity, label families, recent annotations, research questions, autonomous tasks, and research signals from ClickHouse. Empty tables are treated as an empty Meaning Layer so the dashboard can run before the new schema is initialized.

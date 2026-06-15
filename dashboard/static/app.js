@@ -296,6 +296,7 @@ function renderFlow(data) {
     ['Collectors', true, 'runs'],
     ['Redpanda', services.redpanda?.ok, 'topics'],
     ['Worker', services.normalizer?.ok, 'materialize'],
+    ['Meaning', services.normalizer?.ok, `${fmtNum(services.normalizer?.data?.labels_emitted || 0)} labels`],
     ['Filesystem', services.filesystem?.ok, 'media/OCR'],
     ['Pebble', services.normalizer?.ok, 'exact lookup'],
     ['Typesense', services.typesense?.ok, 'keyword'],
@@ -369,6 +370,7 @@ async function loadStream() {
     ['Accounts indexed', fmtNum(normalizer.accounts_indexed)],
     ['Media indexed', fmtNum(normalizer.media_indexed)],
     ['Search indexed', fmtNum(normalizer.search_indexed)],
+    ['Labels emitted', fmtNum(normalizer.labels_emitted)],
   ]);
   renderTable($('#streamMetrics'), [
     { key: 'key', label: 'Topic', width: 280 },
@@ -531,6 +533,73 @@ async function runClickHouseQuery() {
   }
 }
 
+async function loadMeaningStage() {
+  const data = await api(`/api/stage/meaning?${params({ frame: frame() })}`);
+  const t = data.totals || {};
+  $('#meaningCards').innerHTML = [
+    card('Annotations', fmtNum(t.annotations), `${fmtNum(t.annotated_evidence)} evidence IDs`),
+    card('Labels', fmtNum(t.unique_labels), 'unique label ids'),
+    card('Accepted', fmtNum(t.accepted), `${fmtNum(t.proposed)} proposed`),
+    card('Avg confidence', Number(t.avg_confidence || 0).toFixed(3), 'semantic_annotations'),
+    card('Last label', fmtDate(t.last_annotation_at), 'latest annotation'),
+  ].join('');
+  renderHistogram($('#meaningHistogram'), data.histogram || []);
+  renderTable($('#meaningFamilies'), [
+    { key: 'annotation_family', label: 'Family', width: 170 },
+    { key: 'annotations', label: 'Annotations', width: 120, render: r => fmtNum(r.annotations) },
+    { key: 'labels', label: 'Labels', width: 90, render: r => fmtNum(r.labels) },
+    { key: 'evidence', label: 'Evidence', width: 100, render: r => fmtNum(r.evidence) },
+    { key: 'avg_confidence', label: 'Avg conf', width: 100 },
+    { key: 'last_seen', label: 'Last Seen', width: 180, render: r => fmtDate(r.last_seen) },
+  ], data.by_family || [], { id: 'meaning-families' });
+  renderTable($('#meaningLabels'), [
+    { key: 'annotation_family', label: 'Family', width: 150 },
+    { key: 'label_id', label: 'Label', width: 260 },
+    { key: 'status', label: 'Status', width: 110 },
+    { key: 'annotations', label: 'Rows', width: 90, render: r => fmtNum(r.annotations) },
+    { key: 'evidence', label: 'Evidence', width: 100, render: r => fmtNum(r.evidence) },
+    { key: 'avg_confidence', label: 'Avg conf', width: 100 },
+    { key: 'last_seen', label: 'Last Seen', width: 180, render: r => fmtDate(r.last_seen) },
+  ], data.top_labels || [], { id: 'meaning-labels' });
+  renderTable($('#meaningRecent'), [
+    { key: 'created_at', label: 'Created', width: 180, render: r => fmtDate(r.created_at) },
+    { key: 'annotation_family', label: 'Family', width: 150 },
+    { key: 'label_id', label: 'Label', width: 260 },
+    { key: 'status', label: 'Status', width: 110 },
+    { key: 'confidence', label: 'Conf', width: 90 },
+    { key: 'evidence_id', label: 'Evidence ID', width: 260 },
+    { key: 'target_type', label: 'Target', width: 120 },
+    { key: 'value_json', label: 'Value', width: 360, render: r => `<pre class="inline-json">${escapeHtml(r.value_json || '')}</pre>` },
+  ], data.recent || [], { id: 'meaning-recent', onRow: row => openDetail(row.annotation_id || row.label_id, 'Semantic annotation', row) });
+  renderTable($('#meaningQuestions'), [
+    { key: 'created_at', label: 'Created', width: 180, render: r => fmtDate(r.created_at) },
+    { key: 'status', label: 'Status', width: 110 },
+    { key: 'priority', label: 'Priority', width: 90 },
+    { key: 'question_type', label: 'Type', width: 160 },
+    { key: 'question_text', label: 'Question', width: 520 },
+    { key: 'rationale', label: 'Rationale', width: 460 },
+  ], data.research_questions || [], { id: 'meaning-questions', onRow: row => openDetail(row.question_id, 'Research question', row) });
+  renderTable($('#meaningTasks'), [
+    { key: 'created_at', label: 'Created', width: 180, render: r => fmtDate(r.created_at) },
+    { key: 'status', label: 'Status', width: 110 },
+    { key: 'priority', label: 'Priority', width: 90 },
+    { key: 'task_type', label: 'Task', width: 180 },
+    { key: 'question_id', label: 'Question ID', width: 260 },
+    { key: 'dedupe_key', label: 'Dedupe', width: 300 },
+    { key: 'rationale', label: 'Rationale', width: 460 },
+  ], data.autonomous_tasks || [], { id: 'meaning-tasks', onRow: row => openDetail(row.task_id, 'Autonomous task', row) });
+  renderTable($('#meaningSignals'), [
+    { key: 'created_at', label: 'Created', width: 180, render: r => fmtDate(r.created_at) },
+    { key: 'signal_type', label: 'Signal', width: 180 },
+    { key: 'primary_entity_id', label: 'Entity', width: 220 },
+    { key: 'topic_label_id', label: 'Topic', width: 220 },
+    { key: 'signal_summary', label: 'Summary', width: 520 },
+    { key: 'novelty_score', label: 'Novelty', width: 90 },
+    { key: 'uncertainty_score', label: 'Uncertainty', width: 110 },
+    { key: 'impact_score', label: 'Impact', width: 90 },
+  ], data.research_signals || [], { id: 'meaning-signals', onRow: row => openDetail(row.signal_type, 'Research signal', row) });
+}
+
 function activateView(id) {
   state.activeView = id;
   $$('.tab').forEach(tab => tab.classList.toggle('active', tab.dataset.view === id));
@@ -547,6 +616,7 @@ function loadActive() {
   if (id === 'pebble') return loadPebble();
   if (id === 'typesense') return loadTypesenseStage();
   if (id === 'qdrant') return loadQdrantStage();
+  if (id === 'meaning') return loadMeaningStage();
   if (id === 'clickhouse') return loadClickHouseStage();
 }
 

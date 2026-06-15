@@ -119,6 +119,13 @@ def ch_data(query):
     return ch_query(query).get("data", [])
 
 
+def optional_ch_data(query, fallback=None):
+    try:
+        return ch_data(query)
+    except DashboardError:
+        return [] if fallback is None else fallback
+
+
 def safe_order(value, allowed, default):
     return value if value in allowed else default
 
@@ -902,6 +909,152 @@ def clickhouse_stage(params):
     }
 
 
+def meaning_stage(params):
+    frame = params.get("frame", ["24h"])[0]
+    _, (window, bucket_minutes) = timeframe({"frame": [frame]})
+    totals = optional_ch_data(
+        """
+        SELECT
+          count() AS annotations,
+          uniqExact(evidence_id) AS annotated_evidence,
+          uniqExact(label_id) AS unique_labels,
+          countIf(status = 'accepted') AS accepted,
+          countIf(status = 'proposed') AS proposed,
+          avg(confidence) AS avg_confidence,
+          max(created_at) AS last_annotation_at
+        FROM semantic_annotations
+        """,
+        [{
+            "annotations": 0,
+            "annotated_evidence": 0,
+            "unique_labels": 0,
+            "accepted": 0,
+            "proposed": 0,
+            "avg_confidence": 0,
+            "last_annotation_at": "",
+        }],
+    )[0]
+    histogram = optional_ch_data(
+        f"""
+        SELECT
+          toStartOfInterval(created_at, INTERVAL {bucket_minutes} MINUTE) AS bucket,
+          count() AS rows,
+          uniqExact(evidence_id) AS unique_evidence
+        FROM semantic_annotations
+        WHERE created_at >= now64() - INTERVAL {window}
+        GROUP BY bucket
+        ORDER BY bucket ASC
+        """
+    )
+    by_family = optional_ch_data(
+        """
+        SELECT
+          annotation_family,
+          count() AS annotations,
+          uniqExact(label_id) AS labels,
+          uniqExact(evidence_id) AS evidence,
+          round(avg(confidence), 3) AS avg_confidence,
+          max(created_at) AS last_seen
+        FROM semantic_annotations
+        GROUP BY annotation_family
+        ORDER BY annotations DESC, annotation_family ASC
+        LIMIT 200
+        """
+    )
+    top_labels = optional_ch_data(
+        """
+        SELECT
+          annotation_family,
+          label_id,
+          status,
+          count() AS annotations,
+          uniqExact(evidence_id) AS evidence,
+          round(avg(confidence), 3) AS avg_confidence,
+          max(created_at) AS last_seen
+        FROM semantic_annotations
+        GROUP BY annotation_family, label_id, status
+        ORDER BY annotations DESC, annotation_family ASC, label_id ASC
+        LIMIT 300
+        """
+    )
+    recent = optional_ch_data(
+        """
+        SELECT
+          annotation_id,
+          created_at,
+          annotation_family,
+          label_id,
+          status,
+          confidence,
+          evidence_id,
+          target_type,
+          selector_type,
+          substring(value_json, 1, 1200) AS value_json
+        FROM semantic_annotations
+        ORDER BY created_at DESC
+        LIMIT 200
+        """
+    )
+    research_signals = optional_ch_data(
+        """
+        SELECT
+          created_at,
+          signal_type,
+          primary_entity_id,
+          topic_label_id,
+          signal_summary,
+          novelty_score,
+          uncertainty_score,
+          impact_score
+        FROM research_signals
+        ORDER BY created_at DESC
+        LIMIT 100
+        """
+    )
+    research_questions = optional_ch_data(
+        """
+        SELECT
+          created_at,
+          status,
+          priority,
+          question_type,
+          question_id,
+          question_text,
+          rationale
+        FROM research_questions
+        ORDER BY status ASC, priority DESC, created_at DESC
+        LIMIT 100
+        """
+    )
+    autonomous_tasks = optional_ch_data(
+        """
+        SELECT
+          created_at,
+          updated_at,
+          status,
+          priority,
+          task_type,
+          task_id,
+          question_id,
+          dedupe_key,
+          rationale
+        FROM autonomous_tasks
+        ORDER BY status ASC, priority DESC, created_at DESC
+        LIMIT 100
+        """
+    )
+    return {
+        "totals": totals,
+        "histogram": histogram,
+        "by_family": by_family,
+        "top_labels": top_labels,
+        "recent": recent,
+        "research_signals": research_signals,
+        "research_questions": research_questions,
+        "autonomous_tasks": autonomous_tasks,
+    }
+
+
 def safe_clickhouse_query(raw):
     query = (raw or "").strip()
     if not query:
@@ -1106,6 +1259,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self.send_json(qdrant_stage(params))
             if parsed.path == "/api/stage/clickhouse":
                 return self.send_json(clickhouse_stage(params))
+            if parsed.path == "/api/stage/meaning":
+                return self.send_json(meaning_stage(params))
             if parsed.path == "/api/facets":
                 return self.send_json(facets())
             if parsed.path == "/api/events":

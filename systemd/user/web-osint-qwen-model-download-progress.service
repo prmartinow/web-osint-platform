@@ -1,0 +1,18 @@
+[Unit]
+Description=Web OSINT Qwen model download progress log
+Documentation=file:/home/ops/dev/x-research/docs/LOCAL_INFERENCE.md
+After=web-osint-qwen-model-downloads.service
+
+[Service]
+Type=simple
+WorkingDirectory=/home/ops/dev/x-research
+Environment=WEB_OSINT_DATA_ROOT=/mnt/data/web-osint-platform
+Environment=WEB_OSINT_MODELS_DIR=/mnt/data/web-osint-platform/models
+Environment=WEB_OSINT_MODEL_LOG_DIR=/mnt/data/web-osint-platform/logs/model-downloads
+Environment=WEB_OSINT_DOWNLOAD_PROGRESS_INTERVAL=15
+ExecStart=/home/ops/dev/x-research/scripts/qwen_model_download_progress.sh
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=default.target

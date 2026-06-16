@@ -40,7 +40,15 @@ systemctl --user daemon-reload
 systemctl --user enable --now web-osint-qwen-model-downloads.service
 ```
 
-The service is verbose and resumable. It creates an isolated downloader venv on `/mnt/data`, installs `huggingface_hub[hf_xet]`, and downloads the three public model repos sequentially.
+The download service is resumable. It creates an isolated downloader venv on `/mnt/data`, installs `huggingface_hub[hf_xet]` when needed, and downloads the three public model repos sequentially.
+
+Install the companion progress service if you want live elapsed-time and transfer-rate logging:
+
+```bash
+cp systemd/user/web-osint-qwen-model-download-progress.service ~/.config/systemd/user/
+systemctl --user daemon-reload
+systemctl --user enable --now web-osint-qwen-model-download-progress.service
+```
 
 If `/home/ops/dev/huggingface.md` exists, the service extracts the first `hf_...` token from that file and exports it as `HF_TOKEN`. The token is never passed as a command-line argument.
 
@@ -48,10 +56,11 @@ Check progress:
 
 ```bash
 systemctl --user status web-osint-qwen-model-downloads.service --no-pager
-journalctl --user -fu web-osint-qwen-model-downloads.service -o cat
-tail -F /mnt/data/web-osint-platform/logs/model-downloads/latest.log
-watch -n 10 'du -sh /mnt/data/web-osint-platform/models/* 2>/dev/null; find /mnt/data/web-osint-platform/models -name "*.incomplete" -printf "%TY-%Tm-%Td %TH:%TM %s %p\n" 2>/dev/null | sort | tail -12'
+systemctl --user status web-osint-qwen-model-download-progress.service --no-pager
+tail -F /mnt/data/web-osint-platform/logs/model-downloads/latest-progress.log
 ```
+
+`latest-progress.log` is the preferred operator view. It emits timer and transfer-rate lines such as `service_elapsed=00:42:10`, `window_rate=18.32MiB/s`, `avg_rate=15.71MiB/s`, active model, socket count, per-model directory sizes, and the largest active `.incomplete` files. `latest.log` remains the raw Hugging Face CLI log and can include startup/install details or non-tail-friendly progress-bar output.
 
 Re-run or restart safely if the network drops:
 

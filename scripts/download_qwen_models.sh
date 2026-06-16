@@ -19,7 +19,7 @@ LOG_FILE="$LOG_DIR/qwen-model-downloads-$(date -u +%Y%m%dT%H%M%SZ).log"
 ln -sfn "$LOG_FILE" "$LOG_DIR/latest.log"
 exec > >(tee -a "$LOG_FILE") 2>&1
 
-export HF_HOME HF_HUB_CACHE HF_XET_CACHE HF_HUB_VERBOSITY="${HF_HUB_VERBOSITY:-debug}"
+export HF_HOME HF_HUB_CACHE HF_XET_CACHE HF_HUB_VERBOSITY="${HF_HUB_VERBOSITY:-info}"
 export PIP_DISABLE_PIP_VERSION_CHECK=1
 
 if [[ -z "${HF_TOKEN:-}" && -r "$HF_TOKEN_FILE" ]]; then
@@ -58,8 +58,16 @@ if [[ ! -x "$HF_VENV/bin/python" ]]; then
   python3 -m venv "$HF_VENV"
 fi
 
-echo "[$(date -Is)] installing/updating huggingface_hub downloader in isolated venv"
-"$HF_VENV/bin/python" -m pip install -U pip "huggingface_hub[hf_xet]"
+if "$HF_VENV/bin/python" - <<'PY' >/dev/null 2>&1
+import huggingface_hub
+import hf_xet
+PY
+then
+  echo "[$(date -Is)] Hugging Face downloader already available in isolated venv"
+else
+  echo "[$(date -Is)] installing/updating huggingface_hub downloader in isolated venv"
+  "$HF_VENV/bin/python" -m pip install -q -U pip "huggingface_hub[hf_xet]"
+fi
 
 if [[ -x "$HF_VENV/bin/hf" ]]; then
   HF_CLI=("$HF_VENV/bin/hf" download)

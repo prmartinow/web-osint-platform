@@ -100,3 +100,33 @@ docker compose --env-file .env -f compose/docker-compose.yml run --rm research-p
 ```
 
 The dashboard includes a `Meaning` tab backed by `/api/stage/meaning`. It is read-only and surfaces annotation activity, label families, recent annotations, research questions, autonomous tasks, and research signals from ClickHouse. Empty tables are treated as an empty Meaning Layer so the dashboard can run before the new schema is initialized.
+
+## Local Inference Models
+
+The default local retrieval model set is:
+
+- `Qwen/Qwen3-Embedding-8B` for 4096-dimensional text embeddings.
+- `Qwen/Qwen3-Reranker-8B` for reranking dense/BM25/metadata candidate sets.
+- `Qwen/Qwen3-VL-Embedding-8B` for experimental screenshot, chart, UI, benchmark-table, and image embeddings.
+
+Download these models asynchronously with the user-systemd service:
+
+```bash
+mkdir -p ~/.config/systemd/user
+cp systemd/user/web-osint-qwen-model-downloads.service ~/.config/systemd/user/
+systemctl --user daemon-reload
+systemctl --user enable --now web-osint-qwen-model-downloads.service
+```
+
+The service writes models, Hugging Face caches, and its isolated downloader venv under `/mnt/data/web-osint-platform`, keeping the root filesystem clean.
+
+Check progress:
+
+```bash
+systemctl --user status web-osint-qwen-model-downloads.service --no-pager
+journalctl --user -u web-osint-qwen-model-downloads.service -n 80 --no-pager
+tail -f /mnt/data/web-osint-platform/logs/model-downloads/latest.log
+du -sh /mnt/data/web-osint-platform/models/*
+```
+
+See `docs/LOCAL_INFERENCE.md` for vector layout and recovery notes.

@@ -1,0 +1,26 @@
+[Unit]
+Description=Web OSINT Qwen model downloads
+Documentation=README.md docs/LOCAL_INFERENCE.md
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/ops/dev/x-research
+Environment=WEB_OSINT_DATA_ROOT=/mnt/data/web-osint-platform
+Environment=WEB_OSINT_MODELS_DIR=/mnt/data/web-osint-platform/models
+Environment=WEB_OSINT_HF_VENV=/mnt/data/web-osint-platform/.venv-hf
+Environment=WEB_OSINT_MODEL_LOG_DIR=/mnt/data/web-osint-platform/logs/model-downloads
+Environment=WEB_OSINT_TEXT_EMBEDDING_MODEL=Qwen/Qwen3-Embedding-8B
+Environment=WEB_OSINT_RERANKER_MODEL=Qwen/Qwen3-Reranker-8B
+Environment=WEB_OSINT_VL_EMBEDDING_MODEL=Qwen/Qwen3-VL-Embedding-8B
+Environment=HF_HOME=/mnt/data/web-osint-platform/huggingface
+Environment=HF_HUB_CACHE=/mnt/data/web-osint-platform/huggingface/hub
+Environment=HF_XET_CACHE=/mnt/data/web-osint-platform/huggingface/xet
+Environment=HF_HUB_VERBOSITY=debug
+ExecStart=/home/ops/dev/x-research/scripts/download_qwen_models.sh
+Restart=on-failure
+RestartSec=60
+
+[Install]
+WantedBy=default.target

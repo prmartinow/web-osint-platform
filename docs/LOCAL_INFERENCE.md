@@ -110,7 +110,7 @@ evidence.web.documents.observed.v1
 evidence.user.inputs.observed.v1
 ```
 
-It writes vector data to Qdrant collection `web_osint_evidence_v1` using named vectors `text_dense`, `account_dense`, `ocr_dense`, and `caption_dense`, and emits vector metadata to `osint.semantic.embedded.v1`. Evidence text is capped before embedding by default so oversized pages do not monopolize CPU inference; tune `EMBEDDING_WORKER_MAX_TEXT_CHARS` and `BACKFILL_MAX_TEXT_CHARS` if a backfill needs deeper context.
+It writes vector data to Qdrant collection `web_osint_evidence_v1` using named vectors `text_dense`, `account_dense`, `ocr_dense`, and `caption_dense`, and emits vector metadata to `osint.semantic.embedded.v1`. Evidence text is capped before embedding by default so oversized pages do not monopolize CPU inference; tune `EMBEDDING_WORKER_MAX_TEXT_CHARS` and `BACKFILL_MAX_TEXT_CHARS` if a backfill needs deeper context. The ClickHouse backfill processes shorter evidence first to produce useful Qdrant coverage quickly.
 
 Operational checks:
 

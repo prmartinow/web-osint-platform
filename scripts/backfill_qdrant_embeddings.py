@@ -24,7 +24,7 @@ QDRANT_COLLECTION = os.environ.get("QDRANT_COLLECTION", "web_osint_evidence_v1")
 LIMIT = int(os.environ.get("BACKFILL_LIMIT", "0"))
 OFFSET = int(os.environ.get("BACKFILL_OFFSET", "0"))
 BATCH_SIZE = int(os.environ.get("BACKFILL_BATCH_SIZE", "1"))
-MAX_TEXT_CHARS = int(os.environ.get("BACKFILL_MAX_TEXT_CHARS", "4000"))
+MAX_TEXT_CHARS = int(os.environ.get("BACKFILL_MAX_TEXT_CHARS", "1000"))
 REQUEST_TIMEOUT = float(os.environ.get("BACKFILL_REQUEST_TIMEOUT", "600"))
 
 
@@ -82,6 +82,7 @@ SELECT
   argMax(domain, evidence_captured_at) AS domain,
   argMax(title, evidence_captured_at) AS title,
   argMax(evidence_text, evidence_captured_at) AS text,
+  argMax(length(evidence_text), evidence_captured_at) AS text_length,
   argMax(topics, evidence_captured_at) AS topics,
   argMax(entities, evidence_captured_at) AS entities,
   max(evidence_captured_at) AS captured_at,
@@ -94,7 +95,7 @@ FROM (
   WHERE length(text) > 0
 )
 GROUP BY evidence_id
-ORDER BY captured_at ASC
+ORDER BY text_length ASC, captured_at ASC
 {limit_clause}
 {offset_clause}
 FORMAT JSONEachRow

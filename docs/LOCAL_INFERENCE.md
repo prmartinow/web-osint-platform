@@ -120,3 +120,12 @@ systemctl --user status web-osint-embedding-worker.service --no-pager
 curl -fsS http://127.0.0.1:18200/healthz
 curl -fsS http://127.0.0.1:18201/stats
 ```
+
+Existing ClickHouse evidence can be backfilled into Qdrant after the model service is healthy:
+
+```bash
+systemctl --user start web-osint-qdrant-embedding-backfill.service
+journalctl --user -fu web-osint-qdrant-embedding-backfill.service -o cat
+```
+
+The backfill service is idempotent because Qdrant point IDs are deterministic from evidence IDs and source-specific prefixes.

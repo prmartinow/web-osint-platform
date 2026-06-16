@@ -1,0 +1,23 @@
+[Unit]
+Description=Web OSINT one-shot Qdrant embedding backfill
+Documentation=file:/home/ops/dev/x-research/docs/LOCAL_INFERENCE.md
+After=network-online.target web-osint-qwen-inference.service
+Wants=network-online.target web-osint-qwen-inference.service
+
+[Service]
+Type=simple
+WorkingDirectory=/home/ops/dev/x-research
+Environment=WEB_OSINT_DATA_ROOT=/mnt/data/web-osint-platform
+Environment=CLICKHOUSE_URL=http://127.0.0.1:18123
+Environment=CLICKHOUSE_DATABASE=web_osint
+Environment=CLICKHOUSE_USER=web_osint
+Environment=QWEN_INFERENCE_URL=http://127.0.0.1:18200
+Environment=QDRANT_URL=http://127.0.0.1:16333
+Environment=QDRANT_COLLECTION=web_osint_evidence_v1
+Environment=BACKFILL_BATCH_SIZE=1
+ExecStart=/mnt/data/web-osint-platform/.venv-qwen-inference/bin/python /home/ops/dev/x-research/scripts/backfill_qdrant_embeddings.py
+Restart=on-failure
+RestartSec=30
+
+[Install]
+WantedBy=default.target

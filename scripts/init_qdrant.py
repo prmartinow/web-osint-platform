@@ -8,6 +8,8 @@ from pathlib import Path
 
 CODE_ROOT = Path(os.environ.get("CODE_ROOT", Path(__file__).resolve().parents[1]))
 BASE_URL = os.environ.get("QDRANT_URL", "http://127.0.0.1:16333")
+DEFAULT_TEXT_VECTOR_SIZE = 4096
+DEFAULT_VL_VECTOR_SIZE = 4096
 
 
 def load_env(path: Path) -> dict[str, str]:
@@ -35,28 +37,101 @@ def request(method: str, path: str, body: object | None = None):
         return json.loads(raw.decode("utf-8")) if raw else None
 
 
+def env_bool(env: dict[str, str], key: str, default: bool = False) -> bool:
+    raw = os.environ.get(key) or env.get(key)
+    if raw is None:
+        return default
+    return raw.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def env_int(env: dict[str, str], key: str, default: int) -> int:
+    return int(os.environ.get(key) or env.get(key, str(default)))
+
+
+def vector_specs(env: dict[str, str]) -> dict[str, dict[str, object]]:
+    text_size = env_int(env, "QDRANT_TEXT_VECTOR_SIZE", DEFAULT_TEXT_VECTOR_SIZE)
+    vl_size = env_int(env, "QDRANT_VL_VECTOR_SIZE", DEFAULT_VL_VECTOR_SIZE)
+    return {
+        "text_dense": {"size": text_size, "distance": "Cosine"},
+        "ocr_dense": {"size": text_size, "distance": "Cosine"},
+        "caption_dense": {"size": text_size, "distance": "Cosine"},
+        "account_dense": {"size": text_size, "distance": "Cosine"},
+        "vl_image_dense": {"size": vl_size, "distance": "Cosine"},
+    }
+
+
+def existing_vectors(collection_payload: dict) -> dict[str, dict[str, object]]:
+    result = collection_payload.get("result", {})
+    config = result.get("config", {})
+    params = config.get("params", {})
+    vectors = params.get("vectors", {})
+    return vectors if isinstance(vectors, dict) else {}
+
+
+def create_collection(collection: str, vectors: dict[str, dict[str, object]]) -> None:
+    request(
+        "PUT",
+        f"/collections/{collection}",
+        {
+            "vectors": vectors,
+            "on_disk_payload": True,
+        },
+    )
+    print(f"Created Qdrant collection: {collection}")
+
+
+def ensure_vector_schema(collection: str, desired_vectors: dict[str, dict[str, object]], env: dict[str, str]) -> None:
+    current = request("GET", f"/collections/{collection}")
+    current_vectors = existing_vectors(current)
+    mismatches = []
+    missing = {}
+
+    for name, desired in desired_vectors.items():
+        current_spec = current_vectors.get(name)
+        if current_spec is None:
+            missing[name] = desired
+            continue
+        current_size = int(current_spec.get("size", 0))
+        current_distance = current_spec.get("distance")
+        if current_size != desired["size"] or current_distance != desired["distance"]:
+            mismatches.append((name, current_spec, desired))
+
+    if mismatches:
+        points_count = int(current.get("result", {}).get("points_count") or 0)
+        if points_count == 0 and env_bool(env, "QDRANT_RECREATE_EMPTY_ON_VECTOR_MISMATCH"):
+            print(f"Recreating empty Qdrant collection {collection} because vector schema changed: {mismatches}")
+            request("DELETE", f"/collections/{collection}")
+            create_collection(collection, desired_vectors)
+            return
+        details = "; ".join(
+            f"{name}: current={current_spec} desired={desired}"
+            for name, current_spec, desired in mismatches
+        )
+        raise SystemExit(
+            "Qdrant vector schema mismatch. "
+            "Set QDRANT_RECREATE_EMPTY_ON_VECTOR_MISMATCH=true only if the collection is empty, "
+            f"or create a migration/backfill plan. Details: {details}"
+        )
+
+    if missing:
+        request("PATCH", f"/collections/{collection}", {"vectors": missing})
+        print(f"Added Qdrant named vectors to {collection}: {', '.join(sorted(missing))}")
+    else:
+        print(f"Qdrant vector schema is current: {collection}")
+
+
 def main() -> None:
     env = load_env(CODE_ROOT / ".env")
-    size = int(os.environ.get("QDRANT_TEXT_VECTOR_SIZE") or env.get("QDRANT_TEXT_VECTOR_SIZE", "1536"))
     collection = os.environ.get("QDRANT_COLLECTION", "web_osint_evidence_v1")
+    desired_vectors = vector_specs(env)
 
     try:
-        request("GET", f"/collections/{collection}")
+        ensure_vector_schema(collection, desired_vectors, env)
         print(f"Qdrant collection exists: {collection}")
     except urllib.error.HTTPError as exc:
         if exc.code != 404:
             raise
-        payload = {
-            "vectors": {
-                "text_dense": {"size": size, "distance": "Cosine"},
-                "ocr_dense": {"size": size, "distance": "Cosine"},
-                "caption_dense": {"size": size, "distance": "Cosine"},
-                "account_dense": {"size": size, "distance": "Cosine"},
-            },
-            "on_disk_payload": True,
-        }
-        request("PUT", f"/collections/{collection}", payload)
-        print(f"Created Qdrant collection: {collection}")
+        create_collection(collection, desired_vectors)
 
     indexes = [
         ("evidence_id", "keyword"),

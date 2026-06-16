@@ -105,7 +105,9 @@ Pebble is a rebuildable exact-lookup view for stable IDs such as `post/<post_id>
 
 Typesense is the interactive lexical and faceted search layer.
 
-Qdrant is the semantic retrieval layer. The initial collection uses named vectors for `text_dense`, `ocr_dense`, `caption_dense`, and `account_dense`.
+Qdrant is the semantic retrieval layer. The default local inference plan uses `Qwen/Qwen3-Embedding-8B` for text embeddings and `Qwen/Qwen3-Reranker-8B` for cross-encoder reranking, with BM25/keyword/metadata filters still handled by Typesense and payload indexes. Qwen3-Embedding-8B emits native 4096-dimensional vectors, so the Qdrant collection uses 4096-dimensional named vectors for `text_dense`, `ocr_dense`, `caption_dense`, and `account_dense`.
+
+For screenshots, charts, UI captures, benchmark tables, and images where OCR may miss layout or visual context, the platform reserves an experimental multimodal vector path backed by `Qwen/Qwen3-VL-Embedding-8B`. The `vl_image_dense` named vector is also 4096-dimensional and is intended for screenshot/image-level evidence rather than ordinary text chunks.
 
 ClickHouse is the analytics layer for evidence events, entities, claims, labels, source activity, timelines, and collector health.
 

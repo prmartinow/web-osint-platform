@@ -75,21 +75,21 @@ def load_rows() -> list[dict[str, Any]]:
     query = f"""
 SELECT
   evidence_id,
-  argMax(source_kind, captured_at) AS source_kind,
-  argMax(source_project, captured_at) AS source_project,
-  argMax(canonical_url, captured_at) AS canonical_url,
-  argMax(author_handle, captured_at) AS author_handle,
-  argMax(domain, captured_at) AS domain,
-  argMax(title, captured_at) AS title,
-  argMax(evidence_text, captured_at) AS text,
-  argMax(topics, captured_at) AS topics,
-  argMax(entities, captured_at) AS entities,
-  max(captured_at) AS captured_at,
-  max(posted_at) AS posted_at,
+  argMax(source_kind, evidence_captured_at) AS source_kind,
+  argMax(source_project, evidence_captured_at) AS source_project,
+  argMax(canonical_url, evidence_captured_at) AS canonical_url,
+  argMax(author_handle, evidence_captured_at) AS author_handle,
+  argMax(domain, evidence_captured_at) AS domain,
+  argMax(title, evidence_captured_at) AS title,
+  argMax(evidence_text, evidence_captured_at) AS text,
+  argMax(topics, evidence_captured_at) AS topics,
+  argMax(entities, evidence_captured_at) AS entities,
+  max(evidence_captured_at) AS captured_at,
+  max(evidence_posted_at) AS posted_at,
   max(has_media) AS has_media,
   max(has_ocr) AS has_ocr
 FROM (
-  SELECT *, text AS evidence_text
+  SELECT *, text AS evidence_text, captured_at AS evidence_captured_at, posted_at AS evidence_posted_at
   FROM evidence_events
   WHERE length(text) > 0
 )

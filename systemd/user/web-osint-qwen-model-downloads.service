@@ -18,6 +18,7 @@ Environment=WEB_OSINT_VL_EMBEDDING_MODEL=Qwen/Qwen3-VL-Embedding-8B
 Environment=HF_HOME=/mnt/data/web-osint-platform/huggingface
 Environment=HF_HUB_CACHE=/mnt/data/web-osint-platform/huggingface/hub
 Environment=HF_XET_CACHE=/mnt/data/web-osint-platform/huggingface/xet
+Environment=HF_TOKEN_FILE=/home/ops/dev/huggingface.md
 Environment=HF_HUB_VERBOSITY=debug
 ExecStart=/home/ops/dev/x-research/scripts/download_qwen_models.sh
 Restart=on-failure

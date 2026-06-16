@@ -8,6 +8,7 @@ LOG_DIR="${WEB_OSINT_MODEL_LOG_DIR:-$DATA_ROOT/logs/model-downloads}"
 HF_HOME="${HF_HOME:-$DATA_ROOT/huggingface}"
 HF_HUB_CACHE="${HF_HUB_CACHE:-$HF_HOME/hub}"
 HF_XET_CACHE="${HF_XET_CACHE:-$HF_HOME/xet}"
+HF_TOKEN_FILE="${HF_TOKEN_FILE:-/home/ops/dev/huggingface.md}"
 
 TEXT_MODEL="${WEB_OSINT_TEXT_EMBEDDING_MODEL:-Qwen/Qwen3-Embedding-8B}"
 RERANKER_MODEL="${WEB_OSINT_RERANKER_MODEL:-Qwen/Qwen3-Reranker-8B}"
@@ -21,11 +22,35 @@ exec > >(tee -a "$LOG_FILE") 2>&1
 export HF_HOME HF_HUB_CACHE HF_XET_CACHE HF_HUB_VERBOSITY="${HF_HUB_VERBOSITY:-debug}"
 export PIP_DISABLE_PIP_VERSION_CHECK=1
 
+if [[ -z "${HF_TOKEN:-}" && -r "$HF_TOKEN_FILE" ]]; then
+  HF_TOKEN="$(
+    python3 - "$HF_TOKEN_FILE" <<'PY'
+import re
+import sys
+from pathlib import Path
+
+text = Path(sys.argv[1]).read_text(errors="replace")
+match = re.search(r"hf_[A-Za-z0-9_-]{10,}", text)
+if match:
+    print(match.group(0))
+PY
+  )"
+  if [[ -n "$HF_TOKEN" ]]; then
+    export HF_TOKEN
+    echo "[$(date -Is)] loaded Hugging Face token from $HF_TOKEN_FILE"
+  fi
+fi
+
 echo "[$(date -Is)] Web OSINT Qwen model download service starting"
 echo "data_root=$DATA_ROOT"
 echo "models_dir=$MODELS_DIR"
 echo "hf_venv=$HF_VENV"
 echo "hf_home=$HF_HOME"
+if [[ -n "${HF_TOKEN:-}" ]]; then
+  echo "hf_token_loaded=yes"
+else
+  echo "hf_token_loaded=no"
+fi
 echo "models=$TEXT_MODEL | $RERANKER_MODEL | $VL_MODEL"
 
 if [[ ! -x "$HF_VENV/bin/python" ]]; then

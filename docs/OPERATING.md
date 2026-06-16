@@ -120,6 +120,7 @@ systemctl --user enable --now web-osint-qwen-model-downloads.service
 ```
 
 The service writes models, Hugging Face caches, and its isolated downloader venv under `/mnt/data/web-osint-platform`, keeping the root filesystem clean.
+It authenticates with the first `hf_...` token found in `/home/ops/dev/huggingface.md` without printing or passing the token on the command line.
 
 Check progress:
 

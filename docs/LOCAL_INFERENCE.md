@@ -42,6 +42,8 @@ systemctl --user enable --now web-osint-qwen-model-downloads.service
 
 The service is verbose and resumable. It creates an isolated downloader venv on `/mnt/data`, installs `huggingface_hub[hf_xet]`, and downloads the three public model repos sequentially.
 
+If `/home/ops/dev/huggingface.md` exists, the service extracts the first `hf_...` token from that file and exports it as `HF_TOKEN`. The token is never passed as a command-line argument.
+
 Check progress:
 
 ```bash

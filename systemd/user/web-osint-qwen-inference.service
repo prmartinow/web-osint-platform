@@ -1,0 +1,28 @@
+[Unit]
+Description=Web OSINT Qwen local inference API
+Documentation=file:/home/ops/dev/x-research/docs/LOCAL_INFERENCE.md
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/ops/dev/x-research/workers/qwen-inference
+Environment=WEB_OSINT_DATA_ROOT=/mnt/data/web-osint-platform
+Environment=WEB_OSINT_QWEN_INFERENCE_VENV=/mnt/data/web-osint-platform/.venv-qwen-inference
+Environment=QWEN_TEXT_EMBEDDING_MODEL_DIR=/mnt/data/web-osint-platform/models/Qwen3-Embedding-8B
+Environment=QWEN_RERANKER_MODEL_DIR=/mnt/data/web-osint-platform/models/Qwen3-Reranker-8B
+Environment=QWEN_VL_EMBEDDING_MODEL_DIR=/mnt/data/web-osint-platform/models/Qwen3-VL-Embedding-8B
+Environment=QWEN_INFERENCE_DEVICE=cpu
+Environment=QWEN_INFERENCE_TORCH_THREADS=32
+Environment=QWEN_INFERENCE_BATCH_SIZE=1
+Environment=QWEN_INFERENCE_MAX_LENGTH=8192
+Environment=TOKENIZERS_PARALLELISM=false
+Environment=OMP_NUM_THREADS=32
+Environment=MKL_NUM_THREADS=32
+ExecStartPre=/home/ops/dev/x-research/scripts/init_qwen_inference_venv.sh
+ExecStart=/mnt/data/web-osint-platform/.venv-qwen-inference/bin/python -m uvicorn qwen_inference:app --host 127.0.0.1 --port 18200 --log-level info
+Restart=on-failure
+RestartSec=20
+
+[Install]
+WantedBy=default.target

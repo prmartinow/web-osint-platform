@@ -18,12 +18,15 @@ Event Log
 
 Processing
   The normalizer/materializer validates, normalizes, and fans records out.
+  The embedding worker enriches observed evidence with local Qwen vectors and
+  upserts them into Qdrant.
   The research planner derives research signals, questions, and task seeds
   from recent semantic annotations and evidence.
 
 Serving Stores
   Pebble: exact lookup
   Typesense: keyword and facet search
+  Qwen inference: CPU text embeddings, reranking, and experimental VL embeddings
   Qdrant: semantic/vector retrieval
   ClickHouse: analytics and rollups
   Filesystem: media and OCR artifacts
@@ -70,6 +73,7 @@ Meaning Layer append-only topics:
 
 ```text
 osint.semantic.segmented.v1
+osint.semantic.embedded.v1
 osint.label.proposed.v1
 osint.label.feedback.v1
 osint.label.resolved.v1

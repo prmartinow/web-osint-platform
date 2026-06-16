@@ -69,3 +69,54 @@ systemctl --user restart web-osint-qwen-model-downloads.service
 ```
 
 The Hugging Face downloader resumes already-present files instead of starting over.
+
+## Inference And Embedding Services
+
+The RPC node runs local CPU inference as user services:
+
+| Service | Port | Role |
+| --- | ---: | --- |
+| `web-osint-qwen-inference.service` | `127.0.0.1:18200` | FastAPI API for text embeddings, reranking, and experimental VL embeddings |
+| `web-osint-embedding-worker.service` | `127.0.0.1:18201` | Kafka observed-event consumer that embeds evidence text and upserts named vectors into Qdrant |
+
+Install/start:
+
+```bash
+cp systemd/user/web-osint-qwen-inference.service ~/.config/systemd/user/
+cp systemd/user/web-osint-embedding-worker.service ~/.config/systemd/user/
+systemctl --user daemon-reload
+systemctl --user enable --now web-osint-qwen-inference.service
+systemctl --user enable --now web-osint-embedding-worker.service
+```
+
+The inference service creates its Python environment under `/mnt/data/web-osint-platform/.venv-qwen-inference`, then serves:
+
+```text
+GET  /healthz
+POST /warmup
+POST /embed
+POST /v1/embeddings
+POST /rerank
+```
+
+The embedding worker consumes these observed topics:
+
+```text
+evidence.posts.observed.v1
+evidence.accounts.observed.v1
+evidence.media.observed.v1
+evidence.search.results.v1
+evidence.web.documents.observed.v1
+evidence.user.inputs.observed.v1
+```
+
+It writes vector data to Qdrant collection `web_osint_evidence_v1` using named vectors `text_dense`, `account_dense`, `ocr_dense`, and `caption_dense`, and emits vector metadata to `osint.semantic.embedded.v1`.
+
+Operational checks:
+
+```bash
+systemctl --user status web-osint-qwen-inference.service --no-pager
+systemctl --user status web-osint-embedding-worker.service --no-pager
+curl -fsS http://127.0.0.1:18200/healthz
+curl -fsS http://127.0.0.1:18201/stats
+```

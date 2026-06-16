@@ -144,6 +144,8 @@ def main() -> None:
         ("captured_at_day", "keyword"),
         ("topics", "keyword"),
         ("entities", "keyword"),
+        ("embedding_model", "keyword"),
+        ("embedding_vector_names", "keyword"),
     ]
     for field_name, field_type in indexes:
         try:

@@ -2014,7 +2014,7 @@ func vectorsFrom(observed map[string]any) map[string][]float32 {
 		root, _ = observed["embedding"].(map[string]any)
 	}
 	out := map[string][]float32{}
-	for _, name := range []string{"text_dense", "ocr_dense", "caption_dense", "account_dense"} {
+	for _, name := range []string{"text_dense", "ocr_dense", "caption_dense", "account_dense", "vl_image_dense"} {
 		vec := floatSlice(root[name])
 		if len(vec) > 0 {
 			out[name] = vec

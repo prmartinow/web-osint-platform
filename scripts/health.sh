@@ -28,5 +28,13 @@ echo "Research planner:"
 curl -fsS http://127.0.0.1:18091/healthz
 echo
 
+echo "Qwen inference:"
+curl -fsS http://127.0.0.1:18200/healthz
+echo
+
+echo "Embedding worker:"
+curl -fsS http://127.0.0.1:18201/healthz
+echo
+
 echo "Containers:"
 docker ps --filter 'name=web-osint' --format 'table {{.Names}}\t{{.Status}}\t{{.Ports}}'

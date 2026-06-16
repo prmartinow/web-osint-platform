@@ -2,7 +2,22 @@
 set -euo pipefail
 
 BROKERS="${BROKERS:-127.0.0.1:19092}"
-RPK=(docker exec web-osint-redpanda rpk topic)
+
+if [[ -z "${REDPANDA_CONTAINER:-}" ]]; then
+  for candidate in web-osint-redpanda x-research-redpanda; do
+    if docker inspect "$candidate" >/dev/null 2>&1; then
+      REDPANDA_CONTAINER="$candidate"
+      break
+    fi
+  done
+fi
+
+if [[ -z "${REDPANDA_CONTAINER:-}" ]]; then
+  echo "Could not find a Redpanda container. Set REDPANDA_CONTAINER explicitly." >&2
+  exit 1
+fi
+
+RPK=(docker exec "$REDPANDA_CONTAINER" rpk topic)
 
 create_topic() {
   local topic="$1"

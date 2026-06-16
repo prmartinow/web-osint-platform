@@ -24,7 +24,7 @@ QDRANT_COLLECTION = os.environ.get("QDRANT_COLLECTION", "web_osint_evidence_v1")
 LIMIT = int(os.environ.get("BACKFILL_LIMIT", "0"))
 OFFSET = int(os.environ.get("BACKFILL_OFFSET", "0"))
 BATCH_SIZE = int(os.environ.get("BACKFILL_BATCH_SIZE", "1"))
-MAX_TEXT_CHARS = int(os.environ.get("BACKFILL_MAX_TEXT_CHARS", "24000"))
+MAX_TEXT_CHARS = int(os.environ.get("BACKFILL_MAX_TEXT_CHARS", "4000"))
 REQUEST_TIMEOUT = float(os.environ.get("BACKFILL_REQUEST_TIMEOUT", "600"))
 
 

@@ -125,9 +125,9 @@ Check progress:
 
 ```bash
 systemctl --user status web-osint-qwen-model-downloads.service --no-pager
-journalctl --user -u web-osint-qwen-model-downloads.service -n 80 --no-pager
-tail -f /mnt/data/web-osint-platform/logs/model-downloads/latest.log
-du -sh /mnt/data/web-osint-platform/models/*
+journalctl --user -fu web-osint-qwen-model-downloads.service -o cat
+tail -F /mnt/data/web-osint-platform/logs/model-downloads/latest.log
+watch -n 10 'du -sh /mnt/data/web-osint-platform/models/* 2>/dev/null; find /mnt/data/web-osint-platform/models -name "*.incomplete" -printf "%TY-%Tm-%Td %TH:%TM %s %p\n" 2>/dev/null | sort | tail -12'
 ```
 
 See `docs/LOCAL_INFERENCE.md` for vector layout and recovery notes.

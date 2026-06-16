@@ -9,6 +9,7 @@ import sys
 import time
 import urllib.parse
 import urllib.request
+import urllib.error
 from datetime import datetime, timezone
 from typing import Any
 
@@ -60,8 +61,12 @@ def clickhouse_request(query: str) -> bytes:
     if CLICKHOUSE_PASSWORD:
         raw = f"{CLICKHOUSE_USER}:{CLICKHOUSE_PASSWORD}".encode("utf-8")
         req.add_header("Authorization", "Basic " + base64.b64encode(raw).decode("ascii"))
-    with urllib.request.urlopen(req, timeout=REQUEST_TIMEOUT) as response:
-        return response.read()
+    try:
+        with urllib.request.urlopen(req, timeout=REQUEST_TIMEOUT) as response:
+            return response.read()
+    except urllib.error.HTTPError as exc:
+        body = exc.read().decode("utf-8", errors="replace")[:2000]
+        raise RuntimeError(f"ClickHouse HTTP {exc.code}: {body}") from exc
 
 
 def load_rows() -> list[dict[str, Any]]:
@@ -76,15 +81,18 @@ SELECT
   argMax(author_handle, captured_at) AS author_handle,
   argMax(domain, captured_at) AS domain,
   argMax(title, captured_at) AS title,
-  argMax(text, captured_at) AS text,
+  argMax(evidence_text, captured_at) AS text,
   argMax(topics, captured_at) AS topics,
   argMax(entities, captured_at) AS entities,
   max(captured_at) AS captured_at,
   max(posted_at) AS posted_at,
   max(has_media) AS has_media,
   max(has_ocr) AS has_ocr
-FROM evidence_events
-WHERE length(text) > 0
+FROM (
+  SELECT *, text AS evidence_text
+  FROM evidence_events
+  WHERE length(text) > 0
+)
 GROUP BY evidence_id
 ORDER BY captured_at ASC
 {limit_clause}

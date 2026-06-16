@@ -1,6 +1,7 @@
 [Unit]
 Description=Web OSINT Qwen model downloads
-Documentation=README.md docs/LOCAL_INFERENCE.md
+Documentation=file:/home/ops/dev/x-research/docs/LOCAL_INFERENCE.md
+Documentation=https://huggingface.co/docs/huggingface_hub/guides/cli
 After=network-online.target
 Wants=network-online.target
 

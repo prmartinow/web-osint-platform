@@ -112,6 +112,7 @@ The default local retrieval model set is:
 Download these models asynchronously with the user-systemd service:
 
 ```bash
+sudo chown -R ops:ops /mnt/data/web-osint-platform
 mkdir -p ~/.config/systemd/user
 cp systemd/user/web-osint-qwen-model-downloads.service ~/.config/systemd/user/
 systemctl --user daemon-reload

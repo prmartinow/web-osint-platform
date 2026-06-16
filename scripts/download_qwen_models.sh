@@ -33,8 +33,8 @@ if [[ ! -x "$HF_VENV/bin/python" ]]; then
   python3 -m venv "$HF_VENV"
 fi
 
-echo "[$(date -Is)] installing/updating huggingface_hub CLI in isolated venv"
-"$HF_VENV/bin/python" -m pip install -U pip "huggingface_hub[cli,hf_xet]"
+echo "[$(date -Is)] installing/updating huggingface_hub downloader in isolated venv"
+"$HF_VENV/bin/python" -m pip install -U pip "huggingface_hub[hf_xet]"
 
 if [[ -x "$HF_VENV/bin/hf" ]]; then
   HF_CLI=("$HF_VENV/bin/hf" download)

@@ -33,13 +33,14 @@ The initializer refuses unsafe vector-size changes unless the existing collectio
 Install the user service on the RPC node:
 
 ```bash
+sudo chown -R ops:ops /mnt/data/web-osint-platform
 mkdir -p ~/.config/systemd/user
 cp systemd/user/web-osint-qwen-model-downloads.service ~/.config/systemd/user/
 systemctl --user daemon-reload
 systemctl --user enable --now web-osint-qwen-model-downloads.service
 ```
 
-The service is verbose and resumable. It creates an isolated downloader venv on `/mnt/data`, installs `huggingface_hub[cli,hf_xet]`, and downloads the three public model repos sequentially.
+The service is verbose and resumable. It creates an isolated downloader venv on `/mnt/data`, installs `huggingface_hub[hf_xet]`, and downloads the three public model repos sequentially.
 
 Check progress:
 

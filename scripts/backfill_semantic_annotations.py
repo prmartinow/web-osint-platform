@@ -98,22 +98,25 @@ def load_evidence() -> list[dict[str, Any]]:
         f"""
 SELECT
   evidence_id,
-  argMax(event_id, captured_at) AS event_id,
-  argMax(source_kind, captured_at) AS source_kind,
-  argMax(source_project, captured_at) AS source_project,
-  argMax(capture_method, captured_at) AS capture_method,
-  argMax(canonical_url, captured_at) AS canonical_url,
-  argMax(domain, captured_at) AS domain,
-  argMax(title, captured_at) AS title,
-  argMax(text, captured_at) AS text,
-  argMax(topics, captured_at) AS topics,
-  argMax(entities, captured_at) AS entities,
-  argMax(links, captured_at) AS links,
+  argMax(event_id, evidence_captured_at) AS event_id,
+  argMax(source_kind, evidence_captured_at) AS source_kind,
+  argMax(source_project, evidence_captured_at) AS source_project,
+  argMax(capture_method, evidence_captured_at) AS capture_method,
+  argMax(canonical_url, evidence_captured_at) AS canonical_url,
+  argMax(domain, evidence_captured_at) AS domain,
+  argMax(title, evidence_captured_at) AS title,
+  argMax(evidence_text, evidence_captured_at) AS text,
+  argMax(topics, evidence_captured_at) AS topics,
+  argMax(entities, evidence_captured_at) AS entities,
+  argMax(links, evidence_captured_at) AS links,
   max(has_media) AS has_media,
   max(has_ocr) AS has_ocr,
-  max(captured_at) AS captured_at,
-  argMax(raw_json, captured_at) AS raw_json
-FROM evidence_events
+  max(evidence_captured_at) AS captured_at,
+  argMax(raw_json, evidence_captured_at) AS raw_json
+FROM (
+  SELECT *, text AS evidence_text, captured_at AS evidence_captured_at
+  FROM evidence_events
+)
 GROUP BY evidence_id
 ORDER BY captured_at ASC, evidence_id ASC
 {limit}

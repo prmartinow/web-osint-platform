@@ -215,6 +215,21 @@ main { padding: 18px 24px 36px; }
   display: grid;
   grid-template-columns: minmax(260px, 1.5fr) repeat(4, minmax(140px, 1fr)) auto auto;
 }
+.research-search-toolbar {
+  display: grid;
+  grid-template-columns: minmax(280px, 2fr) minmax(120px, .6fr) repeat(3, minmax(120px, .7fr)) minmax(90px, auto) auto;
+}
+.check-inline {
+  min-height: 34px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 9px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--input);
+  white-space: nowrap;
+}
 input, select {
   min-height: 34px;
   padding: 6px 9px;
@@ -502,6 +517,7 @@ tbody tr:hover { background: color-mix(in srgb, var(--accent) 12%, transparent);
   .panel-grid { grid-template-columns: 1fr; }
   .fs-layout { grid-template-columns: 1fr; }
   .toolbar.multi { grid-template-columns: 1fr; }
+  .research-search-toolbar { grid-template-columns: 1fr; }
   .app-header { padding-right: 14px; flex-direction: column; }
   .header-controls { width: 100%; flex-wrap: wrap; }
   .bar-row { grid-template-columns: 80px minmax(80px, 1fr) 56px; }

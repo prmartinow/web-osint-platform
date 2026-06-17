@@ -44,6 +44,7 @@
     <button class="tab" data-view="filesystem">Filesystem</button>
     <button class="tab" data-view="pebble">Pebble</button>
     <button class="tab" data-view="typesense">Typesense</button>
+    <button class="tab" data-view="research-search">Research Search</button>
     <button class="tab" data-view="qdrant">Qdrant</button>
     <button class="tab" data-view="meaning">Meaning</button>
     <button class="tab" data-view="clickhouse">ClickHouse</button>
@@ -193,6 +194,47 @@
         <h2>Metrics</h2>
         <div id="qdrantMetrics"></div>
       </section>
+    </section>
+
+    <section id="research-search" class="view">
+      <div class="cards" id="researchSearchCards"></div>
+      <section class="panel">
+        <h2>Coordinator Query</h2>
+        <div class="toolbar research-search-toolbar">
+          <input id="researchSearchQ" type="search" value="OpenCode Hermes OpenHands coding agent harness" placeholder="Search local evidence">
+          <select id="researchSearchMode" title="Search mode">
+            <option value="hybrid" selected>Hybrid</option>
+            <option value="precision">Precision</option>
+            <option value="keyword">Keyword</option>
+            <option value="semantic">Semantic</option>
+            <option value="visual">Visual</option>
+          </select>
+          <select id="researchSearchProject"><option value="">All projects</option></select>
+          <select id="researchSearchKind"><option value="">All steps</option></select>
+          <select id="researchSearchLimit" title="Limit">
+            <option value="10">10</option>
+            <option value="20" selected>20</option>
+            <option value="50">50</option>
+          </select>
+          <label class="check-inline"><input id="researchSearchRerank" type="checkbox" checked> Rerank</label>
+          <button id="researchSearchGo">Search</button>
+        </div>
+        <div id="researchSearchMeta" class="meta-line"></div>
+      </section>
+      <section class="panel">
+        <h2>Results</h2>
+        <div id="researchSearchTable"></div>
+      </section>
+      <div class="panel-grid">
+        <section class="panel">
+          <h2>Branch Counts</h2>
+          <div id="researchSearchBranches"></div>
+        </section>
+        <section class="panel">
+          <h2>Trace / Errors</h2>
+          <pre id="researchSearchTrace" class="json-box"></pre>
+        </section>
+      </div>
     </section>
 
     <section id="meaning" class="view">

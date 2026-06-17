@@ -29,9 +29,29 @@ QDRANT_URL = os.environ.get("QDRANT_URL", "http://web-osint-qdrant:6333").rstrip
 QDRANT_COLLECTION = os.environ.get("QDRANT_COLLECTION", "web_osint_evidence_v1")
 REDPANDA_PROXY_URL = os.environ.get("REDPANDA_PROXY_URL", "http://web-osint-redpanda:8082").rstrip("/")
 REDPANDA_ADMIN_URL = os.environ.get("REDPANDA_ADMIN_URL", "http://web-osint-redpanda:9644").rstrip("/")
+QWEN_INFERENCE_URL = os.environ.get("QWEN_INFERENCE_URL", "http://127.0.0.1:18200").rstrip("/")
+RESEARCH_SEARCH_TIMEOUT_SECONDS = int(os.environ.get("RESEARCH_SEARCH_TIMEOUT_SECONDS", "300"))
+RESEARCH_QUERY_EMBEDDING_PROMPT = os.environ.get(
+    "RESEARCH_QUERY_EMBEDDING_PROMPT",
+    "Instruct: Given a web research query, retrieve relevant evidence passages that answer the query.\nQuery: ",
+)
 
 MAX_LIMIT = 500
 MAX_FILE_PREVIEW_BYTES = 1_000_000
+RESEARCH_SEARCH_MAX_LIMIT = 100
+RESEARCH_BRANCH_LIMIT = 80
+RESEARCH_RERANK_LIMIT = int(os.environ.get("RESEARCH_RERANK_LIMIT", "8"))
+RRF_K = 60
+RRF_BRANCH_WEIGHTS = {
+    "exact": 4.0,
+    "keyword": 1.2,
+    "text_dense": 1.0,
+    "ocr_dense": 0.95,
+    "vl_image_dense": 0.85,
+    "caption_dense": 0.75,
+    "account_dense": 0.6,
+    "rerank": 2.0,
+}
 PROM_SAMPLE_RE = re.compile(r"^([a-zA-Z_:][a-zA-Z0-9_:]*)(?:\{([^}]*)\})?\s+(-?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?)$")
 SAFE_SQL_PREFIXES = ("select", "with", "show", "describe", "desc", "exists")
 BLOCKED_SQL_WORDS = {
@@ -99,6 +119,22 @@ def http_json(url, headers=None, timeout=10):
             return json.loads(response.read().decode("utf-8"))
     except urllib.error.HTTPError as exc:
         detail = exc.read().decode("utf-8", errors="replace")[:1000]
+        raise DashboardError(exc.code, detail or str(exc))
+    except Exception as exc:
+        raise DashboardError(502, str(exc))
+
+
+def http_json_post(url, body, headers=None, timeout=10):
+    payload = json.dumps(body).encode("utf-8")
+    request_headers = {"Content-Type": "application/json"}
+    request_headers.update(headers or {})
+    request = urllib.request.Request(url, data=payload, method="POST", headers=request_headers)
+    try:
+        with urllib.request.urlopen(request, timeout=timeout) as response:
+            raw = response.read()
+            return json.loads(raw.decode("utf-8")) if raw else {}
+    except urllib.error.HTTPError as exc:
+        detail = exc.read().decode("utf-8", errors="replace")[:2000]
         raise DashboardError(exc.code, detail or str(exc))
     except Exception as exc:
         raise DashboardError(502, str(exc))
@@ -1063,6 +1099,562 @@ def meaning_stage(params):
     }
 
 
+def clamp_int(value, default, min_value, max_value):
+    try:
+        n = int(value)
+    except (TypeError, ValueError):
+        n = default
+    return max(min_value, min(max_value, n))
+
+
+def as_list(value):
+    if value is None:
+        return []
+    if isinstance(value, list):
+        items = value
+    elif isinstance(value, tuple):
+        items = list(value)
+    else:
+        items = [value]
+    out = []
+    for item in items:
+        if item is None:
+            continue
+        text = str(item).strip()
+        if text:
+            out.append(text)
+    return out
+
+
+def normalize_search_filters(raw):
+    raw = raw or {}
+    aliases = {
+        "source_projects": ("source_projects", "source_project", "projects", "project"),
+        "source_kinds": ("source_kinds", "source_kind", "kinds", "kind"),
+        "author_handles": ("author_handles", "author_handle", "handles", "handle"),
+        "domains": ("domains", "domain"),
+        "topics": ("topics", "topic"),
+        "entities": ("entities", "entity"),
+    }
+    filters = {}
+    for canonical, names in aliases.items():
+        values = []
+        for name in names:
+            if name in raw:
+                values.extend(as_list(raw.get(name)))
+        if values:
+            seen = set()
+            filters[canonical] = [v for v in values if not (v in seen or seen.add(v))]
+    for key in ("has_media", "has_ocr"):
+        if key in raw and raw.get(key) not in ("", None):
+            filters[key] = bool(parse_boolish(raw.get(key)))
+    for key in ("date_from", "date_to"):
+        value = str(raw.get(key, "") or "").strip()
+        if value:
+            filters[key] = value
+    return filters
+
+
+def params_to_search_body(params):
+    filters = {}
+    for key in ("source_project", "source_kind", "author_handle", "domain", "date_from", "date_to", "has_media", "has_ocr"):
+        value = params.get(key, [""])[0].strip()
+        if value:
+            filters[key] = value
+    return {
+        "query": params.get("q", [""])[0],
+        "mode": params.get("mode", ["hybrid"])[0],
+        "limit": params.get("limit", ["20"])[0],
+        "rerank": params.get("rerank", ["sync"])[0],
+        "filters": filters,
+        "include": as_list(params.get("include", [])),
+    }
+
+
+def ch_filter_where(filters):
+    clauses = []
+    exact_map = {
+        "source_projects": "source_project",
+        "source_kinds": "source_kind",
+        "domains": "domain",
+        "topics": "topics",
+        "entities": "entities",
+    }
+    for key, column in exact_map.items():
+        values = filters.get(key) or []
+        if not values:
+            continue
+        if column in {"topics", "entities"}:
+            quoted = ", ".join(sql_string(v) for v in values)
+            clauses.append(f"hasAny({column}, [{quoted}])")
+        else:
+            quoted = ", ".join(sql_string(v) for v in values)
+            clauses.append(f"{column} IN ({quoted})")
+    handles = filters.get("author_handles") or []
+    if handles:
+        quoted = ", ".join(sql_string(v.lower().lstrip("@")) for v in handles)
+        clauses.append(f"lower(author_handle) IN ({quoted})")
+    if "has_media" in filters:
+        clauses.append(f"has_media = {1 if filters['has_media'] else 0}")
+    if "has_ocr" in filters:
+        clauses.append(f"has_ocr = {1 if filters['has_ocr'] else 0}")
+    if filters.get("date_from"):
+        clauses.append(f"captured_at >= parseDateTimeBestEffort({sql_string(filters['date_from'])})")
+    if filters.get("date_to"):
+        clauses.append(f"captured_at <= parseDateTimeBestEffort({sql_string(filters['date_to'])})")
+    return " AND ".join(clauses) if clauses else "1"
+
+
+def typesense_string(value):
+    text = str(value).replace("\\", "\\\\").replace("`", "\\`")
+    return f"`{text}`"
+
+
+def typesense_filter_by(filters):
+    clauses = []
+    list_map = {
+        "source_projects": "source_projects",
+        "source_kinds": "source_kind",
+        "author_handles": "author_handle",
+        "domains": "link_hosts",
+        "topics": "topics",
+        "entities": "entities",
+    }
+    for key, field in list_map.items():
+        values = filters.get(key) or []
+        if not values:
+            continue
+        if key == "author_handles":
+            values = [v.lstrip("@") for v in values]
+        clauses.append(f"{field}:=[{','.join(typesense_string(v) for v in values)}]")
+    for key in ("has_ocr",):
+        if key in filters:
+            clauses.append(f"{key}:={str(bool(filters[key])).lower()}")
+    if "has_media" in filters:
+        clauses.append(f"has_screenshot:={str(bool(filters['has_media'])).lower()}")
+    if filters.get("date_from"):
+        epoch = date_to_epoch(filters["date_from"], start=True)
+        if epoch is not None:
+            clauses.append(f"captured_at:>={epoch}")
+    if filters.get("date_to"):
+        epoch = date_to_epoch(filters["date_to"], start=False)
+        if epoch is not None:
+            clauses.append(f"captured_at:<={epoch}")
+    return " && ".join(clauses)
+
+
+def date_to_epoch(value, start=True):
+    import datetime
+    text = str(value).strip()
+    try:
+        if re.fullmatch(r"\d{4}-\d{2}-\d{2}", text):
+            dt = datetime.datetime.fromisoformat(text)
+            if not start:
+                dt = dt.replace(hour=23, minute=59, second=59)
+        else:
+            dt = datetime.datetime.fromisoformat(text.replace("Z", "+00:00"))
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=datetime.timezone.utc)
+        return int(dt.timestamp())
+    except ValueError:
+        return None
+
+
+def qdrant_filter(filters):
+    must = []
+    list_map = {
+        "source_projects": "source_project",
+        "source_kinds": "source_kind",
+        "domains": "domain",
+        "author_handles": "author_handle",
+        "topics": "topics",
+        "entities": "entities",
+    }
+    for key, field in list_map.items():
+        values = filters.get(key) or []
+        if not values:
+            continue
+        if key == "author_handles":
+            values = [v.lstrip("@") for v in values]
+        if len(values) == 1:
+            must.append({"key": field, "match": {"value": values[0]}})
+        else:
+            must.append({"key": field, "match": {"any": values}})
+    if "has_media" in filters:
+        must.append({"key": "has_media", "match": {"value": bool(filters["has_media"])}})
+    date_from = filters.get("date_from")
+    date_to = filters.get("date_to")
+    if date_from and date_from == date_to and re.fullmatch(r"\d{4}-\d{2}-\d{2}", date_from):
+        must.append({"key": "captured_at_day", "match": {"value": date_from}})
+    return {"must": must} if must else None
+
+
+def derive_lookup_keys(query):
+    q = query.strip()
+    if not q:
+        return []
+    keys = []
+    if re.match(r"^(post|account|media|search|capture|user_input|web_document)/", q):
+        keys.append(q)
+    status = re.search(r"(?:x|twitter)\.com/[^/\s]+/status/(\d+)", q)
+    if status:
+        keys.append(f"post/{status.group(1)}")
+    if re.fullmatch(r"\d{12,25}", q):
+        keys.append(f"post/{q}")
+    if re.fullmatch(r"@?[A-Za-z0-9_]{1,30}", q):
+        keys.append(f"account/{q.lower().lstrip('@')}")
+    seen = set()
+    return [key for key in keys if not (key in seen or seen.add(key))]
+
+
+def new_candidate(evidence_id):
+    return {
+        "evidence_id": evidence_id,
+        "branch_ranks": {},
+        "branch_scores": {},
+        "sources": {},
+        "rrf_score": 0.0,
+        "final_score": 0.0,
+    }
+
+
+def add_candidate(candidates, evidence_id, branch, rank, score=None, payload=None):
+    if not evidence_id:
+        return
+    candidate = candidates.setdefault(evidence_id, new_candidate(evidence_id))
+    existing = candidate["branch_ranks"].get(branch)
+    if existing is None or rank < existing:
+        candidate["branch_ranks"][branch] = rank
+        if score is not None:
+            candidate["branch_scores"][branch] = score
+        if payload is not None:
+            candidate["sources"][branch] = payload
+
+
+def exact_candidates(query, filters, branch_limit):
+    rows = []
+    candidates = []
+    errors = []
+    lookup_keys = derive_lookup_keys(query)
+    for key in lookup_keys[:5]:
+        try:
+            value = http_json(f"{NORMALIZER_URL}/lookup?{urllib.parse.urlencode({'key': key})}", timeout=10)
+            evidence_id = value.get("id") or value.get("value", {}).get("evidence_id")
+            if evidence_id:
+                candidates.append({"evidence_id": evidence_id, "lookup_key": key, "lookup": value})
+        except DashboardError as exc:
+            errors.append({"branch": "exact", "key": key, "error": exc.message})
+    if query:
+        where = ch_filter_where(filters)
+        q_sql = sql_string(query)
+        handle_sql = sql_string(query.lower().lstrip("@"))
+        rows = optional_ch_data(
+            f"""
+            SELECT evidence_id, event_id, source_kind, source_project, canonical_url, author_handle,
+                   title, substring(text, 1, 1200) AS text, captured_at, ingested_at
+            FROM evidence_events
+            WHERE ({where}) AND (
+              evidence_id = {q_sql}
+              OR canonical_url = {q_sql}
+              OR lower(author_handle) = {handle_sql}
+            )
+            ORDER BY ingested_at DESC
+            LIMIT {branch_limit}
+            """
+        )
+    for row in rows:
+        candidates.append({"evidence_id": row.get("evidence_id"), "row": row})
+    return candidates, errors
+
+
+def typesense_candidates(query, filters, branch_limit):
+    q = query.strip() or "*"
+    search = {
+        "q": q,
+        "query_by": "text,canonical_url,author_handle,author_name,entities,topics,links",
+        "per_page": str(min(branch_limit, 100)),
+        "page": "1",
+        "prioritize_exact_match": "true",
+        "exhaustive_search": "true",
+    }
+    filter_by = typesense_filter_by(filters)
+    if filter_by:
+        search["filter_by"] = filter_by
+    url = f"{TYPESENSE_URL}/collections/evidence_posts/documents/search?{urllib.parse.urlencode(search)}"
+    data = http_json(url, headers={"X-TYPESENSE-API-KEY": TYPESENSE_KEY}, timeout=20)
+    return data.get("hits", []), data
+
+
+def embed_search_query(query, model="text"):
+    body = {
+        "inputs": [query],
+        "model": model,
+        "prompt": RESEARCH_QUERY_EMBEDDING_PROMPT,
+        "normalize": True,
+        "batch_size": 1,
+    }
+    data = http_json_post(
+        f"{QWEN_INFERENCE_URL}/embed",
+        body,
+        timeout=RESEARCH_SEARCH_TIMEOUT_SECONDS,
+    )
+    rows = data.get("data") or []
+    if not rows:
+        raise DashboardError(502, "Qwen embedding service returned no vectors")
+    return rows[0].get("embedding"), data
+
+
+def qdrant_vector_candidates(vector, vector_name, filters, branch_limit):
+    body = {
+        "vector": {"name": vector_name, "vector": vector},
+        "limit": branch_limit,
+        "with_payload": True,
+        "with_vector": False,
+    }
+    qfilter = qdrant_filter(filters)
+    if qfilter:
+        body["filter"] = qfilter
+    data = http_json_post(
+        f"{QDRANT_URL}/collections/{QDRANT_COLLECTION}/points/search",
+        body,
+        timeout=RESEARCH_SEARCH_TIMEOUT_SECONDS,
+    )
+    return data.get("result", []), data
+
+
+def hydrate_evidence(evidence_ids):
+    if not evidence_ids:
+        return {}
+    chunks = []
+    for idx in range(0, len(evidence_ids), 80):
+        ids = evidence_ids[idx:idx + 80]
+        quoted = ", ".join(sql_string(eid) for eid in ids)
+        chunks.extend(optional_ch_data(
+            f"""
+            SELECT
+              evidence_id,
+              argMax(event_id, ingested_at) AS event_id,
+              argMax(collector_run_id, ingested_at) AS collector_run_id,
+              argMax(source_project, ingested_at) AS source_project,
+              argMax(capture_method, ingested_at) AS capture_method,
+              argMax(source_kind, ingested_at) AS source_kind,
+              argMax(canonical_url, ingested_at) AS canonical_url,
+              argMax(author_handle, ingested_at) AS author_handle,
+              argMax(domain, ingested_at) AS domain,
+              argMax(title, ingested_at) AS title,
+              argMax(text, ingested_at) AS text,
+              argMax(topics, ingested_at) AS topics,
+              argMax(entities, ingested_at) AS entities,
+              argMax(links, ingested_at) AS links,
+              argMax(has_media, ingested_at) AS has_media,
+              argMax(has_ocr, ingested_at) AS has_ocr,
+              argMax(posted_at, ingested_at) AS posted_at,
+              max(captured_at) AS captured_at,
+              max(ingested_at) AS ingested_at
+            FROM evidence_events
+            WHERE evidence_id IN ({quoted})
+            GROUP BY evidence_id
+            """
+        ))
+    return {row.get("evidence_id"): row for row in chunks}
+
+
+def document_for_rerank(hit):
+    parts = [
+        hit.get("title") or "",
+        hit.get("snippet") or "",
+        hit.get("canonical_url") or "",
+        " ".join(hit.get("topics") or []),
+        " ".join(hit.get("entities") or []),
+    ]
+    return "\n".join(part for part in parts if part)[:5000]
+
+
+def apply_rerank(query, hits, rerank_limit):
+    if not query or not hits or rerank_limit <= 0:
+        return {"enabled": False, "elapsed_ms": 0, "model": "", "results": []}
+    slice_hits = hits[:rerank_limit]
+    documents = [document_for_rerank(hit) for hit in slice_hits]
+    data = http_json_post(
+        f"{QWEN_INFERENCE_URL}/rerank",
+        {"query": query, "documents": documents, "normalize": False},
+        timeout=RESEARCH_SEARCH_TIMEOUT_SECONDS,
+    )
+    for rank, item in enumerate(data.get("results", []), start=1):
+        idx = item.get("index")
+        if idx is None or idx >= len(slice_hits):
+            continue
+        hit = slice_hits[idx]
+        hit["scores"]["rerank"] = item.get("score")
+        hit["scores"]["branches"]["rerank"] = item.get("score")
+        hit["scores"]["branch_ranks"]["rerank"] = rank
+        hit["scores"]["fused"] += RRF_BRANCH_WEIGHTS["rerank"] / (RRF_K + rank)
+        hit["scores"]["final"] = hit["scores"]["fused"]
+    hits.sort(key=lambda row: row["scores"]["final"], reverse=True)
+    return {
+        "enabled": True,
+        "elapsed_ms": data.get("elapsed_ms", 0),
+        "model": data.get("model", ""),
+        "results": [
+            {
+                "evidence_id": slice_hits[item.get("index", 0)].get("evidence_id"),
+                "rank": rank,
+                "score": item.get("score"),
+            }
+            for rank, item in enumerate(data.get("results", []), start=1)
+            if item.get("index") is not None and item.get("index") < len(slice_hits)
+        ],
+    }
+
+
+def research_search(body):
+    query = str(body.get("query", "") or "").strip()
+    if not query:
+        raise DashboardError(400, "query is required")
+    mode = str(body.get("mode") or "hybrid").strip().lower()
+    if mode not in {"hybrid", "keyword", "semantic", "visual", "precision"}:
+        mode = "hybrid"
+    limit = clamp_int(body.get("limit"), 20, 1, RESEARCH_SEARCH_MAX_LIMIT)
+    branch_limit = min(RESEARCH_BRANCH_LIMIT, max(limit * 4, 20))
+    filters = normalize_search_filters(body.get("filters") or {})
+    rerank_mode = str(body.get("rerank") or ("sync" if mode in {"hybrid", "precision"} else "off")).lower()
+    if mode == "precision":
+        rerank_mode = "sync"
+    include = set(as_list(body.get("include")))
+
+    candidates = {}
+    branch_counts = {}
+    branch_errors = []
+    trace = []
+    embedding_meta = None
+
+    exact_rows, errors = exact_candidates(query, filters, branch_limit)
+    branch_errors.extend(errors)
+    branch_counts["exact"] = len(exact_rows)
+    for rank, row in enumerate(exact_rows, start=1):
+        add_candidate(candidates, row.get("evidence_id"), "exact", rank, 1.0, row)
+
+    if mode in {"hybrid", "keyword", "precision"}:
+        try:
+            hits, metadata = typesense_candidates(query, filters, branch_limit)
+            branch_counts["keyword"] = len(hits)
+            trace.append({"branch": "keyword", "found": metadata.get("found"), "search_time_ms": metadata.get("search_time_ms")})
+            for rank, hit in enumerate(hits, start=1):
+                doc = hit.get("document") or {}
+                add_candidate(candidates, doc.get("id"), "keyword", rank, hit.get("text_match"), hit)
+        except DashboardError as exc:
+            branch_errors.append({"branch": "keyword", "error": exc.message})
+
+    if mode in {"hybrid", "semantic", "visual", "precision"}:
+        try:
+            vector_model = "vl" if mode == "visual" else "text"
+            vector, embedding_meta = embed_search_query(query, vector_model)
+            vector_branches = ["text_dense", "ocr_dense", "caption_dense", "account_dense"]
+            if mode == "visual":
+                vector_branches = ["vl_image_dense", "caption_dense", "ocr_dense", "text_dense"]
+            for branch in vector_branches:
+                try:
+                    rows, metadata = qdrant_vector_candidates(vector, branch, filters, branch_limit)
+                    branch_counts[branch] = len(rows)
+                    trace.append({"branch": branch, "time": metadata.get("time"), "rows": len(rows)})
+                    for rank, row in enumerate(rows, start=1):
+                        payload = row.get("payload") or {}
+                        add_candidate(candidates, payload.get("evidence_id"), branch, rank, row.get("score"), row)
+                except DashboardError as exc:
+                    branch_errors.append({"branch": branch, "error": exc.message})
+        except DashboardError as exc:
+            branch_errors.append({"branch": "embedding", "error": exc.message})
+
+    for candidate in candidates.values():
+        total = 0.0
+        for branch, rank in candidate["branch_ranks"].items():
+            total += RRF_BRANCH_WEIGHTS.get(branch, 1.0) / (RRF_K + rank)
+        candidate["rrf_score"] = total
+        candidate["final_score"] = total
+
+    ranked = sorted(candidates.values(), key=lambda row: row["final_score"], reverse=True)
+    hydrated = hydrate_evidence([row["evidence_id"] for row in ranked[: max(limit, RESEARCH_RERANK_LIMIT)]])
+    hits = []
+    for candidate in ranked:
+        row = hydrated.get(candidate["evidence_id"], {})
+        if not row:
+            for source in candidate["sources"].values():
+                doc = source.get("document") if isinstance(source, dict) else None
+                payload = source.get("payload") if isinstance(source, dict) else None
+                if doc:
+                    row = {
+                        "evidence_id": doc.get("id"),
+                        "source_kind": doc.get("source_kind"),
+                        "source_project": ", ".join(doc.get("source_projects") or []),
+                        "canonical_url": doc.get("canonical_url"),
+                        "author_handle": doc.get("author_handle"),
+                        "title": doc.get("title") or "",
+                        "text": doc.get("text") or "",
+                        "topics": doc.get("topics") or [],
+                        "entities": doc.get("entities") or [],
+                        "captured_at": doc.get("captured_at"),
+                    }
+                    break
+                if payload:
+                    row = payload
+                    break
+        text = row.get("text") or ""
+        snippet = text[:900] + ("..." if len(text) > 900 else "")
+        hit = {
+            "evidence_id": candidate["evidence_id"],
+            "source_kind": row.get("source_kind", ""),
+            "source_project": row.get("source_project", ""),
+            "title": row.get("title", ""),
+            "canonical_url": row.get("canonical_url", ""),
+            "author_handle": row.get("author_handle", ""),
+            "domain": row.get("domain", ""),
+            "snippet": snippet,
+            "topics": row.get("topics") or [],
+            "entities": row.get("entities") or [],
+            "links": row.get("links") or [],
+            "has_media": bool(row.get("has_media")) if row.get("has_media") is not None else None,
+            "has_ocr": bool(row.get("has_ocr")) if row.get("has_ocr") is not None else None,
+            "posted_at": row.get("posted_at"),
+            "captured_at": row.get("captured_at"),
+            "ingested_at": row.get("ingested_at"),
+            "scores": {
+                "final": candidate["final_score"],
+                "fused": candidate["rrf_score"],
+                "branches": candidate["branch_scores"],
+                "branch_ranks": candidate["branch_ranks"],
+            },
+        }
+        if "ranking_trace" in include:
+            hit["ranking_trace"] = candidate["sources"]
+        hits.append(hit)
+
+    rerank = {"enabled": False}
+    if rerank_mode in {"sync", "true", "1", "yes"} and hits:
+        try:
+            rerank = apply_rerank(query, hits, min(RESEARCH_RERANK_LIMIT, len(hits)))
+        except DashboardError as exc:
+            rerank = {"enabled": False, "error": exc.message}
+
+    return {
+        "query": query,
+        "mode": mode,
+        "filters": filters,
+        "limit": limit,
+        "returned": len(hits[:limit]),
+        "candidate_count": len(candidates),
+        "branch_counts": branch_counts,
+        "branch_errors": branch_errors,
+        "embedding": {
+            "model": embedding_meta.get("model") if embedding_meta else "",
+            "dimension": embedding_meta.get("dimension") if embedding_meta else 0,
+            "elapsed_ms": embedding_meta.get("elapsed_ms") if embedding_meta else 0,
+        },
+        "rerank": rerank,
+        "trace": trace if "ranking_trace" in include else [],
+        "hits": hits[:limit],
+    }
+
+
 def safe_clickhouse_query(raw):
     query = (raw or "").strip()
     if not query:
@@ -1282,6 +1874,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self.send_json({"rows": latest_runs()})
             if parsed.path == "/api/search":
                 return self.send_json(type_search(params))
+            if parsed.path == "/api/research/search":
+                return self.send_json(research_search(params_to_search_body(params)))
             if parsed.path == "/api/lookup":
                 return self.send_json(lookup(params))
             if parsed.path == "/api/media-index":
@@ -1320,15 +1914,17 @@ class Handler(BaseHTTPRequestHandler):
     def do_POST(self):
         parsed = urllib.parse.urlparse(self.path)
         try:
-            if parsed.path != "/api/clickhouse/query":
-                raise DashboardError(404, "not found")
             length = min(int(self.headers.get("Content-Length", "0") or "0"), 100_000)
             payload = self.rfile.read(length)
             try:
                 body = json.loads(payload.decode("utf-8") or "{}")
             except json.JSONDecodeError:
                 raise DashboardError(400, "invalid JSON body")
-            return self.send_json(safe_clickhouse_query(body.get("query", "")))
+            if parsed.path == "/api/clickhouse/query":
+                return self.send_json(safe_clickhouse_query(body.get("query", "")))
+            if parsed.path == "/api/research/search":
+                return self.send_json(research_search(body))
+            raise DashboardError(404, "not found")
         except DashboardError as exc:
             return self.send_json({"error": exc.message}, exc.status)
         except Exception as exc:

@@ -160,6 +160,7 @@ services:
       TYPESENSE_URL: http://web-osint-typesense:8108
       QDRANT_URL: http://web-osint-qdrant:6333
       QDRANT_COLLECTION: web_osint_evidence_v1
+      QWEN_INFERENCE_URL: ${QWEN_INFERENCE_URL:-http://host.docker.internal:18200}
       NORMALIZER_URL: http://web-osint-normalizer:8090
       RESEARCH_PLANNER_URL: http://web-osint-research-planner:8092
       REDPANDA_PROXY_URL: http://web-osint-redpanda:8082
@@ -170,6 +171,8 @@ services:
       DASHBOARD_PORT: "8091"
     ports:
       - "${WEB_OSINT_DASHBOARD_BIND:-127.0.0.1}:18191:8091"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     volumes:
       - ${WEB_OSINT_DATA_ROOT:-/mnt/data/web-osint-platform}:${WEB_OSINT_DATA_ROOT:-/mnt/data/web-osint-platform}:ro
     depends_on:

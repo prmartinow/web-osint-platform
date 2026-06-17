@@ -254,6 +254,8 @@ async function loadFacets() {
   state.facets = await api('/api/facets');
   fillSelect($('#typesenseProject'), state.facets.source_project, 'All projects');
   fillSelect($('#typesenseKind'), state.facets.source_kind, 'All steps', stageLabel);
+  fillSelect($('#researchSearchProject'), state.facets.source_project, 'All projects');
+  fillSelect($('#researchSearchKind'), state.facets.source_kind, 'All steps', stageLabel);
 }
 
 function fillSelect(select, rows, allLabel, labelFn = x => x) {
@@ -495,6 +497,70 @@ async function loadTypesenseSearch() {
   ], rows, { id: 'typesense-search', onRow: row => openDetail(row.id, 'Typesense document', row) });
 }
 
+async function loadResearchSearch() {
+  const query = $('#researchSearchQ').value.trim();
+  if (!query) {
+    $('#researchSearchMeta').textContent = 'Enter a query.';
+    return;
+  }
+  const filters = {};
+  if ($('#researchSearchProject').value) filters.source_projects = [$('#researchSearchProject').value];
+  if ($('#researchSearchKind').value) filters.source_kinds = [$('#researchSearchKind').value];
+  $('#researchSearchMeta').textContent = 'Searching local evidence...';
+  $('#researchSearchTable').innerHTML = '';
+  $('#researchSearchTrace').textContent = '';
+  const started = performance.now();
+  try {
+    const data = await apiPost('/api/research/search', {
+      query,
+      mode: $('#researchSearchMode').value,
+      limit: Number($('#researchSearchLimit').value || 20),
+      rerank: $('#researchSearchRerank').checked ? 'sync' : 'off',
+      filters,
+      include: ['ranking_trace'],
+    });
+    const elapsed = Math.round(performance.now() - started);
+    $('#researchSearchCards').innerHTML = [
+      card('Returned', fmtNum(data.returned), `${fmtNum(data.candidate_count)} candidates`),
+      card('Embedding', data.embedding?.model || 'none', `${fmtNum(data.embedding?.dimension)} dim · ${fmtNum(data.embedding?.elapsed_ms)} ms`),
+      card('Rerank', data.rerank?.enabled ? 'on' : 'off', data.rerank?.error || `${data.rerank?.model || ''} ${fmtNum(data.rerank?.elapsed_ms)} ms`, data.rerank?.error ? 'warn-card' : ''),
+      card('Errors', fmtNum((data.branch_errors || []).length), 'branch errors', (data.branch_errors || []).length ? 'warn-card' : 'good-card'),
+    ].join('');
+    $('#researchSearchMeta').textContent = `${fmtNum(data.returned)} results in ${fmtNum(elapsed)} ms. Mode: ${data.mode}.`;
+    renderTable($('#researchSearchTable'), [
+      { key: 'scores', label: 'Score', width: 110, render: r => Number(r.scores?.final || 0).toFixed(4) },
+      { key: 'source_kind', label: 'Stage', width: 135, render: r => stageLabel(r.source_kind) },
+      { key: 'source_project', label: 'Project', width: 140 },
+      { key: 'title', label: 'Title', width: 280 },
+      { key: 'snippet', label: 'Snippet', width: 520, render: r => `<div class="cell-snippet">${escapeHtml(r.snippet || '')}</div>` },
+      { key: 'canonical_url', label: 'URL', width: 300, render: r => linkCell(r.canonical_url) },
+      { key: 'author_handle', label: 'Author', width: 130 },
+      { key: 'branch_ranks', label: 'Branches', width: 260, render: r => branchPills(r.scores?.branch_ranks || {}) },
+      { key: 'captured_at', label: 'Captured', width: 180, render: r => fmtDate(r.captured_at) },
+    ], data.hits || [], { id: 'research-search-results', onRow: row => openDetail(row.evidence_id, 'Research search hit', row) });
+    renderDynamicTable(
+      $('#researchSearchBranches'),
+      Object.entries(data.branch_counts || {}).map(([branch, rows]) => ({ branch, rows })),
+      'research-search-branches',
+    );
+    $('#researchSearchTrace').textContent = JSON.stringify({
+      branch_errors: data.branch_errors || [],
+      trace: data.trace || [],
+      rerank: data.rerank || {},
+    }, null, 2);
+  } catch (err) {
+    $('#researchSearchMeta').textContent = err.message;
+    $('#researchSearchCards').innerHTML = card('Search failed', 'error', err.message, 'bad-card');
+  }
+}
+
+function branchPills(ranks) {
+  return Object.entries(ranks || {})
+    .sort((a, b) => Number(a[1]) - Number(b[1]))
+    .map(([branch, rank]) => `<span class="pill">${escapeHtml(branch)} #${escapeHtml(rank)}</span>`)
+    .join('');
+}
+
 async function loadQdrantStage() {
   const data = await api(`/api/stage/qdrant?${params({ frame: frame() })}`);
   const result = data.collection?.result || {};
@@ -625,6 +691,7 @@ function loadActive() {
   if (id === 'filesystem') return loadFilesystem();
   if (id === 'pebble') return loadPebble();
   if (id === 'typesense') return loadTypesenseStage();
+  if (id === 'research-search') return loadResearchSearch();
   if (id === 'qdrant') return loadQdrantStage();
   if (id === 'meaning') return loadMeaningStage();
   if (id === 'clickhouse') return loadClickHouseStage();
@@ -642,6 +709,13 @@ function bindEvents() {
   $('#typesenseQ').addEventListener('keydown', ev => { if (ev.key === 'Enter') loadTypesenseSearch(); });
   $('#typesenseProject').addEventListener('change', loadTypesenseSearch);
   $('#typesenseKind').addEventListener('change', loadTypesenseSearch);
+  $('#researchSearchGo').addEventListener('click', loadResearchSearch);
+  $('#researchSearchQ').addEventListener('keydown', ev => { if (ev.key === 'Enter') loadResearchSearch(); });
+  $('#researchSearchMode').addEventListener('change', loadResearchSearch);
+  $('#researchSearchProject').addEventListener('change', loadResearchSearch);
+  $('#researchSearchKind').addEventListener('change', loadResearchSearch);
+  $('#researchSearchLimit').addEventListener('change', loadResearchSearch);
+  $('#researchSearchRerank').addEventListener('change', loadResearchSearch);
   $('#chRun').addEventListener('click', runClickHouseQuery);
   $('#chPlay').addEventListener('click', () => { $('#clickhouseFrame').src = '/clickhouse/play'; });
   $('#chDashboard').addEventListener('click', () => { $('#clickhouseFrame').src = '/clickhouse/dashboard'; });

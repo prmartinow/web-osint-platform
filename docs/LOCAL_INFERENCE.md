@@ -93,11 +93,23 @@ The inference service creates its Python environment under `/mnt/data/web-osint-
 
 ```text
 GET  /healthz
+GET  /metrics
 POST /warmup
 POST /embed
 POST /v1/embeddings
 POST /rerank
 ```
+
+The service enforces CPU-friendly guardrails at the API boundary:
+
+| Operation | Default policy |
+| --- | --- |
+| Offline/chunk embedding | concurrency `1`, queue `64`, queue wait `300s` |
+| Query embedding | concurrency `1`, queue `4`, queue wait `60s` |
+| Rerank | concurrency `1`, queue `2`, queue wait `240s`, max `5` candidates |
+| VL embedding | concurrency `1`, queue `16`, queue wait `300s` |
+
+Rerank is intentionally a precision path, not a broad recall path. Feed it small candidate sets after keyword/vector/metadata retrieval. Oversized queries, candidate lists, and candidate texts are rejected with `413` rather than silently truncated.
 
 The embedding worker consumes these observed topics:
 
@@ -118,6 +130,7 @@ Operational checks:
 systemctl --user status web-osint-qwen-inference.service --no-pager
 systemctl --user status web-osint-embedding-worker.service --no-pager
 curl -fsS http://127.0.0.1:18200/healthz
+curl -fsS http://127.0.0.1:18200/metrics
 curl -fsS http://127.0.0.1:18201/stats
 ```
 

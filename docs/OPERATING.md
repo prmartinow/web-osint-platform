@@ -153,9 +153,40 @@ Check progress:
 
 ```bash
 systemctl --user status web-osint-qwen-model-downloads.service --no-pager
-journalctl --user -fu web-osint-qwen-model-downloads.service -o cat
-tail -F /mnt/data/web-osint-platform/logs/model-downloads/latest.log
-watch -n 10 'du -sh /mnt/data/web-osint-platform/models/* 2>/dev/null; find /mnt/data/web-osint-platform/models -name "*.incomplete" -printf "%TY-%Tm-%Td %TH:%TM %s %p\n" 2>/dev/null | sort | tail -12'
+systemctl --user status web-osint-qwen-model-download-progress.service --no-pager
+tail -F /mnt/data/web-osint-platform/logs/model-downloads/latest-progress.log
 ```
 
 See `docs/LOCAL_INFERENCE.md` for vector layout and recovery notes.
+
+## End-To-End Canary
+
+Use the end-to-end canary after pipeline, inference, or dashboard changes. It creates a synthetic Markdown research document under `/mnt/data`, publishes it to Redpanda through the normal manual-document capture path, then waits for:
+
+```text
+capture_event -> observed user_input row -> embedding audit topic -> Qdrant point -> dashboard research search hit
+```
+
+Run it from the RPC live tree:
+
+```bash
+cd /home/ops/dev/x-research
+python3 scripts/run_e2e_canary.py --env-file .env
+```
+
+Exit codes:
+
+- `0`: pass.
+- `1`: pipeline failed before all expected stages appeared.
+- `2`: local configuration error.
+- `3`: required dependency unavailable.
+
+The canary writes durable operator artifacts:
+
+```text
+/mnt/data/x-research/canaries/runs/<run_id>.json
+/mnt/data/x-research/metrics/e2e_canary.prom
+ClickHouse: ops_canary_runs, ops_canary_steps
+```
+
+The JSON result is the detailed evidence trail. The Prometheus textfile is the lightweight health signal for dashboards or later scraping.

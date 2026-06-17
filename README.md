@@ -72,8 +72,9 @@ curl 'http://127.0.0.1:18090/lookup?key=post/1234567890'
 
 - [Architecture](docs/ARCHITECTURE.md)
 - [Operations](docs/OPERATING.md)
+- [Local Inference](docs/LOCAL_INFERENCE.md)
 - [Sanitization](docs/SANITIZATION.md)
 
 ## Status
 
-This is an early infrastructure baseline. The current implementation includes the streaming backbone, materializer, exact lookup, search, vector-store initialization, analytics schema, deterministic labeling, research-planning seed generation, and smoke-test producer path. Real collectors and richer enrichment workers should be added on top of the existing event schemas.
+This is an early infrastructure baseline. The current implementation includes the streaming backbone, materializer, exact lookup, search, vector-store initialization, local Qwen inference, Qdrant embedding enrichment, analytics schema, deterministic labeling, research-planning seed generation, dashboard research search, and an end-to-end ingestion canary. Real collectors and richer media/OCR/VL enrichment workers should be added on top of the existing event schemas.

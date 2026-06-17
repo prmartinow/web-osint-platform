@@ -454,3 +454,47 @@ CREATE TABLE IF NOT EXISTS web_osint.label_eval_results
 ENGINE = MergeTree
 PARTITION BY toYYYYMM(created_at)
 ORDER BY (labeler_name, labeler_version, annotation_family, label_id);
+
+CREATE TABLE IF NOT EXISTS web_osint.ops_canary_runs
+(
+    run_id String,
+    status LowCardinality(String),
+    started_at DateTime64(3, 'UTC'),
+    finished_at DateTime64(3, 'UTC'),
+    duration_ms UInt64,
+    canary_token String,
+    source_project LowCardinality(String),
+    collector_run_id String,
+    input_path String,
+    input_sha256 String,
+    evidence_ids Array(String),
+    expected_chunks UInt32,
+    observed_chunks UInt32,
+    embedded_chunks UInt32,
+    qdrant_points_found UInt32,
+    dashboard_exact_rank Nullable(UInt32),
+    dashboard_semantic_rank Nullable(UInt32),
+    hydration_ok UInt8,
+    result_path String,
+    errors Array(String),
+    details_json String,
+    created_at DateTime64(3, 'UTC') DEFAULT now64(3)
+)
+ENGINE = MergeTree
+PARTITION BY toYYYYMM(started_at)
+ORDER BY (started_at, run_id);
+
+CREATE TABLE IF NOT EXISTS web_osint.ops_canary_steps
+(
+    run_id String,
+    step_name LowCardinality(String),
+    ok UInt8,
+    duration_ms UInt64,
+    detail_json String,
+    error_class LowCardinality(String),
+    error_message String,
+    created_at DateTime64(3, 'UTC') DEFAULT now64(3)
+)
+ENGINE = MergeTree
+PARTITION BY toYYYYMM(created_at)
+ORDER BY (run_id, created_at, step_name);

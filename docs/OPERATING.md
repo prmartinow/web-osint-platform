@@ -93,6 +93,33 @@ The normalizer consumes `evidence.capture.events.v1`, emits observed/state topic
 
 Collector events may include `web_documents` for opened pages, articles, documentation, PDFs, leaderboards, and table captures. They may include `user_inputs` for user notes, pasted research, corrections, attachments, or research seeds. These records use the same replay, search, analytics, and labeling path as X and Google evidence.
 
+### Manual Research Documents
+
+User-added Markdown or text research files should be ingested as chunked `user_input` evidence. This keeps manually curated research in the same pipeline as Google, X, and opened web documents while preserving the source file path and content hash in each chunk's `context`.
+
+Dry-run a folder:
+
+```bash
+python3 scripts/produce_research_documents.py \
+  /mnt/data/x-research/user-documents/agent-tooling \
+  --source-root /mnt/data/x-research/user-documents/agent-tooling \
+  --source-project agent-harness \
+  --topic-label agent-harness \
+  --dry-run
+```
+
+Publish to Redpanda through Pandaproxy:
+
+```bash
+python3 scripts/produce_research_documents.py \
+  /mnt/data/x-research/user-documents/agent-tooling \
+  --source-root /mnt/data/x-research/user-documents/agent-tooling \
+  --source-project agent-harness \
+  --topic-label agent-harness
+```
+
+The script chunks long documents before publishing so embedding coverage favors accuracy over latency. Reusing the same document content gives stable `input_id` values; downstream stores should hydrate by `evidence_id` and tolerate repeated capture observations.
+
 The research planner reads recent `semantic_annotations` plus `evidence_events`, creates stable/deduped research signals, questions, and task seeds, inserts them into ClickHouse, and publishes replay events to `osint.research_signal.detected.v1`, `osint.research_question.proposed.v1`, and `osint.research_task.created.v1`. Run it once for a smoke pass with:
 
 ```bash

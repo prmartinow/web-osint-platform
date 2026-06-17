@@ -154,25 +154,22 @@ services:
     env_file:
       - ../.env
     environment:
-      CLICKHOUSE_URL: http://web-osint-clickhouse:8123
+      CLICKHOUSE_URL: http://127.0.0.1:18123
       CLICKHOUSE_DATABASE: web_osint
       CLICKHOUSE_USER: web_osint
-      TYPESENSE_URL: http://web-osint-typesense:8108
-      QDRANT_URL: http://web-osint-qdrant:6333
+      TYPESENSE_URL: http://127.0.0.1:18108
+      QDRANT_URL: http://127.0.0.1:16333
       QDRANT_COLLECTION: web_osint_evidence_v1
-      QWEN_INFERENCE_URL: ${QWEN_INFERENCE_URL:-http://host.docker.internal:18200}
-      NORMALIZER_URL: http://web-osint-normalizer:8090
-      RESEARCH_PLANNER_URL: http://web-osint-research-planner:8092
-      REDPANDA_PROXY_URL: http://web-osint-redpanda:8082
-      REDPANDA_ADMIN_URL: http://web-osint-redpanda:9644
+      QWEN_INFERENCE_URL: ${QWEN_INFERENCE_URL:-http://127.0.0.1:18200}
+      NORMALIZER_URL: http://127.0.0.1:18090
+      RESEARCH_PLANNER_URL: http://127.0.0.1:18091
+      REDPANDA_PROXY_URL: http://127.0.0.1:18082
+      REDPANDA_ADMIN_URL: http://127.0.0.1:19644
       MEDIA_ROOT: ${WEB_OSINT_DATA_ROOT:-/mnt/data/web-osint-platform}/media
       OCR_ROOT: ${WEB_OSINT_DATA_ROOT:-/mnt/data/web-osint-platform}/ocr
-      DASHBOARD_HOST: 0.0.0.0
-      DASHBOARD_PORT: "8091"
-    ports:
-      - "${WEB_OSINT_DASHBOARD_BIND:-127.0.0.1}:18191:8091"
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
+      DASHBOARD_HOST: ${WEB_OSINT_DASHBOARD_BIND:-127.0.0.1}
+      DASHBOARD_PORT: "18191"
+    network_mode: host
     volumes:
       - ${WEB_OSINT_DATA_ROOT:-/mnt/data/web-osint-platform}:${WEB_OSINT_DATA_ROOT:-/mnt/data/web-osint-platform}:ro
     depends_on:

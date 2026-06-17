@@ -1517,7 +1517,7 @@ def research_search(body):
     limit = clamp_int(body.get("limit"), 20, 1, RESEARCH_SEARCH_MAX_LIMIT)
     branch_limit = min(RESEARCH_BRANCH_LIMIT, max(limit * 4, 20))
     filters = normalize_search_filters(body.get("filters") or {})
-    rerank_mode = str(body.get("rerank") or ("sync" if mode in {"hybrid", "precision"} else "off")).lower()
+    rerank_mode = str(body.get("rerank") or ("sync" if mode == "precision" else "off")).lower()
     if mode == "precision":
         rerank_mode = "sync"
     include = set(as_list(body.get("include")))

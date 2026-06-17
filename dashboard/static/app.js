@@ -554,6 +554,12 @@ async function loadResearchSearch() {
   }
 }
 
+function syncResearchRerankControl() {
+  const precision = $('#researchSearchMode').value === 'precision';
+  $('#researchSearchRerank').checked = precision ? true : $('#researchSearchRerank').checked;
+  $('#researchSearchRerank').disabled = precision;
+}
+
 function branchPills(ranks) {
   return Object.entries(ranks || {})
     .sort((a, b) => Number(a[1]) - Number(b[1]))
@@ -711,7 +717,10 @@ function bindEvents() {
   $('#typesenseKind').addEventListener('change', loadTypesenseSearch);
   $('#researchSearchGo').addEventListener('click', loadResearchSearch);
   $('#researchSearchQ').addEventListener('keydown', ev => { if (ev.key === 'Enter') loadResearchSearch(); });
-  $('#researchSearchMode').addEventListener('change', loadResearchSearch);
+  $('#researchSearchMode').addEventListener('change', () => {
+    syncResearchRerankControl();
+    loadResearchSearch();
+  });
   $('#researchSearchProject').addEventListener('change', loadResearchSearch);
   $('#researchSearchKind').addEventListener('change', loadResearchSearch);
   $('#researchSearchLimit').addEventListener('change', loadResearchSearch);
@@ -725,6 +734,7 @@ function bindEvents() {
 async function boot() {
   initTheme();
   bindEvents();
+  syncResearchRerankControl();
   await loadFacets();
   await loadLive();
 }

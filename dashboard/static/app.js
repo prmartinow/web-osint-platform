@@ -525,6 +525,8 @@ async function loadResearchSearch() {
       card('Embedding', data.embedding?.model || 'none', `${fmtNum(data.embedding?.dimension)} dim · ${fmtNum(data.embedding?.elapsed_ms)} ms`),
       card('Rerank', data.rerank?.enabled ? 'on' : 'off', data.rerank?.error || `${data.rerank?.model || ''} ${fmtNum(data.rerank?.elapsed_ms)} ms`, data.rerank?.error ? 'warn-card' : ''),
       card('Errors', fmtNum((data.branch_errors || []).length), 'branch errors', (data.branch_errors || []).length ? 'warn-card' : 'good-card'),
+      card('Degraded', data.degraded ? 'yes' : 'no', `${fmtNum(data.timings_ms?.total)} ms`, data.degraded ? 'warn-card' : 'good-card'),
+      card('Warnings', fmtNum((data.warnings || []).length), data.trace_id || '', (data.warnings || []).length ? 'warn-card' : ''),
     ].join('');
     $('#researchSearchMeta').textContent = `${fmtNum(data.returned)} results in ${fmtNum(elapsed)} ms. Mode: ${data.mode}.`;
     renderTable($('#researchSearchTable'), [
@@ -545,6 +547,9 @@ async function loadResearchSearch() {
     );
     $('#researchSearchTrace').textContent = JSON.stringify({
       branch_errors: data.branch_errors || [],
+      warnings: data.warnings || [],
+      timings_ms: data.timings_ms || {},
+      filters_applied: data.filters_applied || {},
       trace: data.trace || [],
       rerank: data.rerank || {},
     }, null, 2);

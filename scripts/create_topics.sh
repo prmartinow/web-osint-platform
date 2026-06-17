@@ -53,6 +53,13 @@ create_topic osint.research_question.proposed.v1 delete
 create_topic osint.research_task.created.v1 delete
 create_topic osint.wiki.page_materialized.v1 delete
 create_topic osint.semantic.deadletter.v1 delete
+create_topic osint.media.enrichment.requested.v1 delete
+create_topic osint.media.ocr.requested.v1 delete
+create_topic osint.media.ocr.completed.v1 delete
+create_topic osint.media.ocr.failed.v1 delete
+create_topic osint.media.vl_embedding.requested.v1 delete
+create_topic osint.media.vl_embedding.completed.v1 delete
+create_topic osint.media.vl_embedding.failed.v1 delete
 
 create_topic evidence.posts.state.v1 compact
 create_topic evidence.accounts.state.v1 compact

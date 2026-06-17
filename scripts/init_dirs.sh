@@ -6,7 +6,7 @@ DATA_ROOT="${WEB_OSINT_DATA_ROOT:-${DATA_ROOT:-/mnt/data/web-osint-platform}}"
 
 mkdir -p \
   "$CODE_ROOT"/{compose,scripts,schemas,typesense,qdrant,sql,docs,connect,workers} \
-  "$DATA_ROOT"/{redpanda,state/pebble/posts,state/pebble/accounts,state/pebble/media,state/pebble/exact-indexes,typesense,media/screenshots,media/post-images,media/videos,media/profile-images,ocr/json,ocr/text,qdrant,clickhouse/data,clickhouse/logs,logs}
+  "$DATA_ROOT"/{redpanda,state/pebble/posts,state/pebble/accounts,state/pebble/media,state/pebble/exact-indexes,typesense,media/screenshots,media/post-images,media/videos,media/profile-images,ocr/json,ocr/text,derived/ocr,derived/vl,derived/pdf-pages,canaries/media/input,canaries/media/runs,tmp,qdrant,clickhouse/data,clickhouse/logs,logs,metrics}
 
 chmod 755 "$DATA_ROOT" 2>/dev/null || true
 chmod 700 "$DATA_ROOT"/state 2>/dev/null || true

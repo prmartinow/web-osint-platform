@@ -498,3 +498,55 @@ CREATE TABLE IF NOT EXISTS web_osint.ops_canary_steps
 ENGINE = MergeTree
 PARTITION BY toYYYYMM(created_at)
 ORDER BY (run_id, created_at, step_name);
+
+CREATE TABLE IF NOT EXISTS web_osint.media_ocr_results
+(
+    ocr_id String,
+    evidence_id String,
+    source_artifact_id String,
+    source_sha256 String,
+    source_kind LowCardinality(String),
+    artifact_role LowCardinality(String),
+    engine LowCardinality(String),
+    engine_version String,
+    params_hash String,
+    status LowCardinality(String),
+    error_class LowCardinality(String),
+    error_message String,
+    json_artifact_path String,
+    text_artifact_path String,
+    text_chars UInt64,
+    block_count UInt64,
+    mean_confidence Float32,
+    min_confidence Float32,
+    image_width UInt32,
+    image_height UInt32,
+    page_no Nullable(UInt32),
+    created_at DateTime64(3, 'UTC')
+)
+ENGINE = MergeTree
+PARTITION BY toYYYYMM(created_at)
+ORDER BY (source_sha256, engine, params_hash, created_at, ocr_id);
+
+CREATE TABLE IF NOT EXISTS web_osint.media_vl_embeddings
+(
+    vl_embedding_id String,
+    evidence_id String,
+    source_artifact_id String,
+    source_sha256 String,
+    model LowCardinality(String),
+    model_version String,
+    params_hash String,
+    qdrant_collection String,
+    qdrant_point_id String,
+    vector_name LowCardinality(String),
+    status LowCardinality(String),
+    error_class LowCardinality(String),
+    error_message String,
+    image_width UInt32,
+    image_height UInt32,
+    created_at DateTime64(3, 'UTC')
+)
+ENGINE = MergeTree
+PARTITION BY toYYYYMM(created_at)
+ORDER BY (source_sha256, model, params_hash, created_at, vl_embedding_id);

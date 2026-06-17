@@ -5,9 +5,11 @@ import mimetypes
 import os
 import posixpath
 import re
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
+import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
@@ -1260,6 +1262,24 @@ def date_to_epoch(value, start=True):
         return None
 
 
+def elapsed_ms(started):
+    return round((time.perf_counter() - started) * 1000, 2)
+
+
+def structured_warning(stage, reason, severity="warn", detail=None):
+    item = {"stage": stage, "reason": reason, "severity": severity}
+    if detail not in (None, ""):
+        item["detail"] = detail
+    return item
+
+
+def structured_branch_error(branch, error, reason="branch_error", severity="warn", detail=None):
+    item = structured_warning(branch, reason, severity, detail if detail is not None else error)
+    item["branch"] = branch
+    item["error"] = str(error)
+    return item
+
+
 def qdrant_filter(filters):
     must = []
     list_map = {
@@ -1508,6 +1528,8 @@ def apply_rerank(query, hits, rerank_limit):
 
 
 def research_search(body):
+    total_started = time.perf_counter()
+    trace_id = str(body.get("trace_id") or uuid.uuid4())
     query = str(body.get("query", "") or "").strip()
     if not query:
         raise DashboardError(400, "query is required")
@@ -1525,55 +1547,89 @@ def research_search(body):
     candidates = {}
     branch_counts = {}
     branch_errors = []
+    warnings = []
+    timings_ms = {}
     trace = []
     embedding_meta = None
 
+    started = time.perf_counter()
     exact_rows, errors = exact_candidates(query, filters, branch_limit)
-    branch_errors.extend(errors)
+    timings_ms["exact"] = elapsed_ms(started)
+    branch_errors.extend(
+        structured_branch_error(err.get("branch", "exact"), err.get("error", ""), reason="lookup_error", detail=err)
+        for err in errors
+    )
     branch_counts["exact"] = len(exact_rows)
     for rank, row in enumerate(exact_rows, start=1):
         add_candidate(candidates, row.get("evidence_id"), "exact", rank, 1.0, row)
 
     if mode in {"hybrid", "keyword", "precision"}:
+        started = time.perf_counter()
         try:
             hits, metadata = typesense_candidates(query, filters, branch_limit)
             branch_counts["keyword"] = len(hits)
+            timings_ms["keyword"] = elapsed_ms(started)
             trace.append({"branch": "keyword", "found": metadata.get("found"), "search_time_ms": metadata.get("search_time_ms")})
+            if not hits:
+                warnings.append(structured_warning("keyword", "no_points", "info", "Typesense returned no keyword candidates"))
             for rank, hit in enumerate(hits, start=1):
                 doc = hit.get("document") or {}
                 add_candidate(candidates, doc.get("id"), "keyword", rank, hit.get("text_match"), hit)
         except DashboardError as exc:
-            branch_errors.append({"branch": "keyword", "error": exc.message})
+            timings_ms["keyword"] = elapsed_ms(started)
+            branch_errors.append(structured_branch_error("keyword", exc.message, reason="branch_unavailable"))
 
     if mode in {"hybrid", "semantic", "visual", "precision"}:
         try:
             vector_model = "vl" if mode == "visual" else "text"
+            started = time.perf_counter()
             vector, embedding_meta = embed_search_query(query, vector_model)
+            timings_ms["query_embedding"] = elapsed_ms(started)
             vector_branches = ["text_dense", "ocr_dense", "caption_dense", "account_dense"]
             if mode == "visual":
                 vector_branches = ["vl_image_dense", "caption_dense", "ocr_dense", "text_dense"]
             for branch in vector_branches:
+                started = time.perf_counter()
                 try:
                     rows, metadata = qdrant_vector_candidates(vector, branch, filters, branch_limit)
                     branch_counts[branch] = len(rows)
+                    timings_ms[f"qdrant_{branch}"] = elapsed_ms(started)
                     trace.append({"branch": branch, "time": metadata.get("time"), "rows": len(rows)})
+                    if not rows:
+                        warnings.append(structured_warning(f"qdrant_{branch}", "no_points", "info", f"{branch} returned no candidates"))
                     for rank, row in enumerate(rows, start=1):
                         payload = row.get("payload") or {}
                         add_candidate(candidates, payload.get("evidence_id"), branch, rank, row.get("score"), row)
                 except DashboardError as exc:
-                    branch_errors.append({"branch": branch, "error": exc.message})
+                    timings_ms[f"qdrant_{branch}"] = elapsed_ms(started)
+                    branch_errors.append(structured_branch_error(branch, exc.message, reason="branch_unavailable"))
         except DashboardError as exc:
-            branch_errors.append({"branch": "embedding", "error": exc.message})
+            timings_ms.setdefault("query_embedding", 0)
+            branch_errors.append(structured_branch_error("embedding", exc.message, reason="embedding_unavailable"))
 
+    started = time.perf_counter()
     for candidate in candidates.values():
         total = 0.0
         for branch, rank in candidate["branch_ranks"].items():
             total += RRF_BRANCH_WEIGHTS.get(branch, 1.0) / (RRF_K + rank)
         candidate["rrf_score"] = total
         candidate["final_score"] = total
+    timings_ms["fusion"] = elapsed_ms(started)
 
     ranked = sorted(candidates.values(), key=lambda row: row["final_score"], reverse=True)
+    started = time.perf_counter()
     hydrated = hydrate_evidence([row["evidence_id"] for row in ranked[: max(limit, RESEARCH_RERANK_LIMIT)]])
+    timings_ms["hydration"] = elapsed_ms(started)
+    expected_hydration = len(ranked[: max(limit, RESEARCH_RERANK_LIMIT)])
+    if expected_hydration and len(hydrated) < expected_hydration:
+        warnings.append(
+            structured_warning(
+                "hydration",
+                "hydration_partial",
+                "warn",
+                {"expected": expected_hydration, "hydrated": len(hydrated)},
+            )
+        )
     hits = []
     for candidate in ranked:
         row = hydrated.get(candidate["evidence_id"], {})
@@ -1630,26 +1686,41 @@ def research_search(body):
 
     rerank = {"enabled": False}
     if rerank_mode in {"sync", "true", "1", "yes"} and hits:
+        started = time.perf_counter()
         try:
             rerank = apply_rerank(query, hits, min(RESEARCH_RERANK_LIMIT, limit, len(hits)))
+            timings_ms["rerank"] = elapsed_ms(started)
         except DashboardError as exc:
+            timings_ms["rerank"] = elapsed_ms(started)
             rerank = {"enabled": False, "error": exc.message}
+            branch_errors.append(structured_branch_error("rerank", exc.message, reason="rerank_unavailable"))
+    else:
+        timings_ms["rerank"] = 0
+
+    timings_ms["total"] = elapsed_ms(total_started)
+    degraded = any((err.get("severity") or "warn") != "info" for err in branch_errors)
 
     return {
+        "trace_id": trace_id,
         "query": query,
         "mode": mode,
         "filters": filters,
+        "filters_applied": filters,
         "limit": limit,
         "returned": len(hits[:limit]),
         "candidate_count": len(candidates),
+        "degraded": degraded,
+        "warnings": warnings,
         "branch_counts": branch_counts,
         "branch_errors": branch_errors,
+        "timings_ms": timings_ms,
         "embedding": {
             "model": embedding_meta.get("model") if embedding_meta else "",
             "dimension": embedding_meta.get("dimension") if embedding_meta else 0,
             "elapsed_ms": embedding_meta.get("elapsed_ms") if embedding_meta else 0,
         },
         "rerank": rerank,
+        "rerank_used": bool(rerank.get("enabled")),
         "trace": trace if "ranking_trace" in include else [],
         "hits": hits[:limit],
     }

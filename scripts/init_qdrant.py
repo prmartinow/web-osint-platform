@@ -146,6 +146,10 @@ def main() -> None:
         ("entities", "keyword"),
         ("embedding_model", "keyword"),
         ("embedding_vector_names", "keyword"),
+        ("point_kind", "keyword"),
+        ("artifact_id", "keyword"),
+        ("artifact_sha256", "keyword"),
+        ("artifact_role", "keyword"),
     ]
     for field_name, field_type in indexes:
         try:

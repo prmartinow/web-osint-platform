@@ -19,6 +19,8 @@ Environment=QDRANT_URL=http://127.0.0.1:16333
 Environment=QDRANT_COLLECTION=web_osint_evidence_v1
 Environment=MEDIA_WORKER_ROLE=vl
 Environment=MEDIA_VL_HTTP_ADDR=127.0.0.1:18213
+Environment=PADDLE_PDX_CACHE_HOME=/mnt/data/web-osint-platform/paddleocr/paddlex-cache
+Environment=PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK=True
 Environment=TOKENIZERS_PARALLELISM=false
 ExecStartPre=/home/ops/dev/x-research/scripts/init_media_enrichment_venv.sh
 ExecStart=/mnt/data/web-osint-platform/.venv-media-enrichment/bin/python /home/ops/dev/x-research/workers/media-enrichment/media_enrichment_worker.py vl

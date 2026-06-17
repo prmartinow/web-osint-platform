@@ -40,7 +40,7 @@ MAX_LIMIT = 500
 MAX_FILE_PREVIEW_BYTES = 1_000_000
 RESEARCH_SEARCH_MAX_LIMIT = 100
 RESEARCH_BRANCH_LIMIT = 80
-RESEARCH_RERANK_LIMIT = int(os.environ.get("RESEARCH_RERANK_LIMIT", "8"))
+RESEARCH_RERANK_LIMIT = int(os.environ.get("RESEARCH_RERANK_LIMIT", "3"))
 RRF_K = 60
 RRF_BRANCH_WEIGHTS = {
     "exact": 4.0,
@@ -1467,7 +1467,7 @@ def document_for_rerank(hit):
         " ".join(hit.get("topics") or []),
         " ".join(hit.get("entities") or []),
     ]
-    return "\n".join(part for part in parts if part)[:5000]
+    return "\n".join(part for part in parts if part)[:2200]
 
 
 def apply_rerank(query, hits, rerank_limit):
@@ -1631,7 +1631,7 @@ def research_search(body):
     rerank = {"enabled": False}
     if rerank_mode in {"sync", "true", "1", "yes"} and hits:
         try:
-            rerank = apply_rerank(query, hits, min(RESEARCH_RERANK_LIMIT, len(hits)))
+            rerank = apply_rerank(query, hits, min(RESEARCH_RERANK_LIMIT, limit, len(hits)))
         except DashboardError as exc:
             rerank = {"enabled": False, "error": exc.message}
 

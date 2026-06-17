@@ -1449,8 +1449,8 @@ def hydrate_evidence(evidence_ids):
               argMax(has_media, ingested_at) AS has_media,
               argMax(has_ocr, ingested_at) AS has_ocr,
               argMax(posted_at, ingested_at) AS posted_at,
-              max(captured_at) AS captured_at,
-              max(ingested_at) AS ingested_at
+              max(captured_at) AS latest_captured_at,
+              max(ingested_at) AS latest_ingested_at
             FROM evidence_events
             WHERE evidence_id IN ({quoted})
             GROUP BY evidence_id
@@ -1615,8 +1615,8 @@ def research_search(body):
             "has_media": bool(row.get("has_media")) if row.get("has_media") is not None else None,
             "has_ocr": bool(row.get("has_ocr")) if row.get("has_ocr") is not None else None,
             "posted_at": row.get("posted_at"),
-            "captured_at": row.get("captured_at"),
-            "ingested_at": row.get("ingested_at"),
+            "captured_at": row.get("captured_at") or row.get("latest_captured_at"),
+            "ingested_at": row.get("ingested_at") or row.get("latest_ingested_at"),
             "scores": {
                 "final": candidate["final_score"],
                 "fused": candidate["rrf_score"],

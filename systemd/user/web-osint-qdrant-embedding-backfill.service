@@ -8,6 +8,7 @@ Wants=network-online.target web-osint-qwen-inference.service
 Type=simple
 WorkingDirectory=/home/ops/dev/x-research
 Environment=WEB_OSINT_DATA_ROOT=/mnt/data/web-osint-platform
+Environment=WEB_OSINT_CPU_RESERVED_THREADS=2
 Environment=CLICKHOUSE_URL=http://127.0.0.1:18123
 Environment=CLICKHOUSE_DATABASE=web_osint
 Environment=CLICKHOUSE_USER=web_osint
@@ -15,7 +16,7 @@ Environment=QWEN_INFERENCE_URL=http://127.0.0.1:18200
 Environment=QDRANT_URL=http://127.0.0.1:16333
 Environment=QDRANT_COLLECTION=web_osint_evidence_v1
 Environment=BACKFILL_BATCH_SIZE=1
-ExecStart=/mnt/data/web-osint-platform/.venv-qwen-inference/bin/python /home/ops/dev/x-research/scripts/backfill_qdrant_embeddings.py
+ExecStart=/home/ops/dev/x-research/scripts/run_with_cpu_thread_guard.sh /mnt/data/web-osint-platform/.venv-qwen-inference/bin/python /home/ops/dev/x-research/scripts/backfill_qdrant_embeddings.py
 Restart=on-failure
 RestartSec=30
 

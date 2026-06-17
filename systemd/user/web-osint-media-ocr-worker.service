@@ -10,6 +10,7 @@ WorkingDirectory=/home/ops/dev/x-research
 EnvironmentFile=-/home/ops/dev/x-research/.env
 Environment=OSINT_DATA_ROOT=/mnt/data/x-research
 Environment=WEB_OSINT_MODEL_ROOT=/mnt/data/web-osint-platform
+Environment=WEB_OSINT_CPU_RESERVED_THREADS=2
 Environment=KAFKA_BROKERS=127.0.0.1:19092
 Environment=CLICKHOUSE_URL=http://127.0.0.1:18123
 Environment=CLICKHOUSE_DATABASE=web_osint
@@ -22,7 +23,7 @@ Environment=PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK=True
 Environment=PADDLE_PDX_ENABLE_MKLDNN_BYDEFAULT=0
 Environment=TOKENIZERS_PARALLELISM=false
 ExecStartPre=/home/ops/dev/x-research/scripts/init_media_enrichment_venv.sh
-ExecStart=/mnt/data/web-osint-platform/.venv-media-enrichment/bin/python /home/ops/dev/x-research/workers/media-enrichment/media_enrichment_worker.py ocr
+ExecStart=/home/ops/dev/x-research/scripts/run_with_cpu_thread_guard.sh /mnt/data/web-osint-platform/.venv-media-enrichment/bin/python /home/ops/dev/x-research/workers/media-enrichment/media_enrichment_worker.py ocr
 Restart=on-failure
 RestartSec=20
 

@@ -109,6 +109,8 @@ The service enforces CPU-friendly guardrails at the API boundary:
 | Rerank | concurrency `1`, queue `2`, queue wait `240s`, max `5` candidates |
 | VL embedding | concurrency `1`, queue `16`, queue wait `300s` |
 
+CPU-heavy user services also run through `scripts/run_with_cpu_thread_guard.sh`. By default, `WEB_OSINT_CPU_RESERVED_THREADS=2`, so the wrapper clamps Torch/OpenMP/MKL/OpenBLAS/Paddle thread pools to at most `nproc - 2` and, when `taskset` is available, runs the process with a CPU affinity mask that leaves the last two logical CPUs outside the Web OSINT worker affinity. Override `WEB_OSINT_CPU_RESERVED_THREADS` only if the RPC node's service mix changes. The Qwen `/healthz` response includes `cpu_thread_guard` so operators can verify the effective thread cap.
+
 Rerank is intentionally a precision path, not a broad recall path. Feed it small candidate sets after keyword/vector/metadata retrieval. Oversized queries, candidate lists, and candidate texts are rejected with `413` rather than silently truncated.
 
 The embedding worker consumes these observed topics:

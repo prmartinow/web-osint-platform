@@ -8,6 +8,7 @@ Wants=network-online.target web-osint-qwen-inference.service
 Type=simple
 WorkingDirectory=/home/ops/dev/x-research/workers/embedding-worker
 Environment=WEB_OSINT_DATA_ROOT=/mnt/data/web-osint-platform
+Environment=WEB_OSINT_CPU_RESERVED_THREADS=2
 Environment=KAFKA_BROKERS=127.0.0.1:19092
 Environment=KAFKA_GROUP_ID=web-osint-embedding-worker-v1
 Environment=QWEN_INFERENCE_URL=http://127.0.0.1:18200
@@ -15,7 +16,7 @@ Environment=QDRANT_URL=http://127.0.0.1:16333
 Environment=QDRANT_COLLECTION=web_osint_evidence_v1
 Environment=HTTP_ADDR=127.0.0.1:18201
 Environment=TOKENIZERS_PARALLELISM=false
-ExecStart=/mnt/data/web-osint-platform/.venv-qwen-inference/bin/python /home/ops/dev/x-research/workers/embedding-worker/embedding_worker.py
+ExecStart=/home/ops/dev/x-research/scripts/run_with_cpu_thread_guard.sh /mnt/data/web-osint-platform/.venv-qwen-inference/bin/python /home/ops/dev/x-research/workers/embedding-worker/embedding_worker.py
 Restart=on-failure
 RestartSec=20
 

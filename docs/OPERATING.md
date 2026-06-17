@@ -159,6 +159,12 @@ tail -F /mnt/data/web-osint-platform/logs/model-downloads/latest-progress.log
 
 See `docs/LOCAL_INFERENCE.md` for vector layout and recovery notes.
 
+CPU-heavy Web OSINT user services should be launched through `scripts/run_with_cpu_thread_guard.sh`. The default `WEB_OSINT_CPU_RESERVED_THREADS=2` keeps at least two logical CPUs outside the worker affinity mask for other RPC services while also clamping common numeric thread-pool variables. Check the active Qwen cap with:
+
+```bash
+curl -fsS http://127.0.0.1:18200/healthz | python3 -m json.tool | sed -n '1,40p'
+```
+
 ## End-To-End Canary
 
 Use the end-to-end canary after pipeline, inference, or dashboard changes. It creates a synthetic Markdown research document under `/mnt/data`, publishes it to Redpanda through the normal manual-document capture path, then waits for:

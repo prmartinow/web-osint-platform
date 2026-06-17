@@ -25,14 +25,34 @@ DEFAULT_BATCH_SIZE = int(os.environ.get("QWEN_INFERENCE_BATCH_SIZE", "1"))
 DEFAULT_MAX_LENGTH = int(os.environ.get("QWEN_INFERENCE_MAX_LENGTH", "8192"))
 DEVICE = os.environ.get("QWEN_INFERENCE_DEVICE", "cpu")
 
-torch.set_num_threads(int(os.environ.get("QWEN_INFERENCE_TORCH_THREADS", "32")))
-
 
 def env_int(name: str, default: int) -> int:
     try:
         return int(os.environ.get(name, str(default)))
     except ValueError:
         return default
+
+
+def cpu_thread_guard() -> dict[str, int]:
+    total = env_int("WEB_OSINT_CPU_TOTAL_THREADS", os.cpu_count() or 1)
+    total = max(1, total)
+    reserved = max(0, env_int("WEB_OSINT_CPU_RESERVED_THREADS", 2))
+    if reserved >= total:
+        reserved = total - 1 if total > 1 else 0
+    effective = max(1, total - reserved)
+    requested = max(1, env_int("QWEN_INFERENCE_TORCH_THREADS", effective))
+    torch_threads = min(requested, effective)
+    return {
+        "total_threads": total,
+        "reserved_threads": reserved,
+        "effective_threads": effective,
+        "requested_torch_threads": requested,
+        "torch_threads": torch_threads,
+    }
+
+
+CPU_THREAD_GUARD = cpu_thread_guard()
+torch.set_num_threads(CPU_THREAD_GUARD["torch_threads"])
 
 
 def env_float(name: str, default: float) -> float:
@@ -402,6 +422,7 @@ def healthz() -> dict[str, Any]:
         "ok": True,
         "device": DEVICE,
         "torch_threads": torch.get_num_threads(),
+        "cpu_thread_guard": CPU_THREAD_GUARD,
         "model_paths": {
             "text": str(TEXT_MODEL_DIR),
             "reranker": str(RERANKER_MODEL_DIR),

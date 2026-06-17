@@ -23,7 +23,9 @@ from typing import Any
 
 import requests
 from confluent_kafka import Consumer, KafkaError, Producer
-from PIL import Image
+from PIL import Image, ImageDraw, ImageFont
+
+os.environ.setdefault("PADDLE_PDX_ENABLE_MKLDNN_BYDEFAULT", "0")
 
 SCRIPT_DIR = Path(__file__).resolve().parents[2] / "scripts"
 sys.path.insert(0, str(SCRIPT_DIR))
@@ -64,6 +66,8 @@ MAX_IMAGE_BYTES = int(env("MEDIA_MAX_IMAGE_BYTES", str(25 * 1024 * 1024)))
 MAX_IMAGE_PIXELS = int(env("MEDIA_MAX_IMAGE_PIXELS", str(40_000_000)))
 VL_MAX_SIDE = int(env("MEDIA_VL_MAX_SIDE", "1600"))
 REQUEST_TIMEOUT = float(env("MEDIA_WORKER_REQUEST_TIMEOUT", "600"))
+OCR_SELFTEST_TOKEN = "SELFTESTALPHA123"
+OCR_SELFTEST_EXPECTED = "TESTALPHA123"
 
 DERIVED_ROOT = ensure_dir(DATA_ROOT / "derived")
 OCR_ROOT = ensure_dir(DERIVED_ROOT / "ocr")
@@ -189,6 +193,7 @@ def ensure_media_tables() -> None:
             status LowCardinality(String),
             error_class LowCardinality(String),
             error_message String,
+            runtime_json String,
             json_artifact_path String,
             text_artifact_path String,
             text_chars UInt64,
@@ -205,6 +210,7 @@ def ensure_media_tables() -> None:
         ORDER BY (source_sha256, engine, params_hash, created_at, ocr_id)
         """
     )
+    ch_execute("ALTER TABLE media_ocr_results ADD COLUMN IF NOT EXISTS runtime_json String AFTER error_message")
     ch_execute(
         """
         CREATE TABLE IF NOT EXISTS media_vl_embeddings
@@ -541,6 +547,46 @@ def run_ocr_engine(path: Path) -> tuple[list[dict[str, Any]], str]:
 run_ocr_engine._ocr = None  # type: ignore[attr-defined]
 
 
+def normalized_ocr_text(value: str) -> str:
+    return "".join(ch for ch in value.upper() if ch.isalnum())
+
+
+def ocr_runtime_info() -> dict[str, str]:
+    try:
+        import importlib.metadata as md
+
+        paddlepaddle_version = md.version("paddlepaddle")
+    except Exception:
+        paddlepaddle_version = ""
+    return {
+        "paddleocr_version": paddleocr_version(),
+        "paddlepaddle_version": paddlepaddle_version,
+        "python_version": sys.version.split()[0],
+        "paddle_pdx_enable_mkldnn_bydefault": env("PADDLE_PDX_ENABLE_MKLDNN_BYDEFAULT", ""),
+        "paddle_pdx_cache_home": env("PADDLE_PDX_CACHE_HOME", ""),
+    }
+
+
+def run_ocr_startup_selftest() -> None:
+    test_path = ensure_dir(DATA_ROOT / "tmp") / "ocr-startup-selftest.png"
+    image = Image.new("RGB", (1200, 260), "white")
+    draw = ImageDraw.Draw(image)
+    try:
+        font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 48)
+    except Exception:
+        font = ImageFont.load_default()
+    draw.text((40, 88), OCR_SELFTEST_TOKEN, fill="black", font=font)
+    image.save(test_path)
+    blocks, _engine_module = run_ocr_engine(test_path)
+    text = "\n".join(block["text"] for block in blocks)
+    if OCR_SELFTEST_EXPECTED not in normalized_ocr_text(text):
+        raise RuntimeError(f"OCR startup self-test failed; expected {OCR_SELFTEST_EXPECTED}, got {text[:200]!r}")
+    print(
+        f"[{now_iso()}] OCR startup self-test passed blocks={len(blocks)} runtime={compact_json(ocr_runtime_info())}",
+        flush=True,
+    )
+
+
 def ocr_completed_for(sha: str, params_hash: str) -> bool:
     rows = ch_data(
         f"""
@@ -571,6 +617,7 @@ def insert_ocr_row(event: dict[str, Any], status: str, **values: Any) -> None:
                 "status": status,
                 "error_class": values.get("error_class", ""),
                 "error_message": values.get("error_message", ""),
+                "runtime_json": compact_json(values.get("runtime") or ocr_runtime_info()),
                 "json_artifact_path": values.get("json_artifact_path", ""),
                 "text_artifact_path": values.get("text_artifact_path", ""),
                 "text_chars": len(values.get("text", "")),
@@ -641,6 +688,7 @@ def handle_ocr_event(producer: Producer, event: dict[str, Any]) -> None:
         "engine": "paddleocr",
         "engine_module": engine_module,
         "engine_version": paddleocr_version(),
+        "runtime": ocr_runtime_info(),
         "params_hash": params_hash,
         "created_at": now_iso(),
     }
@@ -654,6 +702,7 @@ def handle_ocr_event(producer: Producer, event: dict[str, Any]) -> None:
         json_artifact_path=str(json_path),
         text_artifact_path=str(text_path),
         text=text,
+        runtime=payload["runtime"],
         blocks=blocks,
         mean_confidence=mean_conf,
         min_confidence=min_conf,
@@ -761,13 +810,22 @@ def upsert_vl_qdrant(event: dict[str, Any], vector: list[float], vl_embedding_id
         "source_project": event.get("source_project"),
         "artifact_role": event.get("artifact_role"),
         "source_uri": event.get("source_uri") or "",
+        "artifact_uri": event.get("storage_path") or "",
         "canonical_url": event.get("source_uri") or "",
         "artifact_sha256": event.get("artifact_sha256"),
+        "sha256": event.get("artifact_sha256"),
         "media_type": event.get("media_type"),
         "width": int(event.get("width") or 0),
         "height": int(event.get("height") or 0),
         "has_media": True,
+        "has_ocr": bool(event.get("ocr_id")),
+        "ocr_id": event.get("ocr_id") or "",
+        "ocr_text_chars": int(event.get("ocr_text_chars") or event.get("text_chars") or 0),
+        "topics": event.get("topics") or [],
+        "author_handle": event.get("author_handle") or "",
+        "domain": event.get("domain") or "",
         "created_at": now_iso(),
+        "captured_at_day": now_iso()[:10],
         "producer_name": PRODUCER_NAME,
         "producer_version": PRODUCER_VERSION,
     }
@@ -849,6 +907,8 @@ def publish_failure(producer: Producer, topic: str, event: dict[str, Any], exc: 
 def run_consumer(role: str, topic: str, group_id: str, http_addr: str) -> None:
     stats.role = role
     ensure_media_tables()
+    if role == "ocr":
+        run_ocr_startup_selftest()
     threading.Thread(target=serve_http, args=(http_addr,), daemon=True).start()
     producer = Producer({"bootstrap.servers": KAFKA_BROKERS})
     consumer = Consumer(

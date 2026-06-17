@@ -8,6 +8,7 @@ PADDLEX_CACHE_HOME="${PADDLE_PDX_CACHE_HOME:-$PADDLE_HOME/paddlex-cache}"
 
 mkdir -p "$MODEL_ROOT" "$PADDLE_HOME" "$PADDLEX_CACHE_HOME"
 export PADDLE_PDX_CACHE_HOME="$PADDLEX_CACHE_HOME"
+export PADDLE_PDX_ENABLE_MKLDNN_BYDEFAULT="${PADDLE_PDX_ENABLE_MKLDNN_BYDEFAULT:-0}"
 
 if [[ ! -x "$VENV/bin/python" ]]; then
   echo "[$(date -Is)] creating media enrichment venv: $VENV"
@@ -28,6 +29,7 @@ echo "[$(date -Is)] installing media enrichment dependencies"
 
 echo "[$(date -Is)] media enrichment venv ready"
 echo "paddle_pdx_cache_home=$PADDLE_PDX_CACHE_HOME"
+echo "paddle_pdx_enable_mkldnn_bydefault=$PADDLE_PDX_ENABLE_MKLDNN_BYDEFAULT"
 "$VENV/bin/python" - <<'PY'
 import importlib.metadata as md
 

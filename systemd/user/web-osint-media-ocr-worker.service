@@ -19,6 +19,7 @@ Environment=MEDIA_OCR_HTTP_ADDR=127.0.0.1:18212
 Environment=PADDLEOCR_HOME=/mnt/data/web-osint-platform/paddleocr
 Environment=PADDLE_PDX_CACHE_HOME=/mnt/data/web-osint-platform/paddleocr/paddlex-cache
 Environment=PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK=True
+Environment=PADDLE_PDX_ENABLE_MKLDNN_BYDEFAULT=0
 Environment=TOKENIZERS_PARALLELISM=false
 ExecStartPre=/home/ops/dev/x-research/scripts/init_media_enrichment_venv.sh
 ExecStart=/mnt/data/web-osint-platform/.venv-media-enrichment/bin/python /home/ops/dev/x-research/workers/media-enrichment/media_enrichment_worker.py ocr

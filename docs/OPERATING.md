@@ -140,6 +140,16 @@ python3 scripts/run_webpage_extraction_canary.py --env-file .env
 
 The worker stores raw HTML, text, Markdown, tables, and metadata below the configured data root before publishing a compact event containing text, provenance, quality signals, and artifact paths.
 
+Run the continuous request-topic worker as a user service on the RPC node:
+
+```bash
+mkdir -p ~/.config/systemd/user
+cp systemd/user/web-osint-webpage-extraction-worker.service ~/.config/systemd/user/
+systemctl --user daemon-reload
+systemctl --user enable --now web-osint-webpage-extraction-worker.service
+curl http://127.0.0.1:18221/healthz
+```
+
 ### Manual Research Documents
 
 User-added Markdown or text research files should be ingested as chunked `user_input` evidence. This keeps manually curated research in the same pipeline as Google, X, and opened web documents while preserving the source file path and content hash in each chunk's `context`.

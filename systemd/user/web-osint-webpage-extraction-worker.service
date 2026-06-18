@@ -1,0 +1,21 @@
+[Unit]
+Description=Web OSINT webpage extraction worker
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/ops/dev/x-research
+Environment=OSINT_DATA_ROOT=/mnt/data/x-research
+Environment=WEB_OSINT_MODEL_ROOT=/mnt/data/web-osint-platform
+Environment=KAFKA_BROKERS=127.0.0.1:19092
+Environment=PANDAPROXY_URL=http://127.0.0.1:18082
+Environment=WEBPAGE_EXTRACTION_HTTP_ADDR=127.0.0.1:18221
+Environment=WEBPAGE_EXTRACTION_REQUEST_TIMEOUT=45
+Environment=WEBPAGE_EXTRACTION_MAX_HTML_BYTES=8388608
+ExecStart=/mnt/data/web-osint-platform/.venv-webpage-extraction/bin/python /home/ops/dev/x-research/workers/webpage-extraction/webpage_extraction_worker.py run
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=default.target

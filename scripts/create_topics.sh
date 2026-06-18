@@ -63,6 +63,8 @@ create_topic osint.media.ocr.failed.v1 delete
 create_topic osint.media.vl_embedding.requested.v1 delete
 create_topic osint.media.vl_embedding.completed.v1 delete
 create_topic osint.media.vl_embedding.failed.v1 delete
+create_topic osint.web.extraction.requested.v1 delete
+create_topic osint.web.extraction.failed.v1 delete
 
 create_topic evidence.posts.state.v1 compact
 create_topic evidence.accounts.state.v1 compact

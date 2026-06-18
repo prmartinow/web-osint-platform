@@ -90,6 +90,8 @@ Meaning Layer topics:
 - `osint.research_question.proposed.v1`
 - `osint.research_task.created.v1`
 - `osint.wiki.page_materialized.v1`
+- `osint.web.extraction.requested.v1`
+- `osint.web.extraction.failed.v1`
 
 ## Data Ownership
 
@@ -98,6 +100,45 @@ Redpanda topics are durable replay source. Pebble state, Typesense, Qdrant, and 
 The normalizer consumes `evidence.capture.events.v1`, emits observed/state topics, writes materialized records to Pebble, inserts analytics rows into ClickHouse, upserts evidence text into Typesense, emits deterministic semantic annotations, and passes Qdrant named vectors through when a collector or enrichment worker includes them.
 
 Collector events may include `web_documents` for opened pages, articles, documentation, PDFs, leaderboards, and table captures. They may include `user_inputs` for user notes, pasted research, corrections, attachments, or research seeds. These records use the same replay, search, analytics, and labeling path as X and Google evidence.
+
+### Webpage Extraction
+
+The webpage extraction worker turns ordinary URLs into `web_documents` capture events. It is meant for launch blog posts, documentation pages, model cards, benchmark pages, and opened search results where HTML should be captured and normalized rather than treated as a screenshot-only artifact.
+
+Install its isolated venv under the data root:
+
+```bash
+scripts/init_webpage_extraction_venv.sh
+```
+
+Run a one-off extraction without publishing:
+
+```bash
+/mnt/data/web-osint-platform/.venv-webpage-extraction/bin/python \
+  workers/webpage-extraction/webpage_extraction_worker.py extract-url \
+  --url https://www.example.com/blog/model-launch \
+  --source-project launch-blog-research \
+  --topic-label launch-blog
+```
+
+Publish extracted pages through Pandaproxy into the normal capture pipeline:
+
+```bash
+/mnt/data/web-osint-platform/.venv-webpage-extraction/bin/python \
+  workers/webpage-extraction/webpage_extraction_worker.py extract-url \
+  --url https://www.example.com/blog/model-launch \
+  --source-project launch-blog-research \
+  --topic-label launch-blog \
+  --publish
+```
+
+Run the launch-blog canary from the live RPC tree:
+
+```bash
+python3 scripts/run_webpage_extraction_canary.py --env-file .env
+```
+
+The worker stores raw HTML, text, Markdown, tables, and metadata below the configured data root before publishing a compact event containing text, provenance, quality signals, and artifact paths.
 
 ### Manual Research Documents
 

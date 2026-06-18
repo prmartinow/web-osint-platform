@@ -27,6 +27,8 @@ Processing
   The normalizer/materializer validates, normalizes, fans records out, and owns
   stateful Pebble/ClickHouse/Typesense/Qdrant materialization. Stateless routing
   can move to Connect only after shadow parity.
+  The webpage extraction worker turns opened URLs, launch blogs, docs pages,
+  model cards, and research result pages into first-class web_document captures.
   The embedding worker enriches observed evidence with local Qwen vectors and
   upserts them into Qdrant.
   The research planner derives research signals, questions, and task seeds
@@ -96,6 +98,8 @@ osint.research_signal.detected.v1
 osint.research_question.proposed.v1
 osint.research_task.created.v1
 osint.wiki.page_materialized.v1
+osint.web.extraction.requested.v1
+osint.web.extraction.failed.v1
 osint.semantic.deadletter.v1
 ```
 
@@ -141,6 +145,8 @@ Collectors should emit one `capture_event` to `evidence.capture.events.v1` for e
 - `user_inputs`: user-supplied notes, corrections, pasted research, attachments, seeds, and instructions that should become queryable evidence.
 
 The normalizer materializes all of these into shared serving stores while preserving source-specific fields inside the raw JSON. Website content and user input are not side channels; they are first-class evidence with provenance and Meaning Layer annotations.
+
+The webpage extraction worker is a collector-side enrichment bridge for ordinary URLs. It fetches HTML, extracts readable article text, Markdown, tables, metadata, links, headings, images, canonical URLs, and filesystem artifact paths, then publishes the result as a standard `web_documents` capture event. This keeps launch blogs and opened Google/X-linked pages on the same replay path as manual research documents and social captures.
 
 ## Meaning Layer
 

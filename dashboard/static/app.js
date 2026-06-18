@@ -429,13 +429,25 @@ async function loadModelsStage() {
   const data = await api(`/api/stage/models?${params({ frame: frame() })}`);
   const cards = data.cards || {};
   const cpu = data.cpu_thread_guard || {};
+  const host = data.host_cpu || {};
+  const status = cards.model_status || {};
+  const usable = Number(status.usable || 0);
+  const loaded = Number(status.loaded || 0);
+  const available = Number(status.available || 0);
+  const ready = Number(status.ready || 0);
+  const workerRows = data.workers || [];
+  const healthyWorkers = workerRows.filter(row => !row.current_alert).length;
+  const qwenThreads = cards.qwen_torch_threads || cpu.torch_threads || '';
+  const hostCapacityAfterReserve = Math.max(0, Number(host.logical_threads || 0) - Number(cpu.reserved_threads || 0));
   $('#modelCards').innerHTML = [
-    card('Models', `${fmtNum(cards.loaded_or_ready)}/${fmtNum(cards.models)}`, 'loaded or ready'),
+    card('Models usable', `${fmtNum(usable)}/${fmtNum(cards.models)}`, `${fmtNum(loaded)} loaded, ${fmtNum(available)} available, ${fmtNum(ready)} ready`),
+    card('Loaded now', fmtNum(loaded), 'Qwen models in memory'),
     card('Active', fmtNum(cards.active_requests), 'in-flight model requests', Number(cards.active_requests || 0) ? 'warn-card' : 'good-card'),
     card('Waiting', fmtNum(cards.waiting_requests), 'queued model requests', Number(cards.waiting_requests || 0) ? 'warn-card' : 'good-card'),
     card('Requests', fmtNum(cards.requests_total), 'Qwen API total'),
-    card('Workers', fmtNum(cards.failed_workers), 'failed or degraded', Number(cards.failed_workers || 0) ? 'bad-card' : 'good-card'),
-    card('CPU guard', `${fmtNum(cpu.effective_threads)}/${fmtNum(cpu.total_threads)}`, `${fmtNum(cpu.reserved_threads)} reserved`),
+    card('Worker health', `${fmtNum(healthyWorkers)}/${fmtNum(workerRows.length)}`, `${fmtNum(cards.historical_worker_failures)} historical failures`, Number(cards.current_worker_alerts || 0) ? 'bad-card' : 'good-card'),
+    card('Host CPU', `${fmtNum(host.physical_cores)}c / ${fmtNum(host.logical_threads)}t`, `${fmtNum(host.sockets)} socket, SMT ${host.threads_per_core || ''}x`),
+    card('Qwen threads', fmtNum(qwenThreads), `${fmtNum(hostCapacityAfterReserve)} host capacity after reserve; process pool ${fmtNum(cpu.effective_threads)}`),
   ].join('');
   renderTable($('#modelGuardrails'), [
     { key: 'operation', label: 'Operation', width: 140 },
@@ -449,24 +461,28 @@ async function loadModelsStage() {
     { key: 'name', label: 'Worker', width: 190 },
     { key: 'role', label: 'Role', width: 150 },
     { key: 'ok', label: 'OK', width: 70, render: r => r.ok ? 'yes' : 'no' },
+    { key: 'current_alert', label: 'Alert', width: 80, render: r => r.current_alert ? 'yes' : '' },
     { key: 'consumed', label: 'Consumed', width: 100, render: r => fmtNum(r.consumed) },
     { key: 'completed', label: 'Completed', width: 110, render: r => fmtNum(r.completed) },
     { key: 'embedded', label: 'Embedded', width: 100, render: r => fmtNum(r.embedded) },
     { key: 'failed', label: 'Failed', width: 90, render: r => fmtNum(r.failed) },
+    { key: 'historical_failures', label: 'Historical failures', width: 150, render: r => fmtNum(r.historical_failures) },
     { key: 'queued_ocr', label: 'OCR queue', width: 100, render: r => fmtNum(r.queued_ocr) },
     { key: 'queued_vl', label: 'VL queue', width: 100, render: r => fmtNum(r.queued_vl) },
     { key: 'last_error', label: 'Last error', width: 280 },
   ], data.workers || [], { id: 'model-workers' });
   renderTable($('#modelRequestMetrics'), [
     { key: 'model', label: 'Model', width: 230 },
+    { key: 'lane', label: 'Lane', width: 190 },
     { key: 'operation', label: 'Operation', width: 140 },
-    { key: 'status', label: 'Status', width: 90 },
     { key: 'requests', label: 'Requests', width: 100, render: r => fmtNum(r.requests) },
+    { key: 'completed', label: 'Completed', width: 110, render: r => fmtNum(r.completed) },
+    { key: 'failed', label: 'Failed', width: 90, render: r => fmtNum(r.failed) },
+    { key: 'outputs', label: 'Outputs', width: 100, render: r => fmtNum(r.outputs) },
     { key: 'avg_duration_seconds', label: 'Avg duration', width: 130, render: r => preciseSeconds(r.avg_duration_seconds) },
     { key: 'max_duration_seconds', label: 'Max duration', width: 130, render: r => preciseSeconds(r.max_duration_seconds) },
-    { key: 'avg_queue_wait_seconds', label: 'Avg wait', width: 110, render: r => preciseSeconds(r.avg_queue_wait_seconds) },
-    { key: 'avg_batch_size', label: 'Avg batch', width: 110, render: r => r.avg_batch_size === null ? '' : Number(r.avg_batch_size || 0).toFixed(2) },
-  ], data.request_metrics || [], { id: 'model-request-metrics' });
+    { key: 'last_output', label: 'Last output', width: 180, render: r => fmtDate(r.last_output) },
+  ], data.model_activity || [], { id: 'model-request-metrics' });
   renderTable($('#modelInventory'), [
     { key: 'name', label: 'Model', width: 220 },
     { key: 'role', label: 'Role', width: 200 },

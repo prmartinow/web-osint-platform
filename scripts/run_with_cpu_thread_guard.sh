@@ -7,7 +7,7 @@ is_uint() {
 
 detected_total="${WEB_OSINT_CPU_TOTAL_THREADS:-}"
 if ! is_uint "$detected_total" || [[ "$detected_total" -lt 1 ]]; then
-  detected_total="$(nproc 2>/dev/null || getconf _NPROCESSORS_ONLN 2>/dev/null || echo 1)"
+  detected_total="$(nproc --all 2>/dev/null || getconf _NPROCESSORS_ONLN 2>/dev/null || nproc 2>/dev/null || echo 1)"
 fi
 if ! is_uint "$detected_total" || [[ "$detected_total" -lt 1 ]]; then
   detected_total=1

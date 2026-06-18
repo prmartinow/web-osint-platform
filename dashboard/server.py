@@ -920,6 +920,53 @@ def safe_dir_size(path_value):
     return {"bytes": total_bytes, "files": total_files, "accessible": True}
 
 
+def host_cpu_info():
+    info = {
+        "model_name": "",
+        "sockets": None,
+        "physical_cores": None,
+        "threads_per_core": None,
+        "logical_threads": os.cpu_count(),
+        "dashboard_affinity_threads": None,
+    }
+    try:
+        info["dashboard_affinity_threads"] = len(os.sched_getaffinity(0))
+    except Exception:
+        pass
+    try:
+        text = Path("/proc/cpuinfo").read_text(encoding="utf-8", errors="replace")
+        processors = len(re.findall(r"^processor\s*:", text, flags=re.MULTILINE))
+        model_match = re.search(r"^model name\s*:\s*(.+)$", text, flags=re.MULTILINE)
+        physical_ids = set()
+        core_pairs = set()
+        current = {}
+        for block in text.strip().split("\n\n"):
+            current = {}
+            for line in block.splitlines():
+                if ":" not in line:
+                    continue
+                key, value = [part.strip() for part in line.split(":", 1)]
+                current[key] = value
+            physical_id = current.get("physical id", "0")
+            core_id = current.get("core id")
+            physical_ids.add(physical_id)
+            if core_id is not None:
+                core_pairs.add((physical_id, core_id))
+        if processors:
+            info["logical_threads"] = processors
+        if model_match:
+            info["model_name"] = model_match.group(1)
+        if physical_ids:
+            info["sockets"] = len(physical_ids)
+        if core_pairs:
+            info["physical_cores"] = len(core_pairs)
+        if info["physical_cores"] and info["logical_threads"]:
+            info["threads_per_core"] = round(info["logical_threads"] / info["physical_cores"], 2)
+    except Exception:
+        pass
+    return info
+
+
 def qwen_request_rows(qwen_health):
     metrics = (qwen_health or {}).get("metrics") or {}
     rows = {}
@@ -961,6 +1008,46 @@ def qwen_request_rows(qwen_health):
             row["avg_batch_size"] = batch.get("sum", 0) / batch.get("count", 1)
             row["max_batch_size"] = batch.get("max")
     return sorted(rows.values(), key=lambda r: (r["model"], r["operation"], r["status"]))
+
+
+def qwen_request_totals(request_metrics):
+    totals = {}
+    for row in request_metrics:
+        key = (row.get("model", ""), row.get("operation", ""))
+        current = totals.setdefault(key, {
+            "requests": 0,
+            "avg_duration_seconds": None,
+            "max_duration_seconds": None,
+            "avg_queue_wait_seconds": None,
+        })
+        current["requests"] += row.get("requests", 0)
+        for field in ("avg_duration_seconds", "avg_queue_wait_seconds"):
+            if row.get(field) is not None:
+                current[field] = row.get(field)
+        if row.get("max_duration_seconds") is not None:
+            current["max_duration_seconds"] = max(current["max_duration_seconds"] or 0, row.get("max_duration_seconds"))
+    return totals
+
+
+def output_count_maps(output_counts):
+    totals = {}
+    latest = {}
+    for row in output_counts:
+        output = row.get("output", "")
+        totals[output] = totals.get(output, 0) + int(row.get("rows") or 0)
+        last = row.get("last_created_at") or ""
+        if last and last > latest.get(output, ""):
+            latest[output] = last
+    return totals, latest
+
+
+def model_status_counts(inventory):
+    counts = {}
+    for row in inventory:
+        status = row.get("status") or "unknown"
+        counts[status] = counts.get(status, 0) + 1
+    usable = sum(counts.get(status, 0) for status in ("loaded", "available", "ready"))
+    return {**counts, "usable": usable}
 
 
 def model_inventory(qwen_health, ocr_status):
@@ -1064,6 +1151,7 @@ def model_stage(params):
         guardrails.append({"operation": operation, **(cfg or {})})
     inventory = model_inventory(qwen_health, ocr_status)
     request_metrics = qwen_request_rows(qwen_health)
+    request_totals = qwen_request_totals(request_metrics)
 
     worker_statuses = [
         ("qwen-inference", "model API", qwen_status),
@@ -1075,10 +1163,17 @@ def model_stage(params):
     workers = []
     for name, role, status in worker_statuses:
         data = status.get("data") or {}
+        current_alert = (not status.get("ok")) or bool(data.get("last_error") or status.get("error"))
+        try:
+            historical_failures = int(data.get("failed") or 0)
+        except (TypeError, ValueError):
+            historical_failures = 0
         workers.append({
             "name": name,
             "role": role,
             "ok": status.get("ok"),
+            "current_alert": current_alert,
+            "historical_failures": historical_failures,
             "started_at": data.get("started_at") or data.get("metrics", {}).get("started_at", ""),
             "consumed": data.get("consumed", ""),
             "completed": data.get("completed", ""),
@@ -1128,6 +1223,7 @@ def model_stage(params):
         """
     ))
     recent_outputs.sort(key=lambda row: row.get("created_at") or "", reverse=True)
+    output_totals, output_latest = output_count_maps(output_counts)
 
     qdrant_collection = service_json("qdrant", lambda: http_json(f"{QDRANT_URL}/collections/{QDRANT_COLLECTION}", timeout=8))
     lineage = [
@@ -1138,26 +1234,76 @@ def model_stage(params):
         {"source": "media artifacts", "model": "Qwen3-VL-Embedding-8B", "worker": "media-vl-worker", "output": "Qdrant vl_image_dense", "audit": "media_vl_embeddings"},
     ]
 
-    loaded_count = sum(1 for row in inventory if row.get("status") in {"loaded", "ready"})
+    status_counts = model_status_counts(inventory)
     active_requests = sum(int((row.get("active") or 0)) for row in guardrails)
     waiting_requests = sum(int((row.get("waiting") or 0)) for row in guardrails)
-    failed_workers = sum(1 for row in workers if not row.get("ok") or row.get("failed") not in ("", 0, "0", None))
+    current_worker_alerts = sum(1 for row in workers if row.get("current_alert"))
+    historical_worker_failures = sum(int(row.get("historical_failures") or 0) for row in workers)
+    host_cpu = host_cpu_info()
+    cpu_guard = qwen_health.get("cpu_thread_guard") or {}
+
+    def qwen_activity(model, operation, lane, completed="", failed="", outputs="", last_output=""):
+        totals = request_totals.get((model, operation), {})
+        return {
+            "model": model,
+            "lane": lane,
+            "operation": operation,
+            "requests": totals.get("requests", 0),
+            "completed": completed,
+            "failed": failed,
+            "outputs": outputs,
+            "avg_duration_seconds": totals.get("avg_duration_seconds"),
+            "max_duration_seconds": totals.get("max_duration_seconds"),
+            "last_output": last_output,
+        }
+
+    vl_worker = next((row for row in workers if row["name"] == "media-vl-worker"), {})
+    ocr_worker = next((row for row in workers if row["name"] == "media-ocr-worker"), {})
+    model_activity = [
+        qwen_activity("Qwen3-Embedding-8B", "embed", "background text vectors"),
+        qwen_activity("Qwen3-Embedding-8B", "query_embed", "research query vectors"),
+        qwen_activity("Qwen3-Reranker-8B", "rerank", "precision rerank"),
+        qwen_activity(
+            "Qwen3-VL-Embedding-8B",
+            "vl",
+            "image/screenshot vectors",
+            completed=vl_worker.get("completed", ""),
+            failed=vl_worker.get("failed", ""),
+            outputs=output_totals.get("media_vl_embeddings", 0),
+            last_output=output_latest.get("media_vl_embeddings", ""),
+        ),
+        {
+            "model": "PaddleOCR",
+            "lane": "OCR extraction",
+            "operation": "ocr",
+            "requests": ocr_worker.get("consumed", 0),
+            "completed": ocr_worker.get("completed", 0),
+            "failed": ocr_worker.get("failed", 0),
+            "outputs": output_totals.get("media_ocr_results", 0),
+            "avg_duration_seconds": None,
+            "max_duration_seconds": None,
+            "last_output": output_latest.get("media_ocr_results", ""),
+        },
+    ]
 
     return {
         "generated_at": ch_data("SELECT now64() AS now")[0]["now"],
         "frame": frame,
         "cards": {
             "models": len(inventory),
-            "loaded_or_ready": loaded_count,
+            "model_status": status_counts,
             "active_requests": active_requests,
             "waiting_requests": waiting_requests,
-            "failed_workers": failed_workers,
+            "current_worker_alerts": current_worker_alerts,
+            "historical_worker_failures": historical_worker_failures,
             "requests_total": sum(row.get("requests", 0) for row in request_metrics),
+            "qwen_torch_threads": cpu_guard.get("torch_threads"),
         },
         "inventory": inventory,
         "lineage": lineage,
         "guardrails": guardrails,
         "request_metrics": request_metrics,
+        "model_activity": model_activity,
         "workers": workers,
         "output_counts": output_counts,
         "recent_outputs": recent_outputs[:80],
@@ -1168,7 +1314,8 @@ def model_stage(params):
         "media_vl": vl_status,
         "qdrant": qdrant_collection,
         "histogram": activity_rows(frame),
-        "cpu_thread_guard": qwen_health.get("cpu_thread_guard") or {},
+        "cpu_thread_guard": cpu_guard,
+        "host_cpu": host_cpu,
         "model_root": str(MODELS_ROOT),
     }
 

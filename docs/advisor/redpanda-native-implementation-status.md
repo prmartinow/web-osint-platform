@@ -17,6 +17,7 @@ Last checked: 2026-06-18
 | Add a shadow validation pipeline. | Done | `connect/pipelines/capture-shadow-validate.yaml` |
 | Add shadow topics. | Done | `scripts/create_topics.sh` |
 | Extend the E2E canary to verify shadow output. | Done | `scripts/run_e2e_canary.py --expect-shadow` |
+| Prove live P0 shadow parity. | Done | `docs/advisor/redpanda-native-parity-proof-20260618.md` |
 | Keep production materialization in the existing Go normalizer/materializer. | Done | Connect service is behind the `shadow` Compose profile; production routing is unchanged. |
 
 ## Implementation Notes
@@ -29,6 +30,14 @@ client/protocol name is an implementation detail.
 `public/components/redpanda` is imported for Redpanda Data Transform support in
 the custom Connect binary, but in this version it does not register stream
 input/output components.
+
+Live P0 parity was proven on 2026-06-18 with strict canary run
+`e2e_canary_20260618T025352Z_1a6fb8`. The published capture event and the
+Connect shadow-validated event produced identical canonical JSON SHA256 hashes,
+the production ClickHouse row used the exact expected `user_input/...` evidence
+ID, Qwen embedding produced a 4096-dimensional `text_dense` vector in Qdrant,
+and dashboard exact search returned the canary at rank 1. See
+`docs/advisor/redpanda-native-parity-proof-20260618.md`.
 
 ## Deferred P1/P2 Work
 

@@ -69,6 +69,10 @@ class CanaryState:
     embedded_chunks: int = 0
     qdrant_points_found: int = 0
     shadow_validated_events: int = 0
+    published_capture_sha256: str = ""
+    shadow_capture_sha256: str = ""
+    shadow_matches_published_capture: bool = False
+    production_observed_matches_capture: bool = False
     dashboard_exact_rank: int | None = None
     dashboard_semantic_rank: int | None = None
     hydration_ok: bool = False
@@ -78,6 +82,11 @@ class CanaryState:
 
 def utc_now() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z")
+
+
+def canonical_json_sha256(value: Any) -> str:
+    payload = json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    return hashlib.sha256(payload).hexdigest()
 
 
 def ch_time(value: str) -> str:
@@ -600,14 +609,21 @@ Entity: Web OSINT Platform.
                     entities=["Web OSINT Platform"],
                 )
                 state.expected_chunks = int(event.get("context", {}).get("chunk_count") or 0)
-                state.evidence_ids = [item["input_id"] for item in event.get("user_inputs", [])]
+                capture_input_ids = [str(item["input_id"]) for item in event.get("user_inputs", [])]
+                state.evidence_ids = [
+                    input_id if input_id.startswith("user_input/") else f"user_input/{input_id}"
+                    for input_id in capture_input_ids
+                ]
+                state.published_capture_sha256 = canonical_json_sha256(event)
                 response_raw = post_event(pandaproxy_url, CAPTURE_TOPIC, event)
                 response = json.loads(response_raw) if response_raw else {}
                 return {
                     "topic": CAPTURE_TOPIC,
                     "collector_run_id": collector_run_id,
                     "expected_chunks": state.expected_chunks,
-                    "evidence_ids": state.evidence_ids,
+                    "capture_input_ids": capture_input_ids,
+                    "expected_evidence_ids": state.evidence_ids,
+                    "published_capture_sha256": state.published_capture_sha256,
                     "pandaproxy_offsets": response,
                 }
 
@@ -626,16 +642,33 @@ Entity: Web OSINT Platform.
                     ]
                     state.shadow_validated_events = len(matched)
                     if matched:
+                        hashes = [canonical_json_sha256(item) for item in matched]
+                        state.shadow_capture_sha256 = hashes[0]
+                        state.shadow_matches_published_capture = state.published_capture_sha256 in hashes
+                        if not state.shadow_matches_published_capture:
+                            return {
+                                "topic": args.shadow_topic,
+                                "matched_events": len(matched),
+                                "collector_run_id": collector_run_id,
+                                "published_capture_sha256": state.published_capture_sha256,
+                                "shadow_capture_sha256_values": hashes,
+                                "matches_published_capture": False,
+                            }
                         return {
                             "topic": args.shadow_topic,
                             "matched_events": len(matched),
                             "collector_run_id": collector_run_id,
+                            "published_capture_sha256": state.published_capture_sha256,
+                            "shadow_capture_sha256": state.shadow_capture_sha256,
+                            "matches_published_capture": True,
                         }
                     return None
 
                 shadow = poll_until(deadline, poll_shadow_topic, interval=1.0)
                 if not shadow:
                     raise RuntimeError(f"shadow Connect topic {args.shadow_topic} did not validate {collector_run_id} before timeout")
+                if not state.shadow_matches_published_capture:
+                    raise RuntimeError("shadow Connect output did not match the published capture event")
                 state.steps.append(StepResult("poll_redpanda_connect_shadow_validated_topic", True, 0, shadow))
 
             def poll_observed_rows() -> dict[str, Any] | None:
@@ -655,13 +688,27 @@ Entity: Web OSINT Platform.
                 ).get("data", [])
                 state.observed_chunks = len(rows)
                 if len(rows) >= state.expected_chunks:
-                    state.evidence_ids = [str(row.get("evidence_id")) for row in rows if row.get("evidence_id")]
-                    return {"rows": rows, "observed_chunks": state.observed_chunks}
+                    captured_evidence_ids = set(state.evidence_ids)
+                    observed_evidence_ids = [str(row.get("evidence_id")) for row in rows if row.get("evidence_id")]
+                    state.production_observed_matches_capture = (
+                        len(rows) == state.expected_chunks
+                        and captured_evidence_ids == set(observed_evidence_ids)
+                    )
+                    state.evidence_ids = observed_evidence_ids
+                    return {
+                        "rows": rows,
+                        "observed_chunks": state.observed_chunks,
+                        "captured_evidence_ids": sorted(captured_evidence_ids),
+                        "observed_evidence_ids": sorted(observed_evidence_ids),
+                        "matches_capture_event": state.production_observed_matches_capture,
+                    }
                 return None
 
             observed = poll_until(deadline, poll_observed_rows)
             if not observed:
                 raise RuntimeError(f"normalizer/ClickHouse did not observe {state.expected_chunks} chunks before timeout")
+            if not state.production_observed_matches_capture:
+                raise RuntimeError("production ClickHouse rows did not exactly match the capture event evidence IDs")
             state.steps.append(StepResult("poll_clickhouse_observed_rows", True, 0, observed))
 
             if audit_consumer is not None:
@@ -823,6 +870,10 @@ Entity: Web OSINT Platform.
                     "embedded_chunks": state.embedded_chunks,
                     "qdrant_points_found": state.qdrant_points_found,
                     "shadow_validated_events": state.shadow_validated_events,
+                    "shadow_matches_published_capture": state.shadow_matches_published_capture,
+                    "production_observed_matches_capture": state.production_observed_matches_capture,
+                    "published_capture_sha256": state.published_capture_sha256,
+                    "shadow_capture_sha256": state.shadow_capture_sha256,
                     "dashboard_exact_rank": state.dashboard_exact_rank,
                     "errors": state.errors,
                 },

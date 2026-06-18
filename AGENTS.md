@@ -29,7 +29,7 @@ This repository is the sanitized control plane for the local Web OSINT evidence 
 - Do not bypass queue/concurrency limits.
 - Default dashboard search must not synchronously rerank.
 - Rerank is explicit precision mode only, with a hard cap of 5 candidates. Broad rerank requests should reject, not silently truncate.
-- PaddleOCR is the OCR/layout source of truth. Qwen3-VL-Embedding is for visual embeddings, not OCR.
+- PaddleOCR 3.7 is the OCR/layout source of truth. Qwen3-VL-Embedding is for visual embeddings, not OCR.
 
 ## Redpanda
 

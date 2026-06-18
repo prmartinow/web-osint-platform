@@ -24,8 +24,9 @@ echo "[$(date -Is)] installing media enrichment dependencies"
   "requests>=2.32.0" \
   "confluent-kafka>=2.6.0" \
   "numpy>=1.26.0" \
-  "paddlepaddle>=3.0.0" \
-  "paddleocr>=3.0.0"
+  "paddlepaddle>=3.3.0,<3.4.0" \
+  "paddlex>=3.7.0,<3.8.0" \
+  "paddleocr>=3.7.0,<3.8.0"
 
 echo "[$(date -Is)] media enrichment venv ready"
 echo "paddle_pdx_cache_home=$PADDLE_PDX_CACHE_HOME"
@@ -33,6 +34,6 @@ echo "paddle_pdx_enable_mkldnn_bydefault=$PADDLE_PDX_ENABLE_MKLDNN_BYDEFAULT"
 "$VENV/bin/python" - <<'PY'
 import importlib.metadata as md
 
-for package in ["pillow", "requests", "confluent-kafka", "numpy", "paddlepaddle", "paddleocr"]:
+for package in ["pillow", "requests", "confluent-kafka", "numpy", "paddlepaddle", "paddlex", "paddleocr"]:
     print(f"{package}={md.version(package)}")
 PY

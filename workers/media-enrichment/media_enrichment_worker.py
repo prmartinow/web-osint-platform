@@ -268,7 +268,7 @@ class WorkerStats:
 
     def snapshot(self) -> dict[str, Any]:
         with self.lock:
-            return {
+            payload = {
                 "ok": True,
                 "role": self.role,
                 "started_at": self.started_at,
@@ -285,6 +285,9 @@ class WorkerStats:
                 "clickhouse_database": CLICKHOUSE_DATABASE,
                 "qdrant_collection": QDRANT_COLLECTION,
             }
+            if self.role == "ocr":
+                payload["runtime"] = ocr_runtime_info()
+            return payload
 
 
 stats = WorkerStats(role=env("MEDIA_WORKER_ROLE", "unknown"))
@@ -552,15 +555,18 @@ def normalized_ocr_text(value: str) -> str:
 
 
 def ocr_runtime_info() -> dict[str, str]:
-    try:
-        import importlib.metadata as md
+    import importlib.metadata as md
 
-        paddlepaddle_version = md.version("paddlepaddle")
-    except Exception:
-        paddlepaddle_version = ""
+    def package_version(package: str) -> str:
+        try:
+            return md.version(package)
+        except Exception:
+            return ""
+
     return {
         "paddleocr_version": paddleocr_version(),
-        "paddlepaddle_version": paddlepaddle_version,
+        "paddlepaddle_version": package_version("paddlepaddle"),
+        "paddlex_version": package_version("paddlex"),
         "python_version": sys.version.split()[0],
         "paddle_pdx_enable_mkldnn_bydefault": env("PADDLE_PDX_ENABLE_MKLDNN_BYDEFAULT", ""),
         "paddle_pdx_cache_home": env("PADDLE_PDX_CACHE_HOME", ""),

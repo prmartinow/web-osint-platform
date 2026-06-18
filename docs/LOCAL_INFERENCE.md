@@ -9,10 +9,17 @@ The Web OSINT Platform uses local CPU inference for retrieval enrichment on the 
 | Default text embeddings | `Qwen/Qwen3-Embedding-8B` | `/mnt/data/web-osint-platform/models/Qwen3-Embedding-8B` |
 | Reranking | `Qwen/Qwen3-Reranker-8B` | `/mnt/data/web-osint-platform/models/Qwen3-Reranker-8B` |
 | Experimental multimodal embeddings | `Qwen/Qwen3-VL-Embedding-8B` | `/mnt/data/web-osint-platform/models/Qwen3-VL-Embedding-8B` |
+| OCR/layout extraction | `PaddleOCR` 3.7 line | `/mnt/data/web-osint-platform/paddleocr` |
 
 `Qwen3-Embedding-8B` is the default dense text embedder. Pair it with BM25/keyword/metadata filters from Typesense and with `Qwen3-Reranker-8B` for second-stage reranking.
 
 `Qwen3-VL-Embedding-8B` is reserved for screenshots, charts, UI captures, benchmark tables, and other images where OCR may miss layout or visual context.
+
+`PaddleOCR` is the OCR/layout source of truth for media artifacts. The media
+enrichment installer pins the OCR stack to the 3.7 line:
+`paddleocr>=3.7.0,<3.8.0`, `paddlex>=3.7.0,<3.8.0`, and
+`paddlepaddle>=3.3.0,<3.4.0`. The live worker exposes its active runtime under
+`GET /stats` on `127.0.0.1:18212`.
 
 ## Qdrant Vector Layout
 
@@ -134,6 +141,7 @@ systemctl --user status web-osint-embedding-worker.service --no-pager
 curl -fsS http://127.0.0.1:18200/healthz
 curl -fsS http://127.0.0.1:18200/metrics
 curl -fsS http://127.0.0.1:18201/stats
+curl -fsS http://127.0.0.1:18212/stats
 ```
 
 Existing ClickHouse evidence can be backfilled into Qdrant after the model service is healthy:

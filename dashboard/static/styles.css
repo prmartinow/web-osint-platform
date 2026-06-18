@@ -57,6 +57,13 @@ body {
   gap: 8px;
   flex: 0 0 auto;
 }
+.refresh-state {
+  color: var(--muted);
+  font-size: 12px;
+  min-width: 86px;
+  text-align: right;
+  white-space: nowrap;
+}
 
 h1, h2 { margin: 0; letter-spacing: 0; }
 h1 { font-size: 22px; font-weight: 750; }

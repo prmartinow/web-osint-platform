@@ -29,6 +29,14 @@
         <option value="30d">30d</option>
       </select>
       <button id="refreshAll">Refresh</button>
+      <select id="autoRefreshSelect" title="Auto refresh">
+        <option value="0">Auto off</option>
+        <option value="1000">Auto 1s</option>
+        <option value="5000" selected>Auto 5s</option>
+        <option value="15000">Auto 15s</option>
+        <option value="30000">Auto 30s</option>
+      </select>
+      <span id="refreshState" class="refresh-state">Idle</span>
       <button id="themeSwitch" class="theme-switch" role="switch" aria-checked="false" aria-label="Toggle light and dark mode" title="Toggle theme">
         <span class="sun" aria-hidden="true"></span>
         <span class="moon" aria-hidden="true"></span>
@@ -58,6 +66,13 @@
         <div class="stage-subnav">
           <button class="subtab" data-view="stream" data-pane="metrics">Metrics</button>
           <button class="subtab" data-view="stream" data-pane="data">Data</button>
+        </div>
+      </div>
+      <div class="stage-group" data-stage="models">
+        <button class="stage-tab" data-view="models">Models / Inference</button>
+        <div class="stage-subnav">
+          <button class="subtab" data-view="models" data-pane="metrics">Metrics</button>
+          <button class="subtab" data-view="models" data-pane="data">Data</button>
         </div>
       </div>
       <div class="stage-group" data-stage="filesystem">
@@ -183,6 +198,46 @@
             <div id="streamWorker" class="kv-list"></div>
           </section>
         </div>
+      </div>
+    </section>
+
+    <section id="models" class="view">
+      <div class="pane active" data-pane="metrics">
+        <div class="cards" id="modelCards"></div>
+        <div class="panel-grid">
+          <section class="panel">
+            <h2>Runtime Guardrails</h2>
+            <div id="modelGuardrails"></div>
+          </section>
+          <section class="panel">
+            <h2>Workers</h2>
+            <div id="modelWorkers"></div>
+          </section>
+        </div>
+        <section class="panel">
+          <h2>Inference Activity</h2>
+          <div id="modelRequestMetrics"></div>
+        </section>
+      </div>
+      <div class="pane" data-pane="data">
+        <section class="panel">
+          <h2>Model Inventory</h2>
+          <div id="modelInventory"></div>
+        </section>
+        <div class="panel-grid">
+          <section class="panel">
+            <h2>Lineage</h2>
+            <div id="modelLineage"></div>
+          </section>
+          <section class="panel">
+            <h2>Output Counts</h2>
+            <div id="modelOutputCounts"></div>
+          </section>
+        </div>
+        <section class="panel">
+          <h2>Recent Model Outputs</h2>
+          <div id="modelRecentOutputs"></div>
+        </section>
       </div>
     </section>
 

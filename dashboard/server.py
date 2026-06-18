@@ -32,6 +32,11 @@ QDRANT_COLLECTION = os.environ.get("QDRANT_COLLECTION", "web_osint_evidence_v1")
 REDPANDA_PROXY_URL = os.environ.get("REDPANDA_PROXY_URL", "http://web-osint-redpanda:8082").rstrip("/")
 REDPANDA_ADMIN_URL = os.environ.get("REDPANDA_ADMIN_URL", "http://web-osint-redpanda:9644").rstrip("/")
 QWEN_INFERENCE_URL = os.environ.get("QWEN_INFERENCE_URL", "http://127.0.0.1:18200").rstrip("/")
+EMBEDDING_WORKER_URL = os.environ.get("EMBEDDING_WORKER_URL", "http://127.0.0.1:18201").rstrip("/")
+MEDIA_ROUTER_URL = os.environ.get("MEDIA_ROUTER_URL", "http://127.0.0.1:18211").rstrip("/")
+MEDIA_OCR_WORKER_URL = os.environ.get("MEDIA_OCR_WORKER_URL", "http://127.0.0.1:18212").rstrip("/")
+MEDIA_VL_WORKER_URL = os.environ.get("MEDIA_VL_WORKER_URL", "http://127.0.0.1:18213").rstrip("/")
+MODELS_ROOT = Path(os.environ.get("WEB_OSINT_MODELS_DIR", "/mnt/data/web-osint-platform/models")).resolve()
 RESEARCH_SEARCH_TIMEOUT_SECONDS = int(os.environ.get("RESEARCH_SEARCH_TIMEOUT_SECONDS", "300"))
 RESEARCH_QUERY_EMBEDDING_PROMPT = os.environ.get(
     "RESEARCH_QUERY_EMBEDDING_PROMPT",
@@ -431,6 +436,7 @@ def live_dashboard(params):
             "redpanda": service_json("redpanda", lambda: http_json(f"{REDPANDA_PROXY_URL}/brokers")),
             "normalizer": service_json("normalizer", lambda: http_json(f"{NORMALIZER_URL}/stats")),
             "research_planner": service_json("research_planner", lambda: http_json(f"{RESEARCH_PLANNER_URL}/stats")),
+            "qwen": service_json("qwen", lambda: http_json(f"{QWEN_INFERENCE_URL}/healthz")),
             "typesense": service_json("typesense", lambda: http_json(
                 f"{TYPESENSE_URL}/collections/evidence_posts",
                 headers={"X-TYPESENSE-API-KEY": TYPESENSE_KEY},
@@ -888,6 +894,282 @@ def qdrant_stage(params):
         "collection": collection,
         "metrics": metrics,
         "histogram": activity_rows(frame),
+    }
+
+
+def safe_dir_size(path_value):
+    if not path_value:
+        return {"bytes": None, "files": None, "accessible": False}
+    path = Path(path_value).resolve()
+    try:
+        path.relative_to(MODELS_ROOT.parent)
+    except ValueError:
+        return {"bytes": None, "files": None, "accessible": False}
+    if not path.exists() or not path.is_dir():
+        return {"bytes": None, "files": None, "accessible": False}
+    total_bytes = 0
+    total_files = 0
+    for dirpath, dirnames, filenames in os.walk(path):
+        for filename in filenames:
+            try:
+                stat = (Path(dirpath) / filename).stat()
+            except OSError:
+                continue
+            total_files += 1
+            total_bytes += stat.st_size
+    return {"bytes": total_bytes, "files": total_files, "accessible": True}
+
+
+def qwen_request_rows(qwen_health):
+    metrics = (qwen_health or {}).get("metrics") or {}
+    rows = {}
+    for counter in metrics.get("counters", []):
+        if counter.get("name") != "web_osint_qwen_requests_total":
+            continue
+        labels = counter.get("labels") or {}
+        key = (labels.get("model", ""), labels.get("operation", ""), labels.get("status", ""))
+        row = rows.setdefault(key, {
+            "model": key[0],
+            "operation": key[1],
+            "status": key[2],
+            "requests": 0,
+            "avg_duration_seconds": None,
+            "max_duration_seconds": None,
+            "avg_queue_wait_seconds": None,
+            "max_queue_wait_seconds": None,
+            "avg_batch_size": None,
+            "max_batch_size": None,
+        })
+        row["requests"] += counter.get("value", 0)
+    obs_by_key = {}
+    for obs in metrics.get("observations", []):
+        labels = obs.get("labels") or {}
+        key = (labels.get("model", ""), labels.get("operation", ""))
+        obs_by_key.setdefault(key, {})[obs.get("name", "")] = obs
+    for row in rows.values():
+        obs = obs_by_key.get((row["model"], row["operation"]), {})
+        duration = obs.get("web_osint_qwen_request_duration_seconds") or {}
+        queue = obs.get("web_osint_qwen_queue_wait_seconds") or {}
+        batch = obs.get("web_osint_qwen_batch_size") or {}
+        if duration.get("count"):
+            row["avg_duration_seconds"] = duration.get("sum", 0) / duration.get("count", 1)
+            row["max_duration_seconds"] = duration.get("max")
+        if queue.get("count"):
+            row["avg_queue_wait_seconds"] = queue.get("sum", 0) / queue.get("count", 1)
+            row["max_queue_wait_seconds"] = queue.get("max")
+        if batch.get("count"):
+            row["avg_batch_size"] = batch.get("sum", 0) / batch.get("count", 1)
+            row["max_batch_size"] = batch.get("max")
+    return sorted(rows.values(), key=lambda r: (r["model"], r["operation"], r["status"]))
+
+
+def model_inventory(qwen_health, ocr_status):
+    paths = (qwen_health or {}).get("model_paths") or {}
+    exists = (qwen_health or {}).get("model_path_exists") or {}
+    loaded = (qwen_health or {}).get("loaded") or {}
+    model_specs = [
+        {
+            "id": "text",
+            "name": "Qwen3-Embedding-8B",
+            "repo": os.environ.get("WEB_OSINT_TEXT_EMBEDDING_MODEL", "Qwen/Qwen3-Embedding-8B"),
+            "role": "default text embedding",
+            "modality": "text",
+            "precision": "bf16 safetensors",
+            "dimension": 4096,
+            "vector_name": "text_dense",
+            "endpoint": "POST /embed model=text",
+            "worker": "web-osint-embedding-worker",
+            "output": "Qdrant text_dense + osint.semantic.embedded.v1",
+        },
+        {
+            "id": "reranker",
+            "name": "Qwen3-Reranker-8B",
+            "repo": os.environ.get("WEB_OSINT_RERANKER_MODEL", "Qwen/Qwen3-Reranker-8B"),
+            "role": "precision reranking",
+            "modality": "text pairs",
+            "precision": "bf16 safetensors",
+            "dimension": "",
+            "vector_name": "",
+            "endpoint": "POST /rerank",
+            "worker": "research search coordinator",
+            "output": "reranked research-search results",
+        },
+        {
+            "id": "vl",
+            "name": "Qwen3-VL-Embedding-8B",
+            "repo": os.environ.get("WEB_OSINT_VL_EMBEDDING_MODEL", "Qwen/Qwen3-VL-Embedding-8B"),
+            "role": "image/screenshot embedding",
+            "modality": "image + text",
+            "precision": "bf16 safetensors",
+            "dimension": 4096,
+            "vector_name": "vl_image_dense",
+            "endpoint": "POST /embed model=vl",
+            "worker": "web-osint-media-vl-worker",
+            "output": "Qdrant vl_image_dense + media_vl_embeddings",
+        },
+    ]
+    inventory = []
+    for spec in model_specs:
+        path = paths.get(spec["id"], str(MODELS_ROOT / spec["name"]))
+        size = safe_dir_size(path)
+        if spec["id"] in loaded:
+            status = "loaded"
+        elif exists.get(spec["id"]):
+            status = "available"
+        else:
+            status = "missing"
+        inventory.append({
+            **spec,
+            "status": status,
+            "path": path,
+            "path_exists": bool(exists.get(spec["id"])),
+            "size_bytes": size["bytes"],
+            "files": size["files"],
+            "loaded_for_seconds": (loaded.get(spec["id"]) or {}).get("loaded_for_seconds"),
+        })
+    ocr_data = (ocr_status or {}).get("data") or {}
+    inventory.append({
+        "id": "paddleocr",
+        "name": "PaddleOCR",
+        "repo": "paddlepaddle/PaddleOCR",
+        "role": "OCR text extraction",
+        "modality": "image -> text",
+        "precision": "CPU runtime",
+        "dimension": "",
+        "vector_name": "ocr_dense downstream",
+        "endpoint": f"{MEDIA_OCR_WORKER_URL}/stats",
+        "worker": "web-osint-media-ocr-worker",
+        "output": "media_ocr_results + OCR artifacts",
+        "status": "ready" if ocr_status.get("ok") and ocr_data.get("ok", True) else "down",
+        "path": "",
+        "path_exists": "",
+        "size_bytes": None,
+        "files": None,
+        "loaded_for_seconds": "",
+    })
+    return inventory
+
+
+def model_stage(params):
+    frame = params.get("frame", ["24h"])[0]
+    qwen_status = service_json("qwen", lambda: http_json(f"{QWEN_INFERENCE_URL}/healthz", timeout=8))
+    embedding_status = service_json("embedding_worker", lambda: http_json(f"{EMBEDDING_WORKER_URL}/stats", timeout=8))
+    router_status = service_json("media_router", lambda: http_json(f"{MEDIA_ROUTER_URL}/stats", timeout=8))
+    ocr_status = service_json("media_ocr", lambda: http_json(f"{MEDIA_OCR_WORKER_URL}/stats", timeout=8))
+    vl_status = service_json("media_vl", lambda: http_json(f"{MEDIA_VL_WORKER_URL}/stats", timeout=8))
+
+    qwen_health = qwen_status.get("data") if qwen_status.get("ok") else {}
+    guardrails = []
+    for operation, cfg in (qwen_health.get("guardrails") or {}).items():
+        guardrails.append({"operation": operation, **(cfg or {})})
+    inventory = model_inventory(qwen_health, ocr_status)
+    request_metrics = qwen_request_rows(qwen_health)
+
+    worker_statuses = [
+        ("qwen-inference", "model API", qwen_status),
+        ("embedding-worker", "text embedding", embedding_status),
+        ("media-router", "media routing", router_status),
+        ("media-ocr-worker", "OCR", ocr_status),
+        ("media-vl-worker", "VL embedding", vl_status),
+    ]
+    workers = []
+    for name, role, status in worker_statuses:
+        data = status.get("data") or {}
+        workers.append({
+            "name": name,
+            "role": role,
+            "ok": status.get("ok"),
+            "started_at": data.get("started_at") or data.get("metrics", {}).get("started_at", ""),
+            "consumed": data.get("consumed", ""),
+            "completed": data.get("completed", ""),
+            "embedded": data.get("embedded", ""),
+            "failed": data.get("failed", ""),
+            "queued_ocr": data.get("queued_ocr", ""),
+            "queued_vl": data.get("queued_vl", ""),
+            "last_error": data.get("last_error") or status.get("error", ""),
+        })
+
+    output_counts = []
+    output_counts.extend(optional_ch_data(
+        """
+        SELECT 'media_ocr_results' AS output, status, count() AS rows, max(created_at) AS last_created_at
+        FROM media_ocr_results
+        GROUP BY status
+        ORDER BY output, status
+        """
+    ))
+    output_counts.extend(optional_ch_data(
+        """
+        SELECT 'media_vl_embeddings' AS output, status, count() AS rows, max(created_at) AS last_created_at
+        FROM media_vl_embeddings
+        GROUP BY status
+        ORDER BY output, status
+        """
+    ))
+    recent_outputs = []
+    recent_outputs.extend(optional_ch_data(
+        """
+        SELECT 'ocr' AS lane, created_at, evidence_id, engine AS model, status,
+               concat(toString(text_chars), ' chars / ', toString(block_count), ' blocks') AS detail,
+               json_artifact_path AS artifact
+        FROM media_ocr_results
+        ORDER BY created_at DESC
+        LIMIT 50
+        """
+    ))
+    recent_outputs.extend(optional_ch_data(
+        """
+        SELECT 'vl' AS lane, created_at, evidence_id, model, status,
+               concat(vector_name, ' / ', toString(image_width), 'x', toString(image_height)) AS detail,
+               qdrant_point_id AS artifact
+        FROM media_vl_embeddings
+        ORDER BY created_at DESC
+        LIMIT 50
+        """
+    ))
+    recent_outputs.sort(key=lambda row: row.get("created_at") or "", reverse=True)
+
+    qdrant_collection = service_json("qdrant", lambda: http_json(f"{QDRANT_URL}/collections/{QDRANT_COLLECTION}", timeout=8))
+    lineage = [
+        {"source": "evidence.*.observed.v1", "model": "Qwen3-Embedding-8B", "worker": "embedding-worker", "output": "Qdrant text_dense", "audit": "osint.semantic.embedded.v1"},
+        {"source": "research query", "model": "Qwen3-Embedding-8B", "worker": "dashboard coordinator", "output": "Qdrant candidate search", "audit": "request metrics"},
+        {"source": "research candidates", "model": "Qwen3-Reranker-8B", "worker": "dashboard coordinator", "output": "precision reranked results", "audit": "request metrics"},
+        {"source": "media artifacts", "model": "PaddleOCR", "worker": "media-ocr-worker", "output": "media_ocr_results + OCR files", "audit": "ClickHouse"},
+        {"source": "media artifacts", "model": "Qwen3-VL-Embedding-8B", "worker": "media-vl-worker", "output": "Qdrant vl_image_dense", "audit": "media_vl_embeddings"},
+    ]
+
+    loaded_count = sum(1 for row in inventory if row.get("status") in {"loaded", "ready"})
+    active_requests = sum(int((row.get("active") or 0)) for row in guardrails)
+    waiting_requests = sum(int((row.get("waiting") or 0)) for row in guardrails)
+    failed_workers = sum(1 for row in workers if not row.get("ok") or row.get("failed") not in ("", 0, "0", None))
+
+    return {
+        "generated_at": ch_data("SELECT now64() AS now")[0]["now"],
+        "frame": frame,
+        "cards": {
+            "models": len(inventory),
+            "loaded_or_ready": loaded_count,
+            "active_requests": active_requests,
+            "waiting_requests": waiting_requests,
+            "failed_workers": failed_workers,
+            "requests_total": sum(row.get("requests", 0) for row in request_metrics),
+        },
+        "inventory": inventory,
+        "lineage": lineage,
+        "guardrails": guardrails,
+        "request_metrics": request_metrics,
+        "workers": workers,
+        "output_counts": output_counts,
+        "recent_outputs": recent_outputs[:80],
+        "qwen": qwen_status,
+        "embedding_worker": embedding_status,
+        "media_router": router_status,
+        "media_ocr": ocr_status,
+        "media_vl": vl_status,
+        "qdrant": qdrant_collection,
+        "histogram": activity_rows(frame),
+        "cpu_thread_guard": qwen_health.get("cpu_thread_guard") or {},
+        "model_root": str(MODELS_ROOT),
     }
 
 
@@ -1927,6 +2209,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self.send_json(pebble_stage())
             if parsed.path == "/api/stage/typesense":
                 return self.send_json(typesense_stage(params))
+            if parsed.path == "/api/stage/models":
+                return self.send_json(model_stage(params))
             if parsed.path == "/api/stage/qdrant":
                 return self.send_json(qdrant_stage(params))
             if parsed.path == "/api/stage/clickhouse":

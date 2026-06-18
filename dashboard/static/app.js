@@ -5,6 +5,9 @@ const state = {
   facets: {},
   activeView: 'live',
   activePane: 'metrics',
+  autoRefreshMs: Number(localStorage.getItem('web-osint-dashboard-auto-refresh-ms') || 5000),
+  refreshTimer: null,
+  loading: false,
   fsPath: '',
 };
 
@@ -54,6 +57,14 @@ function ageText(seconds) {
   if (n < 3600) return `${Math.round(n / 60)}m`;
   if (n < 86400) return `${Math.round(n / 3600)}h`;
   return `${Math.round(n / 86400)}d`;
+}
+
+function preciseSeconds(value) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return '';
+  if (n < 1) return `${(n * 1000).toFixed(1)} ms`;
+  if (n < 60) return `${n.toFixed(2)} s`;
+  return ageText(n);
 }
 
 async function api(path) {
@@ -107,6 +118,28 @@ function initTheme() {
   $('#themeSwitch').addEventListener('click', () => {
     setTheme(document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark');
   });
+}
+
+function setRefreshState(text) {
+  const node = $('#refreshState');
+  if (node) node.textContent = text;
+}
+
+function setAutoRefresh(ms) {
+  state.autoRefreshMs = Number(ms || 0);
+  localStorage.setItem('web-osint-dashboard-auto-refresh-ms', String(state.autoRefreshMs));
+  const select = $('#autoRefreshSelect');
+  if (select) select.value = String(state.autoRefreshMs);
+  if (state.refreshTimer) {
+    clearInterval(state.refreshTimer);
+    state.refreshTimer = null;
+  }
+  if (state.autoRefreshMs > 0) {
+    state.refreshTimer = setInterval(() => loadActive({ auto: true }), state.autoRefreshMs);
+    setRefreshState(`Auto ${Math.round(state.autoRefreshMs / 1000)}s`);
+  } else {
+    setRefreshState('Auto off');
+  }
 }
 
 function card(label, value, foot = '', cls = '') {
@@ -300,6 +333,7 @@ function renderFlow(data) {
     ['Collectors', true, 'runs'],
     ['Redpanda', services.redpanda?.ok, 'topics'],
     ['Worker', services.normalizer?.ok, 'materialize'],
+    ['Models', services.qwen?.ok !== false, 'inference'],
     ['Meaning', services.normalizer?.ok, `${fmtNum(services.normalizer?.data?.labels_emitted || 0)} labels`],
     ['Research', services.research_planner?.ok, `${fmtNum(services.research_planner?.data?.tasks_created || 0)} tasks`],
     ['Filesystem', services.filesystem?.ok, 'media/OCR'],
@@ -391,6 +425,87 @@ async function loadStream() {
   ], data.bytes_by_topic || [], { id: 'stream-metrics' });
 }
 
+async function loadModelsStage() {
+  const data = await api(`/api/stage/models?${params({ frame: frame() })}`);
+  const cards = data.cards || {};
+  const cpu = data.cpu_thread_guard || {};
+  $('#modelCards').innerHTML = [
+    card('Models', `${fmtNum(cards.loaded_or_ready)}/${fmtNum(cards.models)}`, 'loaded or ready'),
+    card('Active', fmtNum(cards.active_requests), 'in-flight model requests', Number(cards.active_requests || 0) ? 'warn-card' : 'good-card'),
+    card('Waiting', fmtNum(cards.waiting_requests), 'queued model requests', Number(cards.waiting_requests || 0) ? 'warn-card' : 'good-card'),
+    card('Requests', fmtNum(cards.requests_total), 'Qwen API total'),
+    card('Workers', fmtNum(cards.failed_workers), 'failed or degraded', Number(cards.failed_workers || 0) ? 'bad-card' : 'good-card'),
+    card('CPU guard', `${fmtNum(cpu.effective_threads)}/${fmtNum(cpu.total_threads)}`, `${fmtNum(cpu.reserved_threads)} reserved`),
+  ].join('');
+  renderTable($('#modelGuardrails'), [
+    { key: 'operation', label: 'Operation', width: 140 },
+    { key: 'active', label: 'Active', width: 80, render: r => fmtNum(r.active) },
+    { key: 'waiting', label: 'Waiting', width: 90, render: r => fmtNum(r.waiting) },
+    { key: 'concurrency', label: 'Concurrency', width: 120, render: r => fmtNum(r.concurrency) },
+    { key: 'queue_limit', label: 'Queue limit', width: 120, render: r => fmtNum(r.queue_limit) },
+    { key: 'queue_timeout_seconds', label: 'Timeout', width: 110, render: r => preciseSeconds(r.queue_timeout_seconds) },
+  ], data.guardrails || [], { id: 'model-guardrails' });
+  renderTable($('#modelWorkers'), [
+    { key: 'name', label: 'Worker', width: 190 },
+    { key: 'role', label: 'Role', width: 150 },
+    { key: 'ok', label: 'OK', width: 70, render: r => r.ok ? 'yes' : 'no' },
+    { key: 'consumed', label: 'Consumed', width: 100, render: r => fmtNum(r.consumed) },
+    { key: 'completed', label: 'Completed', width: 110, render: r => fmtNum(r.completed) },
+    { key: 'embedded', label: 'Embedded', width: 100, render: r => fmtNum(r.embedded) },
+    { key: 'failed', label: 'Failed', width: 90, render: r => fmtNum(r.failed) },
+    { key: 'queued_ocr', label: 'OCR queue', width: 100, render: r => fmtNum(r.queued_ocr) },
+    { key: 'queued_vl', label: 'VL queue', width: 100, render: r => fmtNum(r.queued_vl) },
+    { key: 'last_error', label: 'Last error', width: 280 },
+  ], data.workers || [], { id: 'model-workers' });
+  renderTable($('#modelRequestMetrics'), [
+    { key: 'model', label: 'Model', width: 230 },
+    { key: 'operation', label: 'Operation', width: 140 },
+    { key: 'status', label: 'Status', width: 90 },
+    { key: 'requests', label: 'Requests', width: 100, render: r => fmtNum(r.requests) },
+    { key: 'avg_duration_seconds', label: 'Avg duration', width: 130, render: r => preciseSeconds(r.avg_duration_seconds) },
+    { key: 'max_duration_seconds', label: 'Max duration', width: 130, render: r => preciseSeconds(r.max_duration_seconds) },
+    { key: 'avg_queue_wait_seconds', label: 'Avg wait', width: 110, render: r => preciseSeconds(r.avg_queue_wait_seconds) },
+    { key: 'avg_batch_size', label: 'Avg batch', width: 110, render: r => r.avg_batch_size === null ? '' : Number(r.avg_batch_size || 0).toFixed(2) },
+  ], data.request_metrics || [], { id: 'model-request-metrics' });
+  renderTable($('#modelInventory'), [
+    { key: 'name', label: 'Model', width: 220 },
+    { key: 'role', label: 'Role', width: 200 },
+    { key: 'modality', label: 'Modality', width: 130 },
+    { key: 'status', label: 'Status', width: 100 },
+    { key: 'repo', label: 'Repo', width: 260 },
+    { key: 'precision', label: 'Precision', width: 160 },
+    { key: 'dimension', label: 'Dim', width: 80 },
+    { key: 'vector_name', label: 'Vector', width: 150 },
+    { key: 'endpoint', label: 'Endpoint', width: 210 },
+    { key: 'size_bytes', label: 'Size', width: 100, render: r => r.size_bytes === null ? '' : fmtBytes(r.size_bytes) },
+    { key: 'files', label: 'Files', width: 80, render: r => r.files === null ? '' : fmtNum(r.files) },
+    { key: 'loaded_for_seconds', label: 'Loaded for', width: 110, render: r => preciseSeconds(r.loaded_for_seconds) },
+    { key: 'path', label: 'Path', width: 360 },
+  ], data.inventory || [], { id: 'model-inventory' });
+  renderTable($('#modelLineage'), [
+    { key: 'source', label: 'Source', width: 220 },
+    { key: 'model', label: 'Model', width: 230 },
+    { key: 'worker', label: 'Worker', width: 210 },
+    { key: 'output', label: 'Output', width: 300 },
+    { key: 'audit', label: 'Audit', width: 180 },
+  ], data.lineage || [], { id: 'model-lineage' });
+  renderTable($('#modelOutputCounts'), [
+    { key: 'output', label: 'Output', width: 190 },
+    { key: 'status', label: 'Status', width: 100 },
+    { key: 'rows', label: 'Rows', width: 90, render: r => fmtNum(r.rows) },
+    { key: 'last_created_at', label: 'Last created', width: 180, render: r => fmtDate(r.last_created_at) },
+  ], data.output_counts || [], { id: 'model-output-counts' });
+  renderTable($('#modelRecentOutputs'), [
+    { key: 'lane', label: 'Lane', width: 90 },
+    { key: 'created_at', label: 'Created', width: 180, render: r => fmtDate(r.created_at) },
+    { key: 'model', label: 'Model', width: 220 },
+    { key: 'status', label: 'Status', width: 100 },
+    { key: 'evidence_id', label: 'Evidence ID', width: 260 },
+    { key: 'detail', label: 'Detail', width: 280 },
+    { key: 'artifact', label: 'Artifact', width: 360 },
+  ], data.recent_outputs || [], { id: 'model-recent-outputs' });
+}
+
 async function loadFilesystem(path = state.fsPath) {
   const data = await api(`/api/stage/filesystem?${params({ frame: frame() })}`);
   $('#fsCards').innerHTML = [
@@ -476,7 +591,9 @@ async function loadTypesenseStage() {
   ].join('');
   renderHistogram($('#typesenseHistogram'), data.histogram || []);
   renderDynamicTable($('#typesenseSchema'), c.fields || [], 'typesense-schema');
-  await loadTypesenseSearch();
+  if (state.activeView === 'typesense' && state.activePane === 'data') {
+    await loadTypesenseSearch();
+  }
 }
 
 async function loadTypesenseSearch() {
@@ -606,7 +723,9 @@ async function loadClickHouseStage() {
     { key: 'total_bytes', label: 'Bytes', width: 130, render: r => fmtBytes(r.total_bytes) },
   ], data.tables || [], { id: 'clickhouse-tables' });
   renderDynamicTable($('#clickhouseMetrics'), [...(data.metrics || []), ...(data.asynchronous_metrics || [])], 'clickhouse-metrics');
-  await runClickHouseQuery();
+  if (state.activeView === 'clickhouse' && state.activePane === 'data') {
+    await runClickHouseQuery();
+  }
 }
 
 async function runClickHouseQuery() {
@@ -704,24 +823,39 @@ function activateView(id, pane = 'metrics') {
   loadActive();
 }
 
-function loadActive() {
+async function loadActive(options = {}) {
+  if (options.auto && state.activePane !== 'metrics') return;
+  if (options.auto && state.activeView === 'research-search') return;
+  if (state.loading) return;
+  state.loading = true;
+  setRefreshState(options.auto ? 'Auto refreshing...' : 'Refreshing...');
   const id = state.activeView;
-  if (id === 'live') return loadLive();
-  if (id === 'collectors') return loadCollectors();
-  if (id === 'stream') return loadStream();
-  if (id === 'filesystem') return loadFilesystem();
-  if (id === 'pebble') return loadPebble();
-  if (id === 'typesense') return loadTypesenseStage();
-  if (id === 'research-search') return loadResearchSearch();
-  if (id === 'qdrant') return loadQdrantStage();
-  if (id === 'meaning') return loadMeaningStage();
-  if (id === 'clickhouse') return loadClickHouseStage();
+  try {
+    if (id === 'live') await loadLive();
+    else if (id === 'collectors') await loadCollectors();
+    else if (id === 'stream') await loadStream();
+    else if (id === 'models') await loadModelsStage();
+    else if (id === 'filesystem') await loadFilesystem();
+    else if (id === 'pebble') await loadPebble();
+    else if (id === 'typesense') await loadTypesenseStage();
+    else if (id === 'research-search') await loadResearchSearch();
+    else if (id === 'qdrant') await loadQdrantStage();
+    else if (id === 'meaning') await loadMeaningStage();
+    else if (id === 'clickhouse') await loadClickHouseStage();
+    setRefreshState(`Updated ${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}`);
+  } catch (err) {
+    console.error(err);
+    setRefreshState(`Error: ${err.message}`);
+  } finally {
+    state.loading = false;
+  }
 }
 
 function bindEvents() {
   $$('.stage-tab').forEach(tab => tab.addEventListener('click', () => activateView(tab.dataset.view, 'metrics')));
   $$('.subtab').forEach(tab => tab.addEventListener('click', () => activateView(tab.dataset.view, tab.dataset.pane)));
   $('#refreshAll').addEventListener('click', () => loadActive());
+  $('#autoRefreshSelect').addEventListener('change', ev => setAutoRefresh(ev.target.value));
   $('#frameSelect').addEventListener('change', () => loadActive());
   $('#detailClose').addEventListener('click', () => {
     $('#detailDrawer').classList.remove('open');
@@ -752,7 +886,8 @@ async function boot() {
   bindEvents();
   syncResearchRerankControl();
   await loadFacets();
-  await loadLive();
+  setAutoRefresh(state.autoRefreshMs);
+  await loadActive();
 }
 
 boot().catch(err => {

@@ -472,6 +472,7 @@ CREATE TABLE IF NOT EXISTS web_osint.ops_canary_runs
     observed_chunks UInt32,
     embedded_chunks UInt32,
     qdrant_points_found UInt32,
+    shadow_validated_events UInt32 DEFAULT 0,
     dashboard_exact_rank Nullable(UInt32),
     dashboard_semantic_rank Nullable(UInt32),
     hydration_ok UInt8,

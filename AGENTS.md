@@ -31,6 +31,15 @@ This repository is the sanitized control plane for the local Web OSINT evidence 
 - Rerank is explicit precision mode only, with a hard cap of 5 candidates. Broad rerank requests should reject, not silently truncate.
 - PaddleOCR is the OCR/layout source of truth. Qwen3-VL-Embedding is for visual embeddings, not OCR.
 
+## Redpanda
+
+- Describe the stream layer as Redpanda Streaming topics, not a Kafka cluster.
+- Kafka-compatible APIs and client libraries are allowed as Redpanda data-plane clients. Do not replace working direct clients without a parity canary.
+- Prefer `REDPANDA_BROKERS` and `REDPANDA_GROUP_ID` for new configuration. Existing `KAFKA_*` names are compatibility fallbacks only.
+- Redpanda Connect YAML is wiring, not business logic. Put deterministic hot-path logic in compiled Go plugins.
+- Use Redpanda Connect dynamic gRPC plugins only for lightweight isolated processors. Do not wrap Qwen, PaddleOCR, Qwen3-VL, Pebble materialization, or dashboard retrieval as gRPC plugins in v1.
+- Run Connect routing in shadow mode before production cutover, and keep the Go normalizer/materializer rollback path until parity is proven.
+
 ## Provenance
 
 - Normal ingestion flows through Redpanda.
@@ -41,6 +50,7 @@ This repository is the sanitized control plane for the local Web OSINT evidence 
 
 - Run the E2E ingestion canary after changes to ingestion, normalizer, embedding worker, Qdrant, dashboard search, or ClickHouse hydration.
 - Run the media enrichment canary after changes to OCR, VL, media workers, media topics, or media tables.
+- When the Connect shadow service is running, run the E2E canary with `--expect-shadow` before changing routing behavior.
 
 ## Deferred
 

@@ -389,7 +389,7 @@ async function loadStream() {
   const normalizer = data.normalizer?.data || {};
   const planner = data.research_planner?.data || {};
   $('#streamCards').innerHTML = [
-    card('Topics', fmtNum((data.topics || []).filter(t => !t.internal).length), 'Kafka namespace'),
+    card('Topics', fmtNum((data.topics || []).filter(t => !t.internal).length), 'Redpanda namespace'),
     card('Brokers', fmtNum((data.brokers || []).length), 'active nodes'),
     card('Processed', fmtNum(normalizer.processed), 'worker counter'),
     card('Failures', fmtNum(normalizer.failed), 'worker counter', Number(normalizer.failed || 0) ? 'bad-card' : 'good-card'),

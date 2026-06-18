@@ -104,6 +104,8 @@ services:
     env_file:
       - ../.env
     environment:
+      REDPANDA_BROKERS: web-osint-redpanda:9092
+      REDPANDA_GROUP_ID: web-osint-normalizer-v1
       KAFKA_BROKERS: web-osint-redpanda:9092
       KAFKA_GROUP_ID: web-osint-normalizer-v1
       TYPESENSE_URL: http://web-osint-typesense:8108
@@ -185,4 +187,19 @@ services:
       - clickhouse
       - normalizer
       - research-planner
+    restart: unless-stopped
+
+  redpanda-connect-shadow:
+    build:
+      context: ../connect
+    container_name: web-osint-connect-shadow
+    profiles:
+      - shadow
+    environment:
+      REDPANDA_BROKERS: web-osint-redpanda:9092
+      REDPANDA_CONNECT_SHADOW_GROUP: web-osint-connect-shadow-v1
+    ports:
+      - "127.0.0.1:14195:4195"
+    depends_on:
+      - redpanda
     restart: unless-stopped

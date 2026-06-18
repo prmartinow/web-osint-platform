@@ -197,8 +197,8 @@ func main() {
 
 func loadConfig() config {
 	return config{
-		Brokers:       splitCSV(env("KAFKA_BROKERS", "127.0.0.1:19092")),
-		GroupID:       env("KAFKA_GROUP_ID", "web-osint-normalizer-v1"),
+		Brokers:       splitCSV(envFirst("REDPANDA_BROKERS", "KAFKA_BROKERS", "127.0.0.1:19092")),
+		GroupID:       envFirst("REDPANDA_GROUP_ID", "KAFKA_GROUP_ID", "web-osint-normalizer-v1"),
 		PebbleDir:     env("PEBBLE_DIR", "/data/pebble"),
 		TypesenseURL:  strings.TrimRight(env("TYPESENSE_URL", "http://127.0.0.1:18108"), "/"),
 		TypesenseKey:  os.Getenv("TYPESENSE_API_KEY"),
@@ -1671,6 +1671,13 @@ func env(key, fallback string) string {
 		return v
 	}
 	return fallback
+}
+
+func envFirst(preferred, legacy, fallback string) string {
+	if v := os.Getenv(preferred); v != "" {
+		return v
+	}
+	return env(legacy, fallback)
 }
 
 func firstNonNil(m map[string]any, keys ...string) any {

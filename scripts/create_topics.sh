@@ -37,6 +37,9 @@ create_topic evidence.media.observed.v1 delete
 create_topic evidence.search.results.v1 delete
 create_topic evidence.web.documents.observed.v1 delete
 create_topic evidence.user.inputs.observed.v1 delete
+create_topic evidence.capture.shadow.validated.v1 delete
+create_topic evidence.capture.shadow.errors.v1 delete
+create_topic evidence.capture.shadow.observed.v1 delete
 create_topic osint.semantic.segmented.v1 delete
 create_topic osint.semantic.embedded.v1 delete
 create_topic osint.label.proposed.v1 delete

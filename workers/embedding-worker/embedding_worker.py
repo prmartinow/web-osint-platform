@@ -30,8 +30,8 @@ def env(name: str, default: str) -> str:
     return os.environ.get(name, default)
 
 
-KAFKA_BROKERS = env("KAFKA_BROKERS", "127.0.0.1:19092")
-KAFKA_GROUP_ID = env("KAFKA_GROUP_ID", "web-osint-embedding-worker-v1")
+REDPANDA_BROKERS = env("REDPANDA_BROKERS", env("KAFKA_BROKERS", "127.0.0.1:19092"))
+REDPANDA_GROUP_ID = env("REDPANDA_GROUP_ID", env("KAFKA_GROUP_ID", "web-osint-embedding-worker-v1"))
 TOPICS = [part.strip() for part in env("EMBEDDING_WORKER_TOPICS", ",".join(DEFAULT_TOPICS)).split(",") if part.strip()]
 AUDIT_TOPIC = env("EMBEDDING_AUDIT_TOPIC", "osint.semantic.embedded.v1")
 DEADLETTER_TOPIC = env("EMBEDDING_DEADLETTER_TOPIC", "osint.semantic.deadletter.v1")
@@ -401,15 +401,15 @@ def main() -> None:
     threading.Thread(target=serve_http, daemon=True).start()
     consumer = Consumer(
         {
-            "bootstrap.servers": KAFKA_BROKERS,
-            "group.id": KAFKA_GROUP_ID,
+            "bootstrap.servers": REDPANDA_BROKERS,
+            "group.id": REDPANDA_GROUP_ID,
             "auto.offset.reset": "earliest",
             "enable.auto.commit": False,
         }
     )
-    producer = Producer({"bootstrap.servers": KAFKA_BROKERS})
+    producer = Producer({"bootstrap.servers": REDPANDA_BROKERS})
     consumer.subscribe(TOPICS)
-    print(f"[{now_iso()}] embedding worker starting topics={','.join(TOPICS)} brokers={KAFKA_BROKERS}", flush=True)
+    print(f"[{now_iso()}] embedding worker starting topics={','.join(TOPICS)} brokers={REDPANDA_BROKERS}", flush=True)
     try:
         while True:
             msg = consumer.poll(POLL_TIMEOUT)
@@ -419,7 +419,7 @@ def main() -> None:
                 if msg.error().code() != KafkaError._PARTITION_EOF:
                     stats.incr("failed")
                     stats.error(str(msg.error()))
-                    print(f"[{now_iso()}] kafka error: {msg.error()}", flush=True)
+                    print(f"[{now_iso()}] Redpanda consumer error: {msg.error()}", flush=True)
                 continue
             stats.incr("consumed")
             topic = msg.topic()

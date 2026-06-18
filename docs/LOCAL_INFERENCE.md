@@ -77,7 +77,7 @@ The RPC node runs local CPU inference as user services:
 | Service | Port | Role |
 | --- | ---: | --- |
 | `web-osint-qwen-inference.service` | `127.0.0.1:18200` | FastAPI API for text embeddings, reranking, and experimental VL embeddings |
-| `web-osint-embedding-worker.service` | `127.0.0.1:18201` | Kafka observed-event consumer that embeds evidence text and upserts named vectors into Qdrant |
+| `web-osint-embedding-worker.service` | `127.0.0.1:18201` | Redpanda observed-event consumer that embeds evidence text and upserts named vectors into Qdrant |
 
 Install/start:
 

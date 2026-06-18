@@ -14,10 +14,19 @@ Ingress
   A local outbox and producer publish records to Redpanda.
 
 Event Log
-  Redpanda stores append-only capture history and compacted state topics.
+  Redpanda Streaming stores append-only capture history and compacted state
+  topics. Kafka-compatible client APIs are a data-plane detail, not the
+  architecture name.
+
+Shadow Stream Plumbing
+  Redpanda Connect hosts compiled Go plugins for future stateless validation,
+  projection, routing, and DLQ enrichment. Shadow pipelines must prove parity
+  before replacing production routing.
 
 Processing
-  The normalizer/materializer validates, normalizes, and fans records out.
+  The normalizer/materializer validates, normalizes, fans records out, and owns
+  stateful Pebble/ClickHouse/Typesense/Qdrant materialization. Stateless routing
+  can move to Connect only after shadow parity.
   The embedding worker enriches observed evidence with local Qwen vectors and
   upserts them into Qdrant.
   The research planner derives research signals, questions, and task seeds
@@ -103,7 +112,10 @@ osint.state.wiki_page_current.v1
 
 ## Store Responsibilities
 
-Redpanda is the durable replay source. It is not the query database.
+Redpanda Streaming is the durable replay source. It is not the query database.
+Redpanda Connect is the preferred future host for stateless validation and
+routing plugins. Redpanda Data Transforms are reserved for tiny broker-local
+single-record transforms only.
 
 Pebble is a rebuildable exact-lookup view for stable IDs such as `post/<post_id>`, `account/<handle>`, `media/<media_id>`, `web_document/<document_id>`, `user_input/<input_id>`, and `capture/<collector_run_id>:<event_index>`.
 
@@ -166,3 +178,22 @@ The labels inside each family are versioned concepts in `label_concepts`. Unknow
 High-value extracted objects are promoted from the generic annotation ledger into typed ClickHouse tables such as `claim_assertions`, `relation_assertions`, `benchmark_facts`, `release_signals`, `research_signals`, `research_questions`, and `autonomous_tasks`. Generated wiki pages are derived projections and must keep backlinks to source evidence and annotation IDs.
 
 The initial research planner is deliberately deterministic. It scans recent evidence and annotations, identifies actionable signals such as user-supplied seeds, comparison opportunities, verification needs, and source-expansion leads, then writes deduped rows to `research_signals`, `research_questions`, and `autonomous_tasks` while also publishing replay events to the matching `osint.*` topics. Later LLM or human feedback loops can replace or augment this planner without changing the storage contract.
+
+## Redpanda-Native Migration
+
+The target migration is:
+
+```text
+v1.1:
+  current Go normalizer/materializer remains production
+  Redpanda Connect runs shadow validation/projection topics
+  canaries compare shadow output against production output
+
+v1.2:
+  Redpanda Connect emits observed topics for proven stateless routing
+  Go materializer consumes observed topics and keeps stateful store writes
+  Python Qwen/OCR/VL services keep direct Redpanda topic consumers
+```
+
+See [Redpanda Native Architecture](REDPANDA_NATIVE_ARCHITECTURE.md) and
+[Topic Catalog](TOPIC_CATALOG.md).

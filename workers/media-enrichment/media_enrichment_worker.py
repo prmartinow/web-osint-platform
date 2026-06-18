@@ -51,7 +51,7 @@ def env(name: str, default: str) -> str:
 
 
 DATA_ROOT = evidence_data_root()
-KAFKA_BROKERS = env("KAFKA_BROKERS", "127.0.0.1:19092")
+REDPANDA_BROKERS = env("REDPANDA_BROKERS", env("KAFKA_BROKERS", "127.0.0.1:19092"))
 CLICKHOUSE_URL = env("CLICKHOUSE_URL", "http://127.0.0.1:18123").rstrip("/")
 CLICKHOUSE_DATABASE = env("CLICKHOUSE_DATABASE", "web_osint")
 CLICKHOUSE_USER = env("CLICKHOUSE_USER", "web_osint")
@@ -468,7 +468,7 @@ def router_scan_once(producer: Producer, queued_ocr: set[str], queued_vl: set[st
 def run_router() -> None:
     stats.role = "router"
     threading.Thread(target=serve_http, args=(env("MEDIA_ROUTER_HTTP_ADDR", "127.0.0.1:18211"),), daemon=True).start()
-    producer = Producer({"bootstrap.servers": KAFKA_BROKERS})
+    producer = Producer({"bootstrap.servers": REDPANDA_BROKERS})
     queued_ocr: set[str] = set()
     queued_vl: set[str] = set()
     print(f"[{now_iso()}] media router starting data_root={DATA_ROOT} db={CLICKHOUSE_DATABASE}", flush=True)
@@ -910,10 +910,10 @@ def run_consumer(role: str, topic: str, group_id: str, http_addr: str) -> None:
     if role == "ocr":
         run_ocr_startup_selftest()
     threading.Thread(target=serve_http, args=(http_addr,), daemon=True).start()
-    producer = Producer({"bootstrap.servers": KAFKA_BROKERS})
+    producer = Producer({"bootstrap.servers": REDPANDA_BROKERS})
     consumer = Consumer(
         {
-            "bootstrap.servers": KAFKA_BROKERS,
+            "bootstrap.servers": REDPANDA_BROKERS,
             "group.id": group_id,
             "auto.offset.reset": "earliest",
             "enable.auto.commit": False,

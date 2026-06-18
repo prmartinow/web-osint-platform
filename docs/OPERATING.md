@@ -8,7 +8,7 @@ scripts/bootstrap.sh
 
 The stack binds service ports to `127.0.0.1` on the RPC node:
 
-- Redpanda Kafka: `127.0.0.1:19092`
+- Redpanda broker Kafka-compatible listener: `127.0.0.1:19092`
 - Redpanda Pandaproxy: `127.0.0.1:18082`
 - Redpanda Schema Registry: `127.0.0.1:18081`
 - Redpanda Admin: `127.0.0.1:19644`
@@ -71,6 +71,12 @@ Error topic:
 
 - `evidence.index.errors.v1`
 
+Shadow Connect topics:
+
+- `evidence.capture.shadow.validated.v1`
+- `evidence.capture.shadow.errors.v1`
+- `evidence.capture.shadow.observed.v1`
+
 Meaning Layer topics:
 
 - `osint.label.proposed.v1`
@@ -118,7 +124,46 @@ python3 scripts/produce_research_documents.py \
   --topic-label agent-harness
 ```
 
+### Shadow Redpanda Connect
+
+The Connect shadow service is disabled by default and runs only under the
+`shadow` Compose profile. It validates capture envelopes into shadow topics and
+does not feed serving stores.
+
+```bash
+docker compose --env-file .env -f compose/docker-compose.yml --profile shadow up -d --build redpanda-connect-shadow
+python3 scripts/run_e2e_canary.py --expect-shadow
+```
+
+See [Connect Shadow Pipeline](CONNECT_SHADOW.md).
+
 The script chunks long documents before publishing so embedding coverage favors accuracy over latency. Reusing the same document content gives stable `input_id` values; downstream stores should hydrate by `evidence_id` and tolerate repeated capture observations.
+
+### Redpanda Reference Source Cache
+
+Reference source checkouts live outside the repo on the RPC data disk:
+
+```text
+/mnt/data/web-osint-platform/reference-src/
+/home/ops/dev/reference-src -> /mnt/data/web-osint-platform/reference-src
+```
+
+Use `redpanda-connect-v4.46.0` for exact behavior of the current custom Connect
+binary, `redpanda-v26.1.10` for the live broker source observed on 2026-06-18,
+and the unversioned `redpanda-connect` / `redpanda` checkouts for current
+upstream changes.
+
+Refresh only current-branch references by default:
+
+```bash
+cd /mnt/data/web-osint-platform/reference-src/redpanda-connect
+git fetch --depth 1 origin main && git checkout -q FETCH_HEAD
+
+cd /mnt/data/web-osint-platform/reference-src/redpanda
+git fetch --depth 1 origin dev && git checkout -q FETCH_HEAD
+```
+
+Do not vendor these checkouts into the sanitized GitHub repo.
 
 The research planner reads recent `semantic_annotations` plus `evidence_events`, creates stable/deduped research signals, questions, and task seeds, inserts them into ClickHouse, and publishes replay events to `osint.research_signal.detected.v1`, `osint.research_question.proposed.v1`, and `osint.research_task.created.v1`. Run it once for a smoke pass with:
 

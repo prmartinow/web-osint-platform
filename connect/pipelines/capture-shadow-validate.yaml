@@ -1,0 +1,58 @@
+logger:
+  level: INFO
+  format: logfmt
+
+metrics:
+  prometheus: {}
+
+http:
+  enabled: true
+  address: 0.0.0.0:4195
+
+input:
+  label: capture_events
+  # Redpanda Connect v4.46 exposes Redpanda topic I/O through the
+  # kafka_franz component. This still targets Redpanda's data plane; the
+  # Kafka-compatible protocol name is an implementation detail.
+  kafka_franz:
+    seed_brokers:
+      - ${REDPANDA_BROKERS:web-osint-redpanda:9092}
+    topics:
+      - evidence.capture.events.v1
+    consumer_group: ${REDPANDA_CONNECT_SHADOW_GROUP:web-osint-connect-shadow-v1}
+    start_from_oldest: true
+    auto_replay_nacks: false
+
+pipeline:
+  threads: 1
+  processors:
+    - mapping: |
+        meta shadow_output_topic = "evidence.capture.shadow.validated.v1"
+        meta validation_plugin = "capture_envelope_validate"
+        meta validation_plugin_version = "0.1.0"
+    - capture_envelope_validate: {}
+    - catch:
+        - mapping: |
+            root = {
+              "schema_version": "v1",
+              "error_class": "capture_envelope_validate",
+              "error_message": error(),
+              "plugin_name": "capture_envelope_validate",
+              "plugin_version": "0.1.0",
+              "original_topic": metadata("kafka_topic"),
+              "original_partition": metadata("kafka_partition"),
+              "original_offset": metadata("kafka_offset"),
+              "original_key": metadata("kafka_key"),
+              "payload_sha256": content().hash("sha256").encode("hex"),
+              "raw": content().string(),
+              "created_at": now()
+            }
+            meta shadow_output_topic = "evidence.capture.shadow.errors.v1"
+
+output:
+  kafka_franz:
+    seed_brokers:
+      - ${REDPANDA_BROKERS:web-osint-redpanda:9092}
+    topic: ${! metadata("shadow_output_topic") }
+    key: ${! metadata("kafka_key") }
+    max_in_flight: 16

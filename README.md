@@ -7,7 +7,8 @@ It is designed for automated research workflows where browser or API collectors 
 ## What It Provides
 
 - Collector-facing producer and local outbox pattern.
-- Redpanda event streaming for durable capture history.
+- Redpanda Streaming topics for durable capture history.
+- Redpanda Connect shadow path for future stateless validation/routing plugins.
 - A Go normalizer/materializer worker.
 - Pebble exact lookup for stable IDs such as posts, accounts, media, and captures.
 - Typesense keyword, faceted, and filterable search.
@@ -21,7 +22,8 @@ It is designed for automated research workflows where browser or API collectors 
 ```text
 Collectors
   -> local outbox
-  -> Redpanda topics
+  -> Redpanda Streaming topics
+  -> optional Redpanda Connect shadow validation/routing
   -> normalizer/materializer
   -> Pebble exact lookup
   -> Typesense search
@@ -71,10 +73,13 @@ curl 'http://127.0.0.1:18090/lookup?key=post/1234567890'
 ## Documentation
 
 - [Architecture](docs/ARCHITECTURE.md)
+- [Redpanda Native Architecture](docs/REDPANDA_NATIVE_ARCHITECTURE.md)
+- [Topic Catalog](docs/TOPIC_CATALOG.md)
+- [Connect Shadow Pipeline](docs/CONNECT_SHADOW.md)
 - [Operations](docs/OPERATING.md)
 - [Local Inference](docs/LOCAL_INFERENCE.md)
 - [Sanitization](docs/SANITIZATION.md)
 
 ## Status
 
-This is an early infrastructure baseline. The current implementation includes the streaming backbone, materializer, exact lookup, search, vector-store initialization, local Qwen inference, Qdrant embedding enrichment, analytics schema, deterministic labeling, research-planning seed generation, dashboard research search, and an end-to-end ingestion canary. Real collectors and richer media/OCR/VL enrichment workers should be added on top of the existing event schemas.
+This is an early infrastructure baseline. The current implementation includes the Redpanda streaming backbone, materializer, exact lookup, search, vector-store initialization, local Qwen inference, Qdrant embedding enrichment, analytics schema, deterministic labeling, research-planning seed generation, dashboard research search, media/OCR/VL enrichment workers, an end-to-end ingestion canary, and a shadow Redpanda Connect skeleton for stateless validation/routing parity work.

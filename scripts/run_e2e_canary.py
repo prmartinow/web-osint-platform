@@ -31,6 +31,7 @@ DEFAULT_QDRANT_URL = "http://127.0.0.1:16333"
 DEFAULT_DASHBOARD_URLS = ("http://127.0.0.1:18191", "http://192.168.1.16:18191")
 CAPTURE_TOPIC = "evidence.capture.events.v1"
 AUDIT_TOPIC = "osint.semantic.embedded.v1"
+SHADOW_VALIDATED_TOPIC = "evidence.capture.shadow.validated.v1"
 
 
 class CanaryConfigError(RuntimeError):
@@ -67,6 +68,7 @@ class CanaryState:
     observed_chunks: int = 0
     embedded_chunks: int = 0
     qdrant_points_found: int = 0
+    shadow_validated_events: int = 0
     dashboard_exact_rank: int | None = None
     dashboard_semantic_rank: int | None = None
     hydration_ok: bool = False
@@ -266,6 +268,7 @@ def ensure_ops_tables(clickhouse_url: str, database: str, user: str, password: s
             observed_chunks UInt32,
             embedded_chunks UInt32,
             qdrant_points_found UInt32,
+            shadow_validated_events UInt32 DEFAULT 0,
             dashboard_exact_rank Nullable(UInt32),
             dashboard_semantic_rank Nullable(UInt32),
             hydration_ok UInt8,
@@ -278,6 +281,13 @@ def ensure_ops_tables(clickhouse_url: str, database: str, user: str, password: s
         PARTITION BY toYYYYMM(started_at)
         ORDER BY (started_at, run_id)
         """,
+    )
+    ch_execute(
+        clickhouse_url,
+        database,
+        user,
+        password,
+        "ALTER TABLE ops_canary_runs ADD COLUMN IF NOT EXISTS shadow_validated_events UInt32 DEFAULT 0 AFTER qdrant_points_found",
     )
     ch_execute(
         clickhouse_url,
@@ -384,6 +394,7 @@ def write_prometheus(path: Path, state: CanaryState) -> None:
         f'web_osint_e2e_canary_stage_count{{stage="observed_chunks"}} {state.observed_chunks}',
         f'web_osint_e2e_canary_stage_count{{stage="embedded_chunks"}} {state.embedded_chunks}',
         f'web_osint_e2e_canary_stage_count{{stage="qdrant_points"}} {state.qdrant_points_found}',
+        f'web_osint_e2e_canary_stage_count{{stage="shadow_validated_events"}} {state.shadow_validated_events}',
     ]
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
@@ -483,6 +494,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--dashboard-url", action="append", default=[], help="Dashboard base URL. Can repeat.")
     parser.add_argument("--skip-dashboard", action="store_true")
     parser.add_argument("--skip-audit-topic", action="store_true")
+    parser.add_argument(
+        "--expect-shadow",
+        action="store_true",
+        help="Require a matching Redpanda Connect shadow validation event. Use only when the shadow service is running.",
+    )
+    parser.add_argument("--shadow-topic", default=SHADOW_VALIDATED_TOPIC)
     return parser.parse_args()
 
 
@@ -563,8 +580,12 @@ Entity: Web OSINT Platform.
         consumer_cm: Any = contextlib.nullcontext(None)
         if not args.skip_audit_topic:
             consumer_cm = PandaProxyConsumer(pandaproxy_url, consumer_group, AUDIT_TOPIC)
+        shadow_records: list[dict[str, Any]] = []
+        shadow_cm: Any = contextlib.nullcontext(None)
+        if args.expect_shadow:
+            shadow_cm = PandaProxyConsumer(pandaproxy_url, f"{consumer_group}-shadow", args.shadow_topic)
 
-        with consumer_cm as audit_consumer:
+        with consumer_cm as audit_consumer, shadow_cm as shadow_consumer:
             def publish_capture() -> dict[str, Any]:
                 path = Path(state.input_path)
                 event = build_event(
@@ -591,6 +612,31 @@ Entity: Web OSINT Platform.
                 }
 
             run_step(state, "publish_capture_event_to_redpanda", publish_capture)
+
+            if shadow_consumer is not None:
+                def poll_shadow_topic() -> dict[str, Any] | None:
+                    for record in shadow_consumer.records(timeout_ms=1200):
+                        value = record.get("value") or {}
+                        if isinstance(value, dict):
+                            shadow_records.append(value)
+                    matched = [
+                        item
+                        for item in shadow_records
+                        if str(item.get("collector_run_id")) == collector_run_id
+                    ]
+                    state.shadow_validated_events = len(matched)
+                    if matched:
+                        return {
+                            "topic": args.shadow_topic,
+                            "matched_events": len(matched),
+                            "collector_run_id": collector_run_id,
+                        }
+                    return None
+
+                shadow = poll_until(deadline, poll_shadow_topic, interval=1.0)
+                if not shadow:
+                    raise RuntimeError(f"shadow Connect topic {args.shadow_topic} did not validate {collector_run_id} before timeout")
+                state.steps.append(StepResult("poll_redpanda_connect_shadow_validated_topic", True, 0, shadow))
 
             def poll_observed_rows() -> dict[str, Any] | None:
                 rows = ch_query(
@@ -733,6 +779,7 @@ Entity: Web OSINT Platform.
                         "observed_chunks": state.observed_chunks,
                         "embedded_chunks": state.embedded_chunks,
                         "qdrant_points_found": state.qdrant_points_found,
+                        "shadow_validated_events": state.shadow_validated_events,
                         "dashboard_exact_rank": state.dashboard_exact_rank,
                         "dashboard_semantic_rank": state.dashboard_semantic_rank,
                         "hydration_ok": 1 if state.hydration_ok else 0,
@@ -775,6 +822,7 @@ Entity: Web OSINT Platform.
                     "observed_chunks": state.observed_chunks,
                     "embedded_chunks": state.embedded_chunks,
                     "qdrant_points_found": state.qdrant_points_found,
+                    "shadow_validated_events": state.shadow_validated_events,
                     "dashboard_exact_rank": state.dashboard_exact_rank,
                     "errors": state.errors,
                 },

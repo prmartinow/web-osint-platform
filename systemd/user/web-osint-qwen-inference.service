@@ -14,7 +14,6 @@ Environment=QWEN_TEXT_EMBEDDING_MODEL_DIR=/mnt/data/web-osint-platform/models/Qw
 Environment=QWEN_RERANKER_MODEL_DIR=/mnt/data/web-osint-platform/models/Qwen3-Reranker-8B
 Environment=QWEN_VL_EMBEDDING_MODEL_DIR=/mnt/data/web-osint-platform/models/Qwen3-VL-Embedding-8B
 Environment=QWEN_INFERENCE_DEVICE=cpu
-Environment=QWEN_INFERENCE_TORCH_THREADS=32
 Environment=QWEN_INFERENCE_BATCH_SIZE=1
 Environment=QWEN_INFERENCE_MAX_LENGTH=8192
 Environment=QWEN_EMBED_CONCURRENCY=1
@@ -33,8 +32,6 @@ Environment=QWEN_VL_CONCURRENCY=1
 Environment=QWEN_VL_QUEUE_LIMIT=16
 Environment=QWEN_VL_QUEUE_TIMEOUT_SECONDS=300
 Environment=TOKENIZERS_PARALLELISM=false
-Environment=OMP_NUM_THREADS=32
-Environment=MKL_NUM_THREADS=32
 ExecStartPre=/home/ops/dev/x-research/scripts/init_qwen_inference_venv.sh
 ExecStart=/home/ops/dev/x-research/scripts/run_with_cpu_thread_guard.sh /mnt/data/web-osint-platform/.venv-qwen-inference/bin/python -m uvicorn qwen_inference:app --host 127.0.0.1 --port 18200 --log-level info
 Restart=on-failure

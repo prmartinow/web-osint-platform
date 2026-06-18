@@ -37,280 +37,380 @@
     </div>
   </header>
 
-  <nav class="tabs" aria-label="Pipeline sections">
-    <button class="tab active" data-view="live">Live Health</button>
-    <button class="tab" data-view="collectors">Collectors</button>
-    <button class="tab" data-view="stream">Redpanda + Worker</button>
-    <button class="tab" data-view="filesystem">Filesystem</button>
-    <button class="tab" data-view="pebble">Pebble</button>
-    <button class="tab" data-view="typesense">Typesense</button>
-    <button class="tab" data-view="research-search">Research Search</button>
-    <button class="tab" data-view="qdrant">Qdrant</button>
-    <button class="tab" data-view="meaning">Meaning</button>
-    <button class="tab" data-view="clickhouse">ClickHouse</button>
-  </nav>
+  <div class="dashboard-shell">
+    <aside class="side-nav" aria-label="Pipeline sections">
+      <div class="stage-group active" data-stage="live">
+        <button class="stage-tab active" data-view="live">Live Health</button>
+        <div class="stage-subnav">
+          <button class="subtab active" data-view="live" data-pane="metrics">Metrics</button>
+          <button class="subtab" data-view="live" data-pane="data">Data</button>
+        </div>
+      </div>
+      <div class="stage-group" data-stage="collectors">
+        <button class="stage-tab" data-view="collectors">Collectors</button>
+        <div class="stage-subnav">
+          <button class="subtab" data-view="collectors" data-pane="metrics">Metrics</button>
+          <button class="subtab" data-view="collectors" data-pane="data">Data</button>
+        </div>
+      </div>
+      <div class="stage-group" data-stage="stream">
+        <button class="stage-tab" data-view="stream">Redpanda + Worker</button>
+        <div class="stage-subnav">
+          <button class="subtab" data-view="stream" data-pane="metrics">Metrics</button>
+          <button class="subtab" data-view="stream" data-pane="data">Data</button>
+        </div>
+      </div>
+      <div class="stage-group" data-stage="filesystem">
+        <button class="stage-tab" data-view="filesystem">Filesystem</button>
+        <div class="stage-subnav">
+          <button class="subtab" data-view="filesystem" data-pane="metrics">Metrics</button>
+          <button class="subtab" data-view="filesystem" data-pane="data">Data</button>
+        </div>
+      </div>
+      <div class="stage-group" data-stage="pebble">
+        <button class="stage-tab" data-view="pebble">Pebble</button>
+        <div class="stage-subnav">
+          <button class="subtab" data-view="pebble" data-pane="metrics">Metrics</button>
+          <button class="subtab" data-view="pebble" data-pane="data">Data</button>
+        </div>
+      </div>
+      <div class="stage-group" data-stage="typesense">
+        <button class="stage-tab" data-view="typesense">Typesense</button>
+        <div class="stage-subnav">
+          <button class="subtab" data-view="typesense" data-pane="metrics">Metrics</button>
+          <button class="subtab" data-view="typesense" data-pane="data">Data</button>
+        </div>
+      </div>
+      <div class="stage-group" data-stage="research-search">
+        <button class="stage-tab" data-view="research-search">Research Search</button>
+        <div class="stage-subnav">
+          <button class="subtab" data-view="research-search" data-pane="metrics">Metrics</button>
+          <button class="subtab" data-view="research-search" data-pane="data">Data</button>
+        </div>
+      </div>
+      <div class="stage-group" data-stage="qdrant">
+        <button class="stage-tab" data-view="qdrant">Qdrant</button>
+        <div class="stage-subnav">
+          <button class="subtab" data-view="qdrant" data-pane="metrics">Metrics</button>
+          <button class="subtab" data-view="qdrant" data-pane="data">Data</button>
+        </div>
+      </div>
+      <div class="stage-group" data-stage="meaning">
+        <button class="stage-tab" data-view="meaning">Meaning</button>
+        <div class="stage-subnav">
+          <button class="subtab" data-view="meaning" data-pane="metrics">Metrics</button>
+          <button class="subtab" data-view="meaning" data-pane="data">Data</button>
+        </div>
+      </div>
+      <div class="stage-group" data-stage="clickhouse">
+        <button class="stage-tab" data-view="clickhouse">ClickHouse</button>
+        <div class="stage-subnav">
+          <button class="subtab" data-view="clickhouse" data-pane="metrics">Metrics</button>
+          <button class="subtab" data-view="clickhouse" data-pane="data">Data</button>
+        </div>
+      </div>
+    </aside>
 
-  <main>
+    <main>
     <section id="live" class="view active">
-      <div class="cards" id="liveCards"></div>
-      <section class="panel">
-        <h2>Pipeline Flow</h2>
-        <div id="flowRail" class="flow-rail"></div>
-      </section>
-      <section class="panel">
-        <h2>Ingest Activity</h2>
-        <div id="liveHistogram"></div>
-      </section>
-      <div class="panel-grid">
+      <div class="pane active" data-pane="metrics">
+        <div class="cards" id="liveCards"></div>
         <section class="panel">
-          <h2>Stage Rows</h2>
-          <div id="liveStageRows"></div>
+          <h2>Pipeline Flow</h2>
+          <div id="flowRail" class="flow-rail"></div>
         </section>
         <section class="panel">
-          <h2>Latest Collector Runs</h2>
-          <div id="liveRuns"></div>
+          <h2>Ingest Activity</h2>
+          <div id="liveHistogram"></div>
         </section>
+      </div>
+      <div class="pane" data-pane="data">
+        <div class="panel-grid">
+          <section class="panel">
+            <h2>Stage Rows</h2>
+            <div id="liveStageRows"></div>
+          </section>
+          <section class="panel">
+            <h2>Latest Collector Runs</h2>
+            <div id="liveRuns"></div>
+          </section>
+        </div>
       </div>
     </section>
 
     <section id="collectors" class="view">
-      <div class="cards" id="collectorCards"></div>
-      <section class="panel">
-        <h2>Collector Activity</h2>
-        <div id="collectorHistogram"></div>
-      </section>
-      <div class="panel-grid">
+      <div class="pane active" data-pane="metrics">
+        <div class="cards" id="collectorCards"></div>
         <section class="panel">
-          <h2>Runs</h2>
-          <div id="collectorRuns"></div>
+          <h2>Collector Activity</h2>
+          <div id="collectorHistogram"></div>
         </section>
-        <section class="panel">
-          <h2>Methods</h2>
-          <div id="collectorMethods"></div>
-        </section>
+      </div>
+      <div class="pane" data-pane="data">
+        <div class="panel-grid">
+          <section class="panel">
+            <h2>Runs</h2>
+            <div id="collectorRuns"></div>
+          </section>
+          <section class="panel">
+            <h2>Methods</h2>
+            <div id="collectorMethods"></div>
+          </section>
+        </div>
       </div>
     </section>
 
     <section id="stream" class="view">
-      <div class="cards" id="streamCards"></div>
-      <section class="panel">
-        <h2>Stream Activity</h2>
-        <div id="streamHistogram"></div>
-      </section>
-      <div class="panel-grid">
+      <div class="pane active" data-pane="metrics">
+        <div class="cards" id="streamCards"></div>
         <section class="panel">
-          <h2>Topics</h2>
-          <div id="streamTopics"></div>
+          <h2>Stream Activity</h2>
+          <div id="streamHistogram"></div>
         </section>
         <section class="panel">
-          <h2>Normalizer / Materializer</h2>
-          <div id="streamWorker" class="kv-list"></div>
+          <h2>Redpanda Metrics</h2>
+          <div id="streamMetrics"></div>
         </section>
       </div>
-      <section class="panel">
-        <h2>Redpanda Metrics</h2>
-        <div id="streamMetrics"></div>
-      </section>
+      <div class="pane" data-pane="data">
+        <div class="panel-grid">
+          <section class="panel">
+            <h2>Topics</h2>
+            <div id="streamTopics"></div>
+          </section>
+          <section class="panel">
+            <h2>Normalizer / Materializer</h2>
+            <div id="streamWorker" class="kv-list"></div>
+          </section>
+        </div>
+      </div>
     </section>
 
     <section id="filesystem" class="view">
-      <div class="cards" id="fsCards"></div>
-      <section class="panel">
-        <h2>File Activity</h2>
-        <div id="fsHistogram"></div>
-      </section>
-      <div class="fs-layout">
-        <section class="panel fs-tree-panel">
-          <h2>Tree</h2>
-          <div id="fsCrumbs" class="meta-line"></div>
-          <div id="fsTree" class="tree-list"></div>
-        </section>
-        <section class="panel fs-viewer-panel">
-          <h2>Viewer</h2>
-          <div id="fsViewer" class="file-viewer"></div>
+      <div class="pane active" data-pane="metrics">
+        <div class="cards" id="fsCards"></div>
+        <section class="panel">
+          <h2>File Activity</h2>
+          <div id="fsHistogram"></div>
         </section>
       </div>
-      <section class="panel">
-        <h2>Recent Files / Gallery</h2>
-        <div id="fsGallery" class="media-grid"></div>
-      </section>
+      <div class="pane" data-pane="data">
+        <div class="fs-layout">
+          <section class="panel fs-tree-panel">
+            <h2>Tree</h2>
+            <div id="fsCrumbs" class="meta-line"></div>
+            <div id="fsTree" class="tree-list"></div>
+          </section>
+          <section class="panel fs-viewer-panel">
+            <h2>Viewer</h2>
+            <div id="fsViewer" class="file-viewer"></div>
+          </section>
+        </div>
+        <section class="panel">
+          <h2>Recent Files / Gallery</h2>
+          <div id="fsGallery" class="media-grid"></div>
+        </section>
+      </div>
     </section>
 
     <section id="pebble" class="view">
-      <div class="cards" id="pebbleCards"></div>
-      <div class="panel-grid">
+      <div class="pane active" data-pane="metrics">
+        <div class="cards" id="pebbleCards"></div>
         <section class="panel">
-          <h2>Key Prefixes</h2>
-          <div id="pebblePrefixes"></div>
-        </section>
-        <section class="panel">
-          <h2>Sample Keys</h2>
-          <div id="pebbleKeys"></div>
+          <h2>Pebble Metrics Raw</h2>
+          <pre id="pebbleRaw" class="json-box"></pre>
         </section>
       </div>
-      <section class="panel">
-        <h2>Pebble Metrics Raw</h2>
-        <pre id="pebbleRaw" class="json-box"></pre>
-      </section>
+      <div class="pane" data-pane="data">
+        <div class="panel-grid">
+          <section class="panel">
+            <h2>Key Prefixes</h2>
+            <div id="pebblePrefixes"></div>
+          </section>
+          <section class="panel">
+            <h2>Sample Keys</h2>
+            <div id="pebbleKeys"></div>
+          </section>
+        </div>
+      </div>
     </section>
 
     <section id="typesense" class="view">
-      <div class="cards" id="typesenseCards"></div>
-      <section class="panel">
-        <h2>Index Activity</h2>
-        <div id="typesenseHistogram"></div>
-      </section>
-      <div class="toolbar multi">
-        <input id="typesenseQ" type="search" value="embedding" placeholder="Search Typesense">
-        <select id="typesenseProject"><option value="">All projects</option></select>
-        <select id="typesenseKind"><option value="">All steps</option></select>
-        <button id="typesenseGo">Search</button>
+      <div class="pane active" data-pane="metrics">
+        <div class="cards" id="typesenseCards"></div>
+        <section class="panel">
+          <h2>Index Activity</h2>
+          <div id="typesenseHistogram"></div>
+        </section>
+        <section class="panel">
+          <h2>Schema / Metrics</h2>
+          <div id="typesenseSchema"></div>
+        </section>
       </div>
-      <div id="typesenseMeta" class="meta-line"></div>
-      <div id="typesenseTable"></div>
-      <section class="panel">
-        <h2>Schema / Metrics</h2>
-        <div id="typesenseSchema"></div>
-      </section>
+      <div class="pane" data-pane="data">
+        <div class="toolbar multi">
+          <input id="typesenseQ" type="search" value="embedding" placeholder="Search Typesense">
+          <select id="typesenseProject"><option value="">All projects</option></select>
+          <select id="typesenseKind"><option value="">All steps</option></select>
+          <button id="typesenseGo">Search</button>
+        </div>
+        <div id="typesenseMeta" class="meta-line"></div>
+        <div id="typesenseTable"></div>
+      </div>
     </section>
 
     <section id="qdrant" class="view">
-      <div class="cards" id="qdrantCards"></div>
-      <section class="panel">
-        <h2>Vector Activity</h2>
-        <div id="qdrantHistogram"></div>
-      </section>
-      <div class="panel-grid">
+      <div class="pane active" data-pane="metrics">
+        <div class="cards" id="qdrantCards"></div>
         <section class="panel">
-          <h2>Named Vectors</h2>
-          <div id="qdrantVectors"></div>
+          <h2>Vector Activity</h2>
+          <div id="qdrantHistogram"></div>
         </section>
         <section class="panel">
-          <h2>Payload Indexes</h2>
-          <div id="qdrantPayload"></div>
+          <h2>Metrics</h2>
+          <div id="qdrantMetrics"></div>
         </section>
       </div>
-      <section class="panel">
-        <h2>Metrics</h2>
-        <div id="qdrantMetrics"></div>
-      </section>
+      <div class="pane" data-pane="data">
+        <div class="panel-grid">
+          <section class="panel">
+            <h2>Named Vectors</h2>
+            <div id="qdrantVectors"></div>
+          </section>
+          <section class="panel">
+            <h2>Payload Indexes</h2>
+            <div id="qdrantPayload"></div>
+          </section>
+        </div>
+      </div>
     </section>
 
     <section id="research-search" class="view">
-      <div class="cards" id="researchSearchCards"></div>
-      <section class="panel">
-        <h2>Coordinator Query</h2>
-        <div class="toolbar research-search-toolbar">
-          <input id="researchSearchQ" type="search" value="OpenCode Hermes OpenHands coding agent harness" placeholder="Search local evidence">
-          <select id="researchSearchMode" title="Search mode">
-            <option value="hybrid" selected>Hybrid</option>
-            <option value="precision">Precision</option>
-            <option value="keyword">Keyword</option>
-            <option value="semantic">Semantic</option>
-            <option value="visual">Visual</option>
-          </select>
-          <select id="researchSearchProject"><option value="">All projects</option></select>
-          <select id="researchSearchKind"><option value="">All steps</option></select>
-          <select id="researchSearchLimit" title="Limit">
-            <option value="10">10</option>
-            <option value="20" selected>20</option>
-            <option value="50">50</option>
-          </select>
-          <label class="check-inline"><input id="researchSearchRerank" type="checkbox"> Rerank</label>
-          <button id="researchSearchGo">Search</button>
+      <div class="pane active" data-pane="metrics">
+        <div class="cards" id="researchSearchCards"></div>
+        <div class="panel-grid">
+          <section class="panel">
+            <h2>Branch Counts</h2>
+            <div id="researchSearchBranches"></div>
+          </section>
+          <section class="panel">
+            <h2>Trace / Errors</h2>
+            <pre id="researchSearchTrace" class="json-box"></pre>
+          </section>
         </div>
-        <div id="researchSearchMeta" class="meta-line"></div>
-      </section>
-      <section class="panel">
-        <h2>Results</h2>
-        <div id="researchSearchTable"></div>
-      </section>
-      <div class="panel-grid">
+      </div>
+      <div class="pane" data-pane="data">
         <section class="panel">
-          <h2>Branch Counts</h2>
-          <div id="researchSearchBranches"></div>
+          <h2>Coordinator Query</h2>
+          <div class="toolbar research-search-toolbar">
+            <input id="researchSearchQ" type="search" value="OpenCode Hermes OpenHands coding agent harness" placeholder="Search local evidence">
+            <select id="researchSearchMode" title="Search mode">
+              <option value="hybrid" selected>Hybrid</option>
+              <option value="precision">Precision</option>
+              <option value="keyword">Keyword</option>
+              <option value="semantic">Semantic</option>
+              <option value="visual">Visual</option>
+            </select>
+            <select id="researchSearchProject"><option value="">All projects</option></select>
+            <select id="researchSearchKind"><option value="">All steps</option></select>
+            <select id="researchSearchLimit" title="Limit">
+              <option value="10">10</option>
+              <option value="20" selected>20</option>
+              <option value="50">50</option>
+            </select>
+            <label class="check-inline"><input id="researchSearchRerank" type="checkbox"> Rerank</label>
+            <button id="researchSearchGo">Search</button>
+          </div>
+          <div id="researchSearchMeta" class="meta-line"></div>
         </section>
         <section class="panel">
-          <h2>Trace / Errors</h2>
-          <pre id="researchSearchTrace" class="json-box"></pre>
+          <h2>Results</h2>
+          <div id="researchSearchTable"></div>
         </section>
       </div>
     </section>
 
     <section id="meaning" class="view">
-      <div class="cards" id="meaningCards"></div>
-      <section class="panel">
-        <h2>Annotation Activity</h2>
-        <div id="meaningHistogram"></div>
-      </section>
-      <div class="panel-grid">
+      <div class="pane active" data-pane="metrics">
+        <div class="cards" id="meaningCards"></div>
         <section class="panel">
-          <h2>Label Families</h2>
-          <div id="meaningFamilies"></div>
-        </section>
-        <section class="panel">
-          <h2>Top Labels</h2>
-          <div id="meaningLabels"></div>
+          <h2>Annotation Activity</h2>
+          <div id="meaningHistogram"></div>
         </section>
       </div>
-      <section class="panel">
-        <h2>Recent Annotations</h2>
-        <div id="meaningRecent"></div>
-      </section>
-      <div class="panel-grid">
+      <div class="pane" data-pane="data">
+        <div class="panel-grid">
+          <section class="panel">
+            <h2>Label Families</h2>
+            <div id="meaningFamilies"></div>
+          </section>
+          <section class="panel">
+            <h2>Top Labels</h2>
+            <div id="meaningLabels"></div>
+          </section>
+        </div>
         <section class="panel">
-          <h2>Research Questions</h2>
-          <div id="meaningQuestions"></div>
+          <h2>Recent Annotations</h2>
+          <div id="meaningRecent"></div>
         </section>
+        <div class="panel-grid">
+          <section class="panel">
+            <h2>Research Questions</h2>
+            <div id="meaningQuestions"></div>
+          </section>
+          <section class="panel">
+            <h2>Autonomous Tasks</h2>
+            <div id="meaningTasks"></div>
+          </section>
+        </div>
         <section class="panel">
-          <h2>Autonomous Tasks</h2>
-          <div id="meaningTasks"></div>
+          <h2>Research Signals</h2>
+          <div id="meaningSignals"></div>
         </section>
       </div>
-      <section class="panel">
-        <h2>Research Signals</h2>
-        <div id="meaningSignals"></div>
-      </section>
     </section>
 
     <section id="clickhouse" class="view">
-      <div class="cards" id="clickhouseCards"></div>
-      <section class="panel">
-        <h2>Analytics Activity</h2>
-        <div id="clickhouseHistogram"></div>
-      </section>
-      <div class="panel-grid">
+      <div class="pane active" data-pane="metrics">
+        <div class="cards" id="clickhouseCards"></div>
         <section class="panel">
-          <h2>Tables</h2>
-          <div id="clickhouseTables"></div>
+          <h2>Analytics Activity</h2>
+          <div id="clickhouseHistogram"></div>
         </section>
         <section class="panel">
           <h2>Metrics</h2>
           <div id="clickhouseMetrics"></div>
         </section>
       </div>
-      <section class="panel">
-        <h2>Data Inspector</h2>
-        <textarea id="chQuery" class="sql-box">SELECT source_project, source_kind, count() AS rows
+      <div class="pane" data-pane="data">
+        <section class="panel">
+          <h2>Tables</h2>
+          <div id="clickhouseTables"></div>
+        </section>
+        <section class="panel">
+          <h2>Data Inspector</h2>
+          <textarea id="chQuery" class="sql-box">SELECT source_project, source_kind, count() AS rows
 FROM evidence_events
 GROUP BY source_project, source_kind
 ORDER BY rows DESC
 LIMIT 50</textarea>
-        <div class="toolbar">
-          <button id="chRun">Run Query</button>
-          <button id="chPlay">Open Play</button>
-          <button id="chDashboard">Open Dashboard</button>
-          <button id="chClickstack">Open ClickStack</button>
-        </div>
-        <div id="chQueryMeta" class="meta-line"></div>
-        <div id="chQueryTable"></div>
-      </section>
-      <section class="panel">
-        <h2>Embedded ClickHouse UI</h2>
-        <iframe id="clickhouseFrame" class="embedded-ui" src="/clickhouse/dashboard" title="ClickHouse UI"></iframe>
-      </section>
+          <div class="toolbar">
+            <button id="chRun">Run Query</button>
+            <button id="chPlay">Open Play</button>
+            <button id="chDashboard">Open Dashboard</button>
+            <button id="chClickstack">Open ClickStack</button>
+          </div>
+          <div id="chQueryMeta" class="meta-line"></div>
+          <div id="chQueryTable"></div>
+        </section>
+        <section class="panel">
+          <h2>Embedded ClickHouse UI</h2>
+          <iframe id="clickhouseFrame" class="embedded-ui" src="/clickhouse/dashboard" title="ClickHouse UI"></iframe>
+        </section>
+      </div>
     </section>
-  </main>
+    </main>
+  </div>
 
   <aside id="detailDrawer" class="drawer" aria-hidden="true">
     <div class="drawer-head">

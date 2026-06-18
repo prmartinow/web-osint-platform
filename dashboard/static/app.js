@@ -4,6 +4,7 @@ const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
 const state = {
   facets: {},
   activeView: 'live',
+  activePane: 'metrics',
   fsPath: '',
 };
 
@@ -687,10 +688,19 @@ async function loadMeaningStage() {
   ], data.research_signals || [], { id: 'meaning-signals', onRow: row => openDetail(row.signal_type, 'Research signal', row) });
 }
 
-function activateView(id) {
+function activateView(id, pane = 'metrics') {
   state.activeView = id;
-  $$('.tab').forEach(tab => tab.classList.toggle('active', tab.dataset.view === id));
-  $$('.view').forEach(view => view.classList.toggle('active', view.id === id));
+  state.activePane = pane;
+  $$('.stage-group').forEach(group => group.classList.toggle('active', group.dataset.stage === id));
+  $$('.stage-tab').forEach(tab => tab.classList.toggle('active', tab.dataset.view === id));
+  $$('.subtab').forEach(tab => tab.classList.toggle('active', tab.dataset.view === id && tab.dataset.pane === pane));
+  $$('.view').forEach(view => {
+    const active = view.id === id;
+    view.classList.toggle('active', active);
+    $$('.pane', view).forEach(section => {
+      section.classList.toggle('active', active && section.dataset.pane === pane);
+    });
+  });
   loadActive();
 }
 
@@ -709,7 +719,8 @@ function loadActive() {
 }
 
 function bindEvents() {
-  $$('.tab').forEach(tab => tab.addEventListener('click', () => activateView(tab.dataset.view)));
+  $$('.stage-tab').forEach(tab => tab.addEventListener('click', () => activateView(tab.dataset.view, 'metrics')));
+  $$('.subtab').forEach(tab => tab.addEventListener('click', () => activateView(tab.dataset.view, tab.dataset.pane)));
   $('#refreshAll').addEventListener('click', () => loadActive());
   $('#frameSelect').addEventListener('change', () => loadActive());
   $('#detailClose').addEventListener('click', () => {

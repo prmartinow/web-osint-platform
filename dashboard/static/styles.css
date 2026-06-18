@@ -136,18 +136,25 @@ h2 { font-size: 15px; font-weight: 760; text-transform: uppercase; color: var(--
 }
 :root[data-theme="dark"] .theme-switch .moon::after { background: #143142; }
 
-.tabs {
+.dashboard-shell {
+  display: grid;
+  grid-template-columns: 248px minmax(0, 1fr);
+  min-height: calc(100vh - 82px);
+}
+.side-nav {
   position: sticky;
   top: 0;
-  z-index: 10;
-  display: flex;
-  gap: 6px;
-  padding: 10px 24px;
+  align-self: start;
+  height: 100vh;
+  overflow: auto;
+  padding: 12px;
   background: var(--panel);
-  border-bottom: 1px solid var(--line);
-  overflow-x: auto;
+  border-right: 1px solid var(--line);
 }
-.tab, button, select, input {
+.stage-group {
+  margin-bottom: 6px;
+}
+.stage-tab, .subtab, button, select, input {
   font: inherit;
   color: var(--text);
 }
@@ -162,20 +169,50 @@ button {
   cursor: pointer;
 }
 button:hover, select:hover, input:hover { border-color: var(--accent); }
-.tab {
+.stage-tab {
+  width: 100%;
   background: transparent;
   color: var(--muted);
-  white-space: nowrap;
+  text-align: left;
+  font-weight: 720;
 }
-.tab.active {
+.stage-tab.active {
   background: var(--panel-2);
   color: var(--text);
   border-color: var(--accent);
 }
+.stage-subnav {
+  display: none;
+  gap: 5px;
+  padding: 6px 0 8px 14px;
+}
+.stage-group.active .stage-subnav {
+  display: grid;
+}
+.subtab {
+  width: 100%;
+  min-height: 28px;
+  padding: 3px 9px;
+  background: transparent;
+  color: var(--muted);
+  text-align: left;
+  border-color: transparent;
+  font-size: 13px;
+}
+.subtab.active {
+  color: var(--text);
+  background: var(--input);
+  border-color: var(--line);
+}
 
-main { padding: 18px 24px 36px; }
+main {
+  min-width: 0;
+  padding: 18px 24px 36px;
+}
 .view { display: none; }
 .view.active { display: block; }
+.pane { display: none; }
+.pane.active { display: block; }
 
 .cards {
   display: grid;
@@ -514,6 +551,18 @@ tbody tr:hover { background: color-mix(in srgb, var(--accent) 12%, transparent);
 .status-error { color: var(--danger); }
 
 @media (max-width: 860px) {
+  .dashboard-shell { display: block; }
+  .side-nav {
+    position: static;
+    height: auto;
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 6px;
+    border-right: 0;
+    border-bottom: 1px solid var(--line);
+  }
+  .stage-group { margin-bottom: 0; }
+  .stage-subnav { padding-left: 0; }
   .panel-grid { grid-template-columns: 1fr; }
   .fs-layout { grid-template-columns: 1fr; }
   .toolbar.multi { grid-template-columns: 1fr; }

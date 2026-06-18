@@ -176,6 +176,11 @@ function linkCell(url) {
   return `<span class="visitedish">${safe}</span>`;
 }
 
+function internalLinkCell(url, label = 'Open') {
+  if (!url) return '';
+  return `<a class="linkish" href="${escapeHtml(url)}" target="_blank" rel="noreferrer">${escapeHtml(label)}</a>`;
+}
+
 function pillList(values) {
   return (values || []).slice(0, 12).map(v => `<span class="pill">${escapeHtml(v)}</span>`).join('');
 }
@@ -706,6 +711,144 @@ function branchPills(ranks) {
     .join('');
 }
 
+async function loadEvidenceInspector() {
+  const query = $('#evidenceInspectQ').value.trim();
+  if (!query) {
+    $('#evidenceInspectMeta').textContent = 'Enter a URL, evidence id, post id, or collector run id.';
+    return;
+  }
+  $('#evidenceInspectMeta').textContent = 'Inspecting local evidence bundle...';
+  try {
+    const data = await api(`/api/evidence/inspect?${params({ q: query })}`);
+    renderEvidenceInspector(data);
+  } catch (err) {
+    $('#evidenceInspectMeta').textContent = err.message;
+    $('#evidenceInspectCards').innerHTML = card('Inspector failed', 'error', err.message, 'bad-card');
+  }
+}
+
+function renderEvidenceInspector(data) {
+  const c = data.cards || {};
+  const completedOcr = (data.ocr || []).filter(row => row.status === 'completed').length;
+  const completedVl = (data.vl || []).filter(row => row.status === 'completed').length;
+  $('#evidenceInspectMeta').textContent = `${fmtNum(c.rows)} rows across ${fmtNum(c.runs)} run(s). Generated ${fmtDate(data.generated_at)}.`;
+  $('#evidenceInspectCards').innerHTML = [
+    card('Rows', fmtNum(c.rows), `${fmtNum(c.runs)} collector runs`),
+    card('Web text', fmtNum(c.web_text_chars), 'normalized chars', c.web_text_chars ? 'good-card' : 'warn-card'),
+    card('Post text', fmtNum(c.post_text_chars), 'X post chars', c.post_text_chars ? 'good-card' : 'warn-card'),
+    card('Media', fmtNum(c.media), `${fmtNum(c.artifacts)} artifacts`),
+    card('OCR', `${fmtNum(completedOcr)}/${fmtNum(c.ocr_rows)}`, 'completed / rows', completedOcr ? 'good-card' : 'warn-card'),
+    card('VL', `${fmtNum(completedVl)}/${fmtNum(c.vl_rows)}`, 'completed / rows', completedVl ? 'good-card' : 'warn-card'),
+  ].join('');
+  renderDynamicTable($('#evidenceInspectKinds'), data.by_kind || [], 'evidence-inspect-kinds');
+  renderCoverageNotes(data);
+  renderEvidenceRows(data.rows || []);
+  renderEvidenceProse(data.primary || {});
+  renderEvidenceMedia(data.media || []);
+  renderEvidenceArtifacts(data.artifacts || []);
+  renderEvidenceAnnotations(data.annotations || []);
+}
+
+function renderCoverageNotes(data) {
+  const rows = data.rows || [];
+  const primary = data.primary || {};
+  const notes = [];
+  const emptyWebRows = rows.filter(row => row.source_kind === 'web_page' && !Number(row.text_len || 0));
+  if (emptyWebRows.length) notes.push(['warn', `${fmtNum(emptyWebRows.length)} static webpage extraction row(s) have zero text. Rendered capture should be preferred.`]);
+  if (primary.web_document?.text_len) notes.push(['ok', `Rendered/normalized web document is available with ${fmtNum(primary.web_document.text_len)} characters.`]);
+  if (primary.x_post?.text_len) notes.push(['ok', `X post/thread text is captured with ${fmtNum(primary.x_post.text_len)} characters.`]);
+  const captureQuality = primary.capture?.quality || {};
+  if (captureQuality.x_video_count) {
+    notes.push(['ok', `X video detected: ${fmtNum(captureQuality.x_video_count)} video, ${fmtNum(captureQuality.x_video_keyframes)} keyframe image(s) captured for OCR/VL.`]);
+  }
+  if (!(data.ocr || []).length) notes.push(['warn', 'OCR/VL enrichment may still be queued, or media router has not reached these artifacts yet.']);
+  if (!notes.length) notes.push(['info', 'No special coverage notes for this evidence bundle.']);
+  $('#evidenceInspectCoverage').innerHTML = notes.map(([kind, text]) => `<div class="note ${kind}">${escapeHtml(text)}</div>`).join('');
+}
+
+function renderEvidenceRows(rows) {
+  renderTable($('#evidenceInspectRows'), [
+    { key: 'source_kind', label: 'Kind', width: 125, render: r => stageLabel(r.source_kind) },
+    { key: 'evidence_id', label: 'Evidence ID', width: 260 },
+    { key: 'title', label: 'Title', width: 320 },
+    { key: 'text_len', label: 'Text', width: 90, render: r => fmtNum(r.text_len) },
+    { key: 'canonical_url', label: 'URL', width: 330, render: r => linkCell(r.canonical_url) },
+    { key: 'collector_run_id', label: 'Run', width: 260 },
+    { key: 'captured_at', label: 'Captured', width: 180, render: r => fmtDate(r.captured_at) },
+    { key: 'raw_url', label: 'Raw', width: 90, render: r => internalLinkCell(r.raw_url, 'JSON') },
+  ], rows, { id: 'evidence-inspect-rows', onRow: row => openDetail(row.evidence_id, 'Evidence row', row) });
+}
+
+function prosePanel(row, emptyText) {
+  if (!row) return `<div class="empty">${escapeHtml(emptyText)}</div>`;
+  const meta = [
+    row.title,
+    row.author_handle ? `@${row.author_handle}` : '',
+    row.canonical_url,
+    row.captured_at ? fmtDate(row.captured_at) : '',
+  ].filter(Boolean).join(' · ');
+  const text = row.text || row.text_preview || '';
+  return `
+    <div class="meta-line">${escapeHtml(meta)}</div>
+    <pre class="prose-text">${escapeHtml(text)}</pre>
+  `;
+}
+
+function renderEvidenceProse(primary) {
+  $('#evidenceInspectWeb').innerHTML = prosePanel(primary.web_document, 'No normalized web/blog content found.');
+  $('#evidenceInspectPost').innerHTML = prosePanel(primary.x_post, 'No X post content found.');
+  $('#evidenceInspectAccount').innerHTML = prosePanel(primary.x_account, 'No X account context found.');
+}
+
+function renderEvidenceMedia(media) {
+  if (!media.length) {
+    $('#evidenceInspectMedia').innerHTML = '<div class="empty">No media artifacts found for this bundle.</div>';
+    return;
+  }
+  $('#evidenceInspectMedia').innerHTML = media.map(row => {
+    const ocr = row.ocr || [];
+    const vl = row.vl || [];
+    const ocrText = ocr.length ? ocr.map(item => `${item.status}: ${fmtNum(item.text_chars)} chars`).join(' · ') : 'not observed';
+    const vlText = vl.length ? vl.map(item => `${item.status}: ${item.vector_name || item.model || ''}`).join(' · ') : 'not observed';
+    return `
+      <article class="evidence-media-card">
+        ${row.url ? `<a href="${escapeHtml(row.url)}" target="_blank" rel="noreferrer"><img src="${escapeHtml(row.url)}" alt=""></a>` : '<div class="media-placeholder">No preview</div>'}
+        <div class="media-card-body">
+          <strong>${escapeHtml(row.title || row.evidence_id)}</strong>
+          <div class="meta-line">${escapeHtml(row.evidence_id)}</div>
+          <div class="media-status"><span>OCR</span><span>${escapeHtml(ocrText)}</span></div>
+          <div class="media-status"><span>VL</span><span>${escapeHtml(vlText)}</span></div>
+          <div class="toolbar tight">
+            ${row.url ? internalLinkCell(row.url, 'Open image') : ''}
+            ${row.raw_url ? internalLinkCell(row.raw_url, 'Raw JSON') : ''}
+          </div>
+        </div>
+      </article>
+    `;
+  }).join('');
+}
+
+function renderEvidenceArtifacts(artifacts) {
+  renderTable($('#evidenceInspectArtifacts'), [
+    { key: 'kind', label: 'Kind', width: 90 },
+    { key: 'source_kind', label: 'Source', width: 130, render: r => stageLabel(r.source_kind) },
+    { key: 'source_evidence_id', label: 'Evidence ID', width: 260 },
+    { key: 'path', label: 'Path', width: 520 },
+    { key: 'url', label: 'Open', width: 90, render: r => internalLinkCell(r.url, 'Open') },
+  ], artifacts, { id: 'evidence-inspect-artifacts' });
+}
+
+function renderEvidenceAnnotations(annotations) {
+  renderTable($('#evidenceInspectAnnotations'), [
+    { key: 'annotation_family', label: 'Family', width: 150 },
+    { key: 'label_id', label: 'Label', width: 230 },
+    { key: 'confidence', label: 'Conf', width: 80, render: r => Number(r.confidence || 0).toFixed(2) },
+    { key: 'evidence_id', label: 'Evidence ID', width: 240 },
+    { key: 'span_text', label: 'Span', width: 320 },
+    { key: 'created_at', label: 'Created', width: 180, render: r => fmtDate(r.created_at) },
+  ], annotations || [], { id: 'evidence-inspect-annotations', onRow: row => openDetail(row.label_id, 'Semantic annotation', row) });
+}
+
 async function loadQdrantStage() {
   const data = await api(`/api/stage/qdrant?${params({ frame: frame() })}`);
   const result = data.collection?.result || {};
@@ -740,6 +883,10 @@ async function loadClickHouseStage() {
   ], data.tables || [], { id: 'clickhouse-tables' });
   renderDynamicTable($('#clickhouseMetrics'), [...(data.metrics || []), ...(data.asynchronous_metrics || [])], 'clickhouse-metrics');
   if (state.activeView === 'clickhouse' && state.activePane === 'data') {
+    const frame = $('#clickhouseFrame');
+    if (frame && (!frame.getAttribute('src') || frame.getAttribute('src') === 'about:blank')) {
+      frame.src = '/clickhouse/dashboard';
+    }
     await runClickHouseQuery();
   }
 }
@@ -826,6 +973,10 @@ async function loadMeaningStage() {
 function activateView(id, pane = 'metrics') {
   state.activeView = id;
   state.activePane = pane;
+  const nextHash = `#${id}/${pane}`;
+  if (window.location.hash !== nextHash) {
+    history.replaceState(null, '', nextHash);
+  }
   $$('.stage-group').forEach(group => group.classList.toggle('active', group.dataset.stage === id));
   $$('.stage-tab').forEach(tab => tab.classList.toggle('active', tab.dataset.view === id));
   $$('.subtab').forEach(tab => tab.classList.toggle('active', tab.dataset.view === id && tab.dataset.pane === pane));
@@ -842,6 +993,7 @@ function activateView(id, pane = 'metrics') {
 async function loadActive(options = {}) {
   if (options.auto && state.activePane !== 'metrics') return;
   if (options.auto && state.activeView === 'research-search') return;
+  if (options.auto && state.activeView === 'evidence-inspector') return;
   if (state.loading) return;
   state.loading = true;
   setRefreshState(options.auto ? 'Auto refreshing...' : 'Refreshing...');
@@ -855,6 +1007,7 @@ async function loadActive(options = {}) {
     else if (id === 'pebble') await loadPebble();
     else if (id === 'typesense') await loadTypesenseStage();
     else if (id === 'research-search') await loadResearchSearch();
+    else if (id === 'evidence-inspector') await loadEvidenceInspector();
     else if (id === 'qdrant') await loadQdrantStage();
     else if (id === 'meaning') await loadMeaningStage();
     else if (id === 'clickhouse') await loadClickHouseStage();
@@ -891,6 +1044,8 @@ function bindEvents() {
   $('#researchSearchKind').addEventListener('change', loadResearchSearch);
   $('#researchSearchLimit').addEventListener('change', loadResearchSearch);
   $('#researchSearchRerank').addEventListener('change', loadResearchSearch);
+  $('#evidenceInspectGo').addEventListener('click', loadEvidenceInspector);
+  $('#evidenceInspectQ').addEventListener('keydown', ev => { if (ev.key === 'Enter') loadEvidenceInspector(); });
   $('#chRun').addEventListener('click', runClickHouseQuery);
   $('#chPlay').addEventListener('click', () => { $('#clickhouseFrame').src = '/clickhouse/play'; });
   $('#chDashboard').addEventListener('click', () => { $('#clickhouseFrame').src = '/clickhouse/dashboard'; });
@@ -903,7 +1058,12 @@ async function boot() {
   syncResearchRerankControl();
   await loadFacets();
   setAutoRefresh(state.autoRefreshMs);
-  await loadActive();
+  const [hashView, hashPane] = window.location.hash.replace(/^#/, '').split('/');
+  if (hashView && document.getElementById(hashView)) {
+    activateView(hashView, hashPane || 'metrics');
+  } else {
+    await loadActive();
+  }
 }
 
 boot().catch(err => {

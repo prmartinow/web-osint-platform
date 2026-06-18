@@ -18,6 +18,7 @@ APP_DIR = Path(__file__).resolve().parent
 STATIC_DIR = APP_DIR / "static"
 MEDIA_ROOT = Path(os.environ.get("MEDIA_ROOT", "/mnt/data/web-osint-platform/media")).resolve()
 OCR_ROOT = Path(os.environ.get("OCR_ROOT", "/mnt/data/web-osint-platform/ocr")).resolve()
+WEB_ROOT = Path(os.environ.get("WEB_ROOT", str(MEDIA_ROOT.parent / "web"))).resolve()
 
 CLICKHOUSE_URL = os.environ.get("CLICKHOUSE_URL", "http://web-osint-clickhouse:8123").rstrip("/")
 CLICKHOUSE_DB = os.environ.get("CLICKHOUSE_DATABASE", "web_osint")
@@ -676,8 +677,256 @@ def media_index(params):
     return {"rows": out}
 
 
+def parsed_raw_json(row):
+    raw = row.get("raw_json") or "{}"
+    if isinstance(raw, dict):
+        return raw
+    try:
+        return json.loads(raw)
+    except Exception:
+        return {}
+
+
+def inspector_path_url(raw_path):
+    if not raw_path:
+        return ""
+    candidate = Path(str(raw_path)).resolve()
+    for root in allowed_fs_roots():
+        try:
+            candidate.relative_to(root)
+            return f"/api/stage/fs-file?{urllib.parse.urlencode({'path': str(candidate)})}"
+        except ValueError:
+            continue
+    return ""
+
+
+def artifact_paths_from_raw(raw):
+    paths = []
+
+    def add(value):
+        if isinstance(value, str) and value.startswith("/mnt/data/") and value not in paths:
+            paths.append(value)
+
+    def walk(value, depth=0):
+        if depth > 4:
+            return
+        if isinstance(value, dict):
+            for key in ("artifact_paths", "ocr_artifact_paths", "local_paths", "paths"):
+                raw_paths = value.get(key)
+                if isinstance(raw_paths, list):
+                    for item in raw_paths:
+                        add(item)
+                else:
+                    add(raw_paths)
+            for key in ("local_path", "storage_path", "path", "json_artifact_path", "text_artifact_path"):
+                add(value.get(key))
+            for key in ("context", "raw", "quality"):
+                walk(value.get(key), depth + 1)
+        elif isinstance(value, list):
+            for item in value[:100]:
+                walk(item, depth + 1)
+
+    walk(raw)
+    return paths
+
+
+def evidence_inspector(params):
+    query = params.get("q", [""])[0].strip()
+    if not query:
+        raise DashboardError(400, "q is required")
+    query = query[:500]
+    q_sql = sql_string(query)
+    raw_q_sql = sql_string(query)
+    clauses = [
+        f"evidence_id = {q_sql}",
+        f"collector_run_id = {q_sql}",
+        f"canonical_url = {q_sql}",
+        f"has(links, {q_sql})",
+        f"positionCaseInsensitive(raw_json, {raw_q_sql}) > 0",
+    ]
+    status = re.search(r"(?:x|twitter)\.com/[^/\s]+/status/(\d+)", query)
+    if status:
+        post_id = status.group(1)
+        post_sql = sql_string(post_id)
+        status_path_sql = sql_string(f"/status/{post_id}")
+        clauses.extend([
+            f"evidence_id = {post_sql}",
+            f"position(canonical_url, {status_path_sql}) > 0",
+            f"position(raw_json, {post_sql}) > 0",
+        ])
+    if re.fullmatch(r"\d{12,25}", query):
+        clauses.append(f"evidence_id = {q_sql}")
+        clauses.append(f"position(raw_json, {q_sql}) > 0")
+
+    seed_rows = ch_data(
+        f"""
+        SELECT *
+        FROM evidence_events
+        WHERE {" OR ".join(f"({clause})" for clause in clauses)}
+        ORDER BY ingested_at DESC
+        LIMIT 80
+        """
+    )
+    run_ids = []
+    for row in seed_rows:
+        run_id = row.get("collector_run_id")
+        if run_id and run_id not in run_ids:
+            run_ids.append(run_id)
+
+    related_rows = []
+    if run_ids:
+        quoted_runs = ", ".join(sql_string(run_id) for run_id in run_ids[:20])
+        related_rows = ch_data(
+            f"""
+            SELECT *
+            FROM evidence_events
+            WHERE collector_run_id IN ({quoted_runs})
+            ORDER BY captured_at ASC, source_kind ASC, event_id ASC
+            LIMIT 300
+            """
+        )
+
+    by_event = {}
+    for row in [*seed_rows, *related_rows]:
+        key = row.get("event_id") or f"{row.get('collector_run_id')}:{row.get('evidence_id')}"
+        if key not in by_event:
+            by_event[key] = row
+    rows = list(by_event.values())
+    rows.sort(key=lambda row: (row.get("collector_run_id") or "", row.get("source_kind") or "", row.get("captured_at") or ""))
+
+    evidence_ids = [row.get("evidence_id") for row in rows if row.get("evidence_id")]
+    quoted_ids = ", ".join(sql_string(eid) for eid in evidence_ids[:300])
+    annotations = []
+    ocr_rows = []
+    vl_rows = []
+    if quoted_ids:
+        annotations = optional_ch_data(
+            f"""
+            SELECT evidence_id, annotation_family, label_id, status, confidence, span_text,
+                   value_json, producer_name, producer_version, created_at
+            FROM semantic_annotations
+            WHERE evidence_id IN ({quoted_ids})
+            ORDER BY created_at DESC
+            LIMIT 300
+            """
+        )
+        ocr_rows = optional_ch_data(
+            f"""
+            SELECT evidence_id, source_artifact_id, source_sha256, artifact_role, engine,
+                   engine_version, status, text_chars, block_count, mean_confidence,
+                   text_artifact_path, json_artifact_path, error_message, created_at
+            FROM media_ocr_results
+            WHERE evidence_id IN ({quoted_ids})
+            ORDER BY created_at DESC
+            LIMIT 300
+            """
+        )
+        vl_rows = optional_ch_data(
+            f"""
+            SELECT evidence_id, source_artifact_id, source_sha256, model, model_version,
+                   vector_name, status, qdrant_point_id, image_width, image_height,
+                   error_message, created_at
+            FROM media_vl_embeddings
+            WHERE evidence_id IN ({quoted_ids})
+            ORDER BY created_at DESC
+            LIMIT 300
+            """
+        )
+
+    ocr_by_evidence = {}
+    for row in ocr_rows:
+        ocr_by_evidence.setdefault(row.get("evidence_id"), []).append(row)
+    vl_by_evidence = {}
+    for row in vl_rows:
+        vl_by_evidence.setdefault(row.get("evidence_id"), []).append(row)
+
+    out_rows = []
+    media = []
+    artifacts = []
+    for row in rows:
+        raw = parsed_raw_json(row)
+        text = row.get("text") or ""
+        item = {k: v for k, v in row.items() if k != "raw_json"}
+        item["text_len"] = len(text)
+        item["text_preview"] = text[:1200]
+        item["raw_url"] = f"/api/raw?{urllib.parse.urlencode({'event_id': row.get('event_id', '')})}"
+        item["quality"] = raw.get("quality") or (raw.get("raw", {}) if isinstance(raw.get("raw"), dict) else {}).get("quality") or {}
+        out_rows.append(item)
+
+        for artifact_path in artifact_paths_from_raw(raw):
+            artifacts.append({
+                "source_evidence_id": row.get("evidence_id"),
+                "source_kind": row.get("source_kind"),
+                "path": artifact_path,
+                "kind": human_kind(Path(artifact_path)),
+                "url": inspector_path_url(artifact_path),
+            })
+
+        if row.get("source_kind") == "media":
+            media_path = media_path_from_row(row)
+            media.append({
+                **item,
+                "path": media_path,
+                "url": f"/api/media?id={urllib.parse.quote(row.get('evidence_id', ''))}" if media_path else "",
+                "ocr": ocr_by_evidence.get(row.get("evidence_id"), []),
+                "vl": vl_by_evidence.get(row.get("evidence_id"), []),
+            })
+
+    def longest(kind):
+        candidates = [row for row in out_rows if row.get("source_kind") == kind]
+        return max(candidates, key=lambda row: row.get("text_len") or 0, default=None)
+
+    by_kind = {}
+    for row in out_rows:
+        key = row.get("source_kind") or "unknown"
+        by_kind[key] = by_kind.get(key, 0) + 1
+
+    web_doc = longest("web_page")
+    post = longest("x_post")
+    account = longest("x_account")
+    capture = longest("x_page") or longest("web_page")
+    artifact_seen = set()
+    unique_artifacts = []
+    for artifact in artifacts:
+        path_key = artifact.get("path")
+        if path_key in artifact_seen:
+            continue
+        artifact_seen.add(path_key)
+        unique_artifacts.append(artifact)
+
+    return {
+        "query": query,
+        "generated_at": ch_data("SELECT now64() AS now")[0]["now"],
+        "run_ids": run_ids,
+        "cards": {
+            "rows": len(out_rows),
+            "runs": len(run_ids),
+            "media": len(media),
+            "artifacts": len(unique_artifacts),
+            "annotations": len(annotations),
+            "ocr_rows": len(ocr_rows),
+            "vl_rows": len(vl_rows),
+            "web_text_chars": (web_doc or {}).get("text_len", 0),
+            "post_text_chars": (post or {}).get("text_len", 0),
+        },
+        "by_kind": [{"source_kind": key, "rows": value} for key, value in sorted(by_kind.items())],
+        "primary": {
+            "capture": capture,
+            "web_document": web_doc,
+            "x_post": post,
+            "x_account": account,
+        },
+        "rows": out_rows,
+        "media": media,
+        "artifacts": unique_artifacts,
+        "annotations": annotations,
+        "ocr": ocr_rows,
+        "vl": vl_rows,
+    }
+
+
 def allowed_fs_roots():
-    return [MEDIA_ROOT, OCR_ROOT]
+    return [MEDIA_ROOT, OCR_ROOT, WEB_ROOT]
 
 
 def safe_fs_path(raw_path=""):
@@ -2378,6 +2627,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self.send_json(type_search(params))
             if parsed.path == "/api/research/search":
                 return self.send_json(research_search(params_to_search_body(params)))
+            if parsed.path == "/api/evidence/inspect":
+                return self.send_json(evidence_inspector(params))
             if parsed.path == "/api/lookup":
                 return self.send_json(lookup(params))
             if parsed.path == "/api/media-index":

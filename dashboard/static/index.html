@@ -103,6 +103,13 @@
           <button class="subtab" data-view="research-search" data-pane="data">Data</button>
         </div>
       </div>
+      <div class="stage-group" data-stage="evidence-inspector">
+        <button class="stage-tab" data-view="evidence-inspector">Evidence Inspector</button>
+        <div class="stage-subnav">
+          <button class="subtab" data-view="evidence-inspector" data-pane="metrics">Metrics</button>
+          <button class="subtab" data-view="evidence-inspector" data-pane="data">Data</button>
+        </div>
+      </div>
       <div class="stage-group" data-stage="qdrant">
         <button class="stage-tab" data-view="qdrant">Qdrant</button>
         <div class="stage-subnav">
@@ -385,6 +392,64 @@
       </div>
     </section>
 
+    <section id="evidence-inspector" class="view">
+      <div class="pane active" data-pane="metrics">
+        <section class="panel">
+          <h2>Evidence Lookup</h2>
+          <div class="toolbar evidence-toolbar">
+            <input id="evidenceInspectQ" type="search" value="https://x.com/datalabto/status/2066597525432213782" placeholder="Paste URL, evidence id, post id, or collector run id">
+            <button id="evidenceInspectGo">Inspect</button>
+          </div>
+          <div id="evidenceInspectMeta" class="meta-line"></div>
+        </section>
+        <div class="cards" id="evidenceInspectCards"></div>
+        <div class="panel-grid">
+          <section class="panel">
+            <h2>Source Kinds</h2>
+            <div id="evidenceInspectKinds"></div>
+          </section>
+          <section class="panel">
+            <h2>Coverage Notes</h2>
+            <div id="evidenceInspectCoverage" class="note-list"></div>
+          </section>
+        </div>
+      </div>
+      <div class="pane" data-pane="data">
+        <section class="panel">
+          <h2>Evidence Bundle Rows</h2>
+          <div id="evidenceInspectRows"></div>
+        </section>
+        <div class="panel-grid evidence-content-grid">
+          <section class="panel">
+            <h2>Normalized Blog / Web Content</h2>
+            <div id="evidenceInspectWeb" class="prose-box"></div>
+          </section>
+          <section class="panel">
+            <h2>X Post / Thread</h2>
+            <div id="evidenceInspectPost" class="prose-box"></div>
+          </section>
+        </div>
+        <section class="panel">
+          <h2>Account Context</h2>
+          <div id="evidenceInspectAccount" class="prose-box compact"></div>
+        </section>
+        <section class="panel">
+          <h2>Media, OCR, And VL</h2>
+          <div id="evidenceInspectMedia" class="evidence-media-grid"></div>
+        </section>
+        <div class="panel-grid">
+          <section class="panel">
+            <h2>Artifacts</h2>
+            <div id="evidenceInspectArtifacts"></div>
+          </section>
+          <section class="panel">
+            <h2>Semantic Annotations</h2>
+            <div id="evidenceInspectAnnotations"></div>
+          </section>
+        </div>
+      </div>
+    </section>
+
     <section id="meaning" class="view">
       <div class="pane active" data-pane="metrics">
         <div class="cards" id="meaningCards"></div>
@@ -460,7 +525,7 @@ LIMIT 50</textarea>
         </section>
         <section class="panel">
           <h2>Embedded ClickHouse UI</h2>
-          <iframe id="clickhouseFrame" class="embedded-ui" src="/clickhouse/dashboard" title="ClickHouse UI"></iframe>
+          <iframe id="clickhouseFrame" class="embedded-ui" src="about:blank" title="ClickHouse UI"></iframe>
         </section>
       </div>
     </section>

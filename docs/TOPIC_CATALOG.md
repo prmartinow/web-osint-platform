@@ -50,6 +50,12 @@ operator-facing map for replay, parity checks, and future Connect migration.
 | `osint.media.vl_embedding.completed.v1` | VL | VL worker | canary, analytics | delete | n/a |
 | `osint.media.vl_embedding.failed.v1` | VL | VL worker | operators, dashboard | delete | n/a |
 
+## Review And Curation Topics
+
+| Topic | Owner | Producer | Consumers | Policy | Schema | Purpose |
+| --- | --- | --- | --- | --- | --- | --- |
+| `research.review.events.v1` | research UI | Source Workbench / review API | review materializer, ClickHouse projections | delete | `schemas/research_review_event.schema.json` | Append-only user and reviewer actions: evidence selections, annotations, proposed facts, entity links, claim stubs, and review-state changes |
+
 ## Shadow Connect Topics
 
 These topics are not production-serving. They exist to prove Redpanda Connect

@@ -551,3 +551,84 @@ CREATE TABLE IF NOT EXISTS web_osint.media_vl_embeddings
 ENGINE = MergeTree
 PARTITION BY toYYYYMM(created_at)
 ORDER BY (source_sha256, model, params_hash, created_at, vl_embedding_id);
+
+CREATE TABLE IF NOT EXISTS web_osint.research_review_events
+(
+    event_id String,
+    schema_version LowCardinality(String),
+    event_type LowCardinality(String),
+    project String,
+    source_evidence_id String,
+    subject_type LowCardinality(String),
+    subject_id String,
+    actor String,
+    created_at DateTime64(3, 'UTC'),
+    payload_json String,
+    source_anchor_json String,
+    idempotency_key String,
+    inserted_at DateTime64(3, 'UTC') DEFAULT now64(3)
+)
+ENGINE = MergeTree
+PARTITION BY toYYYYMM(created_at)
+ORDER BY (source_evidence_id, created_at, event_id);
+
+CREATE TABLE IF NOT EXISTS web_osint.evidence_selections
+(
+    selection_id String,
+    source_evidence_id String,
+    document_id String,
+    block_id String,
+    selection_kind LowCardinality(String),
+    quote String,
+    context_before String,
+    context_after String,
+    source_anchor_json String,
+    note String,
+    status LowCardinality(String),
+    actor String,
+    created_at DateTime64(3, 'UTC'),
+    updated_at DateTime64(3, 'UTC')
+)
+ENGINE = ReplacingMergeTree(updated_at)
+PARTITION BY toYYYYMM(created_at)
+ORDER BY (source_evidence_id, selection_id);
+
+CREATE TABLE IF NOT EXISTS web_osint.review_annotations
+(
+    annotation_id String,
+    source_evidence_id String,
+    evidence_selection_id String,
+    annotation_type LowCardinality(String),
+    body String,
+    status LowCardinality(String),
+    source_anchor_json String,
+    actor String,
+    created_at DateTime64(3, 'UTC'),
+    updated_at DateTime64(3, 'UTC')
+)
+ENGINE = ReplacingMergeTree(updated_at)
+PARTITION BY toYYYYMM(created_at)
+ORDER BY (source_evidence_id, annotation_id);
+
+CREATE TABLE IF NOT EXISTS web_osint.proposed_facts
+(
+    proposed_fact_id String,
+    source_evidence_id String,
+    evidence_selection_id String,
+    fact_type LowCardinality(String),
+    field_path String,
+    raw_value String,
+    normalized_value String,
+    unit String,
+    entities_json String,
+    evidence_quote String,
+    source_anchor_json String,
+    status LowCardinality(String),
+    note String,
+    actor String,
+    created_at DateTime64(3, 'UTC'),
+    updated_at DateTime64(3, 'UTC')
+)
+ENGINE = ReplacingMergeTree(updated_at)
+PARTITION BY toYYYYMM(created_at)
+ORDER BY (source_evidence_id, proposed_fact_id);

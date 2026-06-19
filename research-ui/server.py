@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 import base64
+from datetime import datetime, timezone
 import json
 import mimetypes
 import os
 import posixpath
-import re
+import uuid
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -24,8 +25,11 @@ MEDIA_ROOT = Path(os.environ.get("MEDIA_ROOT", str(DATA_ROOT / "media"))).resolv
 OCR_ROOT = Path(os.environ.get("OCR_ROOT", str(DATA_ROOT / "ocr"))).resolve()
 WEB_ROOT = Path(os.environ.get("WEB_ROOT", str(DATA_ROOT / "web"))).resolve()
 DERIVED_ROOT = Path(os.environ.get("DERIVED_ROOT", str(DATA_ROOT / "derived"))).resolve()
+REVIEW_ROOT = Path(os.environ.get("REVIEW_ROOT", str(DATA_ROOT / "review"))).resolve()
+REVIEW_ACTOR = os.environ.get("REVIEW_ACTOR", "web-osint-user")
 
 MAX_LIMIT = 200
+MAX_JSON_BODY_BYTES = 1_000_000
 MAX_ARTIFACT_PREVIEW_BYTES = 2_000_000
 SAFE_SQL_PREFIXES = ("select", "with", "show", "describe", "desc")
 
@@ -53,28 +57,49 @@ def sql_int(value, default, min_value=1, max_value=MAX_LIMIT):
     return max(min_value, min(max_value, parsed))
 
 
-def ch_query(query):
-    compact = " ".join(query.strip().split())
-    if not compact.lower().startswith(SAFE_SQL_PREFIXES):
-        raise ResearchUiError(400, "Only read-only ClickHouse queries are allowed")
+def ch_request(query, body=None, default_format="JSON", timeout=25):
     params = {
         "database": CLICKHOUSE_DB,
         "query": query,
-        "default_format": "JSON",
         "date_time_output_format": "iso",
     }
-    request = urllib.request.Request(CLICKHOUSE_URL + "/?" + urllib.parse.urlencode(params), method="POST")
+    if default_format:
+        params["default_format"] = default_format
+    data = body.encode("utf-8") if isinstance(body, str) else body
+    request = urllib.request.Request(
+        CLICKHOUSE_URL + "/?" + urllib.parse.urlencode(params),
+        data=data,
+        method="POST",
+    )
     if CLICKHOUSE_PASSWORD:
         token = base64.b64encode(f"{CLICKHOUSE_USER}:{CLICKHOUSE_PASSWORD}".encode()).decode()
         request.add_header("Authorization", f"Basic {token}")
     try:
-        with urllib.request.urlopen(request, timeout=25) as response:
-            return json.loads(response.read().decode("utf-8"))
+        with urllib.request.urlopen(request, timeout=timeout) as response:
+            return response.read().decode("utf-8")
     except urllib.error.HTTPError as exc:
         detail = exc.read().decode("utf-8", errors="replace")[:2000]
         raise ResearchUiError(502, f"ClickHouse error {exc.code}: {detail}")
     except Exception as exc:
         raise ResearchUiError(502, f"ClickHouse request failed: {exc}")
+
+
+def ch_query(query):
+    compact = " ".join(query.strip().split())
+    if not compact.lower().startswith(SAFE_SQL_PREFIXES):
+        raise ResearchUiError(400, "Only read-only ClickHouse queries are allowed")
+    return json.loads(ch_request(query))
+
+
+def ch_execute(query):
+    return ch_request(query, default_format=None, timeout=30)
+
+
+def ch_insert_json_each_row(table, rows):
+    if not rows:
+        return
+    body = "\n".join(json.dumps(row, ensure_ascii=False, default=str) for row in rows) + "\n"
+    ch_request(f"INSERT INTO {table} FORMAT JSONEachRow", body=body, default_format=None, timeout=30)
 
 
 def ch_data(query, fallback=None):
@@ -125,8 +150,117 @@ def extract_paths(raw):
     return paths
 
 
+def now_iso():
+    return datetime.now(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z")
+
+
+def make_id(prefix):
+    return f"{prefix}/{uuid.uuid4().hex}"
+
+
+def json_text(value):
+    return json.dumps(value if value is not None else {}, ensure_ascii=False, sort_keys=True, default=str)
+
+
+def compact_text(value, limit=20000):
+    text = str(value or "").strip()
+    return text[:limit]
+
+
 def artifact_url(path):
     return "/api/artifact?" + urllib.parse.urlencode({"path": path})
+
+
+def ensure_review_tables():
+    ddl = [
+        """
+        CREATE TABLE IF NOT EXISTS research_review_events
+        (
+            event_id String,
+            schema_version LowCardinality(String),
+            event_type LowCardinality(String),
+            project String,
+            source_evidence_id String,
+            subject_type LowCardinality(String),
+            subject_id String,
+            actor String,
+            created_at DateTime64(3, 'UTC'),
+            payload_json String,
+            source_anchor_json String,
+            idempotency_key String,
+            inserted_at DateTime64(3, 'UTC') DEFAULT now64(3)
+        )
+        ENGINE = MergeTree
+        PARTITION BY toYYYYMM(created_at)
+        ORDER BY (source_evidence_id, created_at, event_id)
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS evidence_selections
+        (
+            selection_id String,
+            source_evidence_id String,
+            document_id String,
+            block_id String,
+            selection_kind LowCardinality(String),
+            quote String,
+            context_before String,
+            context_after String,
+            source_anchor_json String,
+            note String,
+            status LowCardinality(String),
+            actor String,
+            created_at DateTime64(3, 'UTC'),
+            updated_at DateTime64(3, 'UTC')
+        )
+        ENGINE = ReplacingMergeTree(updated_at)
+        PARTITION BY toYYYYMM(created_at)
+        ORDER BY (source_evidence_id, selection_id)
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS review_annotations
+        (
+            annotation_id String,
+            source_evidence_id String,
+            evidence_selection_id String,
+            annotation_type LowCardinality(String),
+            body String,
+            status LowCardinality(String),
+            source_anchor_json String,
+            actor String,
+            created_at DateTime64(3, 'UTC'),
+            updated_at DateTime64(3, 'UTC')
+        )
+        ENGINE = ReplacingMergeTree(updated_at)
+        PARTITION BY toYYYYMM(created_at)
+        ORDER BY (source_evidence_id, annotation_id)
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS proposed_facts
+        (
+            proposed_fact_id String,
+            source_evidence_id String,
+            evidence_selection_id String,
+            fact_type LowCardinality(String),
+            field_path String,
+            raw_value String,
+            normalized_value String,
+            unit String,
+            entities_json String,
+            evidence_quote String,
+            source_anchor_json String,
+            status LowCardinality(String),
+            note String,
+            actor String,
+            created_at DateTime64(3, 'UTC'),
+            updated_at DateTime64(3, 'UTC')
+        )
+        ENGINE = ReplacingMergeTree(updated_at)
+        PARTITION BY toYYYYMM(created_at)
+        ORDER BY (source_evidence_id, proposed_fact_id)
+        """,
+    ]
+    for query in ddl:
+        ch_execute(query)
 
 
 def source_kind_label(kind):
@@ -275,6 +409,72 @@ def facets():
     return {"totals": totals, "source_kinds": source_kinds, "projects": projects, "domains": domains, "queues": queues}
 
 
+def review_state_for_source(evidence_id):
+    quoted = sql_string(evidence_id)
+    selections = ch_data(
+        f"""
+        SELECT
+          selection_id, source_evidence_id, document_id, block_id, selection_kind,
+          quote, context_before, context_after, source_anchor_json, note, status,
+          actor, created_at, updated_at
+        FROM evidence_selections FINAL
+        WHERE source_evidence_id = {quoted}
+        ORDER BY updated_at DESC, created_at DESC
+        LIMIT 200
+        """,
+        fallback=[],
+    )
+    annotations = ch_data(
+        f"""
+        SELECT
+          annotation_id, source_evidence_id, evidence_selection_id, annotation_type,
+          body, status, source_anchor_json, actor, created_at, updated_at
+        FROM review_annotations FINAL
+        WHERE source_evidence_id = {quoted}
+        ORDER BY updated_at DESC, created_at DESC
+        LIMIT 200
+        """,
+        fallback=[],
+    )
+    proposed_facts = ch_data(
+        f"""
+        SELECT
+          proposed_fact_id, source_evidence_id, evidence_selection_id, fact_type,
+          field_path, raw_value, normalized_value, unit, entities_json, evidence_quote,
+          source_anchor_json, status, note, actor, created_at, updated_at
+        FROM proposed_facts FINAL
+        WHERE source_evidence_id = {quoted}
+        ORDER BY updated_at DESC, created_at DESC
+        LIMIT 200
+        """,
+        fallback=[],
+    )
+    events = ch_data(
+        f"""
+        SELECT
+          event_id, event_type, project, source_evidence_id, subject_type, subject_id,
+          actor, created_at, payload_json, source_anchor_json, idempotency_key
+        FROM research_review_events
+        WHERE source_evidence_id = {quoted}
+        ORDER BY created_at DESC
+        LIMIT 200
+        """,
+        fallback=[],
+    )
+    return {
+        "selections": selections,
+        "annotations": annotations,
+        "proposed_facts": proposed_facts,
+        "events": events,
+        "counts": {
+            "selections": len(selections),
+            "annotations": len(annotations),
+            "proposed_facts": len(proposed_facts),
+            "events": len(events),
+        },
+    }
+
+
 def source_detail(params):
     evidence_id = (params.get("id", [""])[0] or "").strip()
     if not evidence_id:
@@ -378,7 +578,192 @@ def source_detail(params):
         "annotations": annotations,
         "ocr": ocr,
         "vl": vl,
+        "review": review_state_for_source(evidence_id),
     }
+
+
+def append_review_jsonl(event):
+    day = event["created_at"][:10].replace("-", "")
+    directory = REVIEW_ROOT / "events"
+    path = directory / f"{day}.jsonl"
+    try:
+        directory.mkdir(parents=True, exist_ok=True)
+        with path.open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps(event, ensure_ascii=False, sort_keys=True, default=str) + "\n")
+        return {"ok": True, "path": str(path)}
+    except Exception as exc:
+        print(f"review jsonl append failed: {exc}", flush=True)
+        return {"ok": False, "error": str(exc), "path": str(path)}
+
+
+def build_review_event(event_type, payload):
+    source_evidence_id = compact_text(payload.get("source_evidence_id"), 1000)
+    if not source_evidence_id:
+        raise ResearchUiError(400, "source_evidence_id is required")
+    created_at = now_iso()
+    subject_type = compact_text(payload.get("subject_type") or event_type.split(".")[0], 80)
+    subject_id = compact_text(payload.get("subject_id") or payload.get("selection_id") or payload.get("annotation_id") or payload.get("proposed_fact_id"), 300)
+    source_anchor = payload.get("source_anchor") or {}
+    event = {
+        "event_id": make_id("review_event"),
+        "schema_version": "research_review_event.v1",
+        "event_type": event_type,
+        "project": compact_text(payload.get("project") or payload.get("source_project") or "", 200),
+        "source_evidence_id": source_evidence_id,
+        "subject_type": subject_type,
+        "subject_id": subject_id,
+        "actor": compact_text(payload.get("actor") or REVIEW_ACTOR, 200),
+        "created_at": created_at,
+        "payload": payload,
+        "source_anchor": source_anchor,
+        "payload_json": json_text(payload),
+        "source_anchor_json": json_text(source_anchor),
+        "idempotency_key": compact_text(payload.get("idempotency_key") or "", 500),
+    }
+    return event
+
+
+def persist_review_event(event):
+    ch_insert_json_each_row("research_review_events", [{
+        "event_id": event["event_id"],
+        "schema_version": event["schema_version"],
+        "event_type": event["event_type"],
+        "project": event["project"],
+        "source_evidence_id": event["source_evidence_id"],
+        "subject_type": event["subject_type"],
+        "subject_id": event["subject_id"],
+        "actor": event["actor"],
+        "created_at": event["created_at"],
+        "payload_json": event["payload_json"],
+        "source_anchor_json": event["source_anchor_json"],
+        "idempotency_key": event["idempotency_key"],
+    }])
+    event["jsonl"] = append_review_jsonl(event)
+    return event
+
+
+def create_evidence_selection(payload):
+    selection_id = compact_text(payload.get("selection_id"), 300) or make_id("selection")
+    now = now_iso()
+    normalized = {
+        **payload,
+        "selection_id": selection_id,
+        "subject_type": "evidence_selection",
+        "subject_id": selection_id,
+        "selection_kind": compact_text(payload.get("selection_kind") or "text", 80),
+        "status": compact_text(payload.get("status") or "selected", 80),
+        "quote": compact_text(payload.get("quote"), 50000),
+        "context_before": compact_text(payload.get("context_before"), 10000),
+        "context_after": compact_text(payload.get("context_after"), 10000),
+        "note": compact_text(payload.get("note"), 20000),
+        "created_at": payload.get("created_at") or now,
+        "updated_at": now,
+    }
+    event = persist_review_event(build_review_event("evidence_selection.created", normalized))
+    ch_insert_json_each_row("evidence_selections", [{
+        "selection_id": selection_id,
+        "source_evidence_id": normalized["source_evidence_id"],
+        "document_id": compact_text(normalized.get("document_id"), 500),
+        "block_id": compact_text(normalized.get("block_id"), 500),
+        "selection_kind": normalized["selection_kind"],
+        "quote": normalized["quote"],
+        "context_before": normalized["context_before"],
+        "context_after": normalized["context_after"],
+        "source_anchor_json": json_text(normalized.get("source_anchor")),
+        "note": normalized["note"],
+        "status": normalized["status"],
+        "actor": compact_text(normalized.get("actor") or REVIEW_ACTOR, 200),
+        "created_at": normalized["created_at"],
+        "updated_at": normalized["updated_at"],
+    }])
+    return {"event": event, "selection": normalized}
+
+
+def create_review_annotation(payload):
+    annotation_id = compact_text(payload.get("annotation_id"), 300) or make_id("annotation")
+    body = compact_text(payload.get("body"), 50000)
+    if not body:
+        raise ResearchUiError(400, "body is required")
+    now = now_iso()
+    normalized = {
+        **payload,
+        "annotation_id": annotation_id,
+        "subject_type": "annotation",
+        "subject_id": annotation_id,
+        "annotation_type": compact_text(payload.get("annotation_type") or "note", 80),
+        "status": compact_text(payload.get("status") or "open", 80),
+        "body": body,
+        "created_at": payload.get("created_at") or now,
+        "updated_at": now,
+    }
+    event = persist_review_event(build_review_event("annotation.created", normalized))
+    ch_insert_json_each_row("review_annotations", [{
+        "annotation_id": annotation_id,
+        "source_evidence_id": normalized["source_evidence_id"],
+        "evidence_selection_id": compact_text(normalized.get("evidence_selection_id"), 300),
+        "annotation_type": normalized["annotation_type"],
+        "body": normalized["body"],
+        "status": normalized["status"],
+        "source_anchor_json": json_text(normalized.get("source_anchor")),
+        "actor": compact_text(normalized.get("actor") or REVIEW_ACTOR, 200),
+        "created_at": normalized["created_at"],
+        "updated_at": normalized["updated_at"],
+    }])
+    return {"event": event, "annotation": normalized}
+
+
+def create_proposed_fact(payload):
+    proposed_fact_id = compact_text(payload.get("proposed_fact_id"), 300) or make_id("proposed_fact")
+    fact_type = compact_text(payload.get("fact_type") or "general", 120)
+    raw_value = compact_text(payload.get("raw_value"), 50000)
+    normalized_value = compact_text(payload.get("normalized_value"), 50000)
+    if not raw_value and not normalized_value:
+        raise ResearchUiError(400, "raw_value or normalized_value is required")
+    now = now_iso()
+    normalized = {
+        **payload,
+        "proposed_fact_id": proposed_fact_id,
+        "subject_type": "proposed_fact",
+        "subject_id": proposed_fact_id,
+        "fact_type": fact_type,
+        "field_path": compact_text(payload.get("field_path"), 500),
+        "raw_value": raw_value,
+        "normalized_value": normalized_value,
+        "unit": compact_text(payload.get("unit"), 120),
+        "evidence_quote": compact_text(payload.get("evidence_quote") or payload.get("quote"), 50000),
+        "status": compact_text(payload.get("status") or "proposed", 80),
+        "note": compact_text(payload.get("note"), 20000),
+        "created_at": payload.get("created_at") or now,
+        "updated_at": now,
+    }
+    event = persist_review_event(build_review_event("proposed_fact.created", normalized))
+    ch_insert_json_each_row("proposed_facts", [{
+        "proposed_fact_id": proposed_fact_id,
+        "source_evidence_id": normalized["source_evidence_id"],
+        "evidence_selection_id": compact_text(normalized.get("evidence_selection_id"), 300),
+        "fact_type": normalized["fact_type"],
+        "field_path": normalized["field_path"],
+        "raw_value": normalized["raw_value"],
+        "normalized_value": normalized["normalized_value"],
+        "unit": normalized["unit"],
+        "entities_json": json_text(normalized.get("entities") or []),
+        "evidence_quote": normalized["evidence_quote"],
+        "source_anchor_json": json_text(normalized.get("source_anchor")),
+        "status": normalized["status"],
+        "note": normalized["note"],
+        "actor": compact_text(normalized.get("actor") or REVIEW_ACTOR, 200),
+        "created_at": normalized["created_at"],
+        "updated_at": normalized["updated_at"],
+    }])
+    return {"event": event, "proposed_fact": normalized}
+
+
+def create_generic_review_event(payload):
+    event_type = compact_text(payload.get("event_type"), 160)
+    if not event_type:
+        raise ResearchUiError(400, "event_type is required")
+    event = persist_review_event(build_review_event(event_type, payload))
+    return {"event": event}
 
 
 def safe_artifact(path_value):
@@ -453,6 +838,24 @@ class ResearchUiHandler(BaseHTTPRequestHandler):
             return
         self.send_text(artifact["body"], artifact["content_type"])
 
+    def read_json_body(self):
+        try:
+            length = int(self.headers.get("Content-Length", "0"))
+        except ValueError:
+            raise ResearchUiError(400, "Invalid Content-Length")
+        if length <= 0:
+            raise ResearchUiError(400, "Missing JSON body")
+        if length > MAX_JSON_BODY_BYTES:
+            raise ResearchUiError(413, "JSON body is too large")
+        raw = self.rfile.read(length).decode("utf-8")
+        try:
+            value = json.loads(raw)
+        except json.JSONDecodeError as exc:
+            raise ResearchUiError(400, f"Invalid JSON: {exc}")
+        if not isinstance(value, dict):
+            raise ResearchUiError(400, "JSON body must be an object")
+        return value
+
     def do_HEAD(self):
         if urllib.parse.urlparse(self.path).path == "/":
             self.send_response(200)
@@ -476,6 +879,11 @@ class ResearchUiHandler(BaseHTTPRequestHandler):
                 return self.send_json(inbox(params))
             if parsed.path == "/api/source":
                 return self.send_json(source_detail(params))
+            if parsed.path == "/api/source/review":
+                evidence_id = (params.get("id", [""])[0] or "").strip()
+                if not evidence_id:
+                    raise ResearchUiError(400, "Missing source id")
+                return self.send_json(review_state_for_source(evidence_id))
             if parsed.path == "/api/artifact":
                 return self.send_artifact(safe_artifact(params.get("path", [""])[0]))
             if parsed.path.startswith("/static/"):
@@ -488,10 +896,33 @@ class ResearchUiHandler(BaseHTTPRequestHandler):
         except Exception as exc:
             self.send_json({"error": str(exc)}, status=500)
 
+    def do_POST(self):
+        parsed = urllib.parse.urlparse(self.path)
+        try:
+            ensure_review_tables()
+            payload = self.read_json_body()
+            if parsed.path == "/api/review/events":
+                return self.send_json(create_generic_review_event(payload), status=201)
+            if parsed.path == "/api/evidence/selections":
+                return self.send_json(create_evidence_selection(payload), status=201)
+            if parsed.path == "/api/annotations":
+                return self.send_json(create_review_annotation(payload), status=201)
+            if parsed.path == "/api/proposed-facts":
+                return self.send_json(create_proposed_fact(payload), status=201)
+            raise ResearchUiError(404, "Not found")
+        except ResearchUiError as exc:
+            self.send_json({"error": exc.message}, status=exc.status)
+        except Exception as exc:
+            self.send_json({"error": str(exc)}, status=500)
+
 
 def main():
     host = os.environ.get("RESEARCH_UI_HOST", "127.0.0.1")
     port = int(os.environ.get("RESEARCH_UI_PORT", "18192"))
+    try:
+        ensure_review_tables()
+    except Exception as exc:
+        print(f"Review table initialization warning: {exc}", flush=True)
     server = ThreadingHTTPServer((host, port), ResearchUiHandler)
     print(f"Web OSINT Research UI listening on http://{host}:{port}", flush=True)
     server.serve_forever()

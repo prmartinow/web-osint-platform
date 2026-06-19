@@ -7,6 +7,9 @@ const state = {
   selectedId: '',
   rows: [],
   facets: null,
+  currentSource: null,
+  currentDoc: null,
+  selectedBlock: null,
 };
 
 const $ = (id) => document.getElementById(id);
@@ -31,6 +34,22 @@ async function fetchJson(url) {
   const data = await response.json();
   if (!response.ok) throw new Error(data.error || response.statusText);
   return data;
+}
+
+async function postJson(url, payload) {
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  const data = await response.json();
+  if (!response.ok) throw new Error(data.error || response.statusText);
+  return data;
+}
+
+function activateTab(name) {
+  document.querySelectorAll('.tab').forEach((item) => item.classList.toggle('active', item.dataset.tab === name));
+  document.querySelectorAll('.tab-pane').forEach((item) => item.classList.toggle('active', item.id === `tab-${name}`));
 }
 
 function setTheme(theme) {
@@ -201,6 +220,29 @@ function artifactUrl(path) {
   return `/api/artifact?path=${encodeURIComponent(path)}`;
 }
 
+function blockStableId(block, index) {
+  return block.block_id || block.id || block.anchor?.block_id || block.anchor?.dom_id || `block-${index + 1}`;
+}
+
+function textForBlock(block) {
+  if (block.text) return String(block.text);
+  if (Array.isArray(block.rows)) return block.rows.map((row) => (row || []).join(' | ')).join('\n');
+  return '';
+}
+
+function sourceAnchorForBlock(doc, docPath, block, index) {
+  const blockId = blockStableId(block, index);
+  return {
+    document_id: doc.document_id || '',
+    block_id: blockId,
+    block_index: index,
+    block_type: block.type || '',
+    artifact_path: docPath,
+    selector: block.anchor || {},
+    quote: textForBlock(block),
+  };
+}
+
 function renderEvidenceDocumentPlaceholder(source) {
   const docPath = evidenceDocumentPath(source);
   if (!docPath) {
@@ -226,6 +268,7 @@ function renderEvidenceDocumentPlaceholder(source) {
 }
 
 function renderEvidenceDocument(doc, docPath) {
+  state.currentDoc = { doc, docPath };
   const blocks = doc.blocks || [];
   const assets = doc.assets || [];
   const quality = doc.revision?.quality || {};
@@ -247,16 +290,25 @@ function renderEvidenceDocument(doc, docPath) {
       </div>
       <div class="card">
         <h3>Blocks</h3>
-        <div class="doc-blocks">${blocks.slice(0, 180).map((block) => `
-          <div class="doc-block">
+        <p class="muted">Select a block to create a durable evidence selection, annotation, or proposed fact.</p>
+        <div class="doc-blocks">${blocks.slice(0, 180).map((block, index) => {
+          const blockId = blockStableId(block, index);
+          const isSelected = state.selectedBlock?.block_id === blockId;
+          return `
+          <div class="doc-block selectable ${isSelected ? 'selected' : ''}" data-block-index="${index}">
             <div class="tag-line">
               <span class="pill">${escapeHtml(block.type || 'block')}</span>
+              <span class="pill">${escapeHtml(blockId)}</span>
               ${block.level ? `<span class="pill">${escapeHtml(block.level)}</span>` : ''}
               ${block.anchor?.dom_path ? `<span class="pill">${escapeHtml(block.anchor.dom_path)}</span>` : ''}
             </div>
             ${block.rows ? renderMiniTable(block.rows) : `<p>${escapeHtml(block.text || '')}</p>`}
+            <div class="doc-block-actions">
+              <button class="secondary" data-block-action="select" data-block-index="${index}">${isSelected ? 'Selected' : 'Select evidence'}</button>
+            </div>
           </div>
-        `).join('')}</div>
+        `;
+        }).join('')}</div>
       </div>
       <div class="card">
         <h3>Assets</h3>
@@ -274,6 +326,12 @@ function renderEvidenceDocument(doc, docPath) {
       </div>
     </div>
   `;
+  document.querySelectorAll('[data-block-action="select"]').forEach((button) => {
+    button.addEventListener('click', () => {
+      const index = Number(button.dataset.blockIndex || 0);
+      selectEvidenceBlock(doc, docPath, blocks[index], index);
+    });
+  });
 }
 
 function renderMiniTable(rows) {
@@ -322,23 +380,259 @@ function renderRelated(source) {
   });
 }
 
-function renderNotes(source) {
-  const id = source.latest?.evidence_id || '';
-  const key = `web-osint-research-note:${id}`;
-  const note = localStorage.getItem(key) || '';
-  $('tab-notes').innerHTML = `
-    <h3>Local review note</h3>
-    <p class="muted">Temporary browser-local notes for first-pass review. Durable annotation storage comes next.</p>
-    <textarea id="noteText" placeholder="Evidence selection, correction, claim, entity link, publication thought...">${escapeHtml(note)}</textarea>
-    <div class="top-actions" style="margin-top:8px">
-      <button id="saveNote">Save note locally</button>
-      <button id="clearNote" class="secondary">Clear</button>
+function selectEvidenceBlock(doc, docPath, block, index) {
+  const anchor = sourceAnchorForBlock(doc, docPath, block, index);
+  state.selectedBlock = {
+    source_evidence_id: state.currentSource?.latest?.evidence_id || state.selectedId,
+    document_id: anchor.document_id,
+    block_id: anchor.block_id,
+    block_type: anchor.block_type,
+    quote: anchor.quote,
+    source_anchor: anchor,
+  };
+  document.querySelectorAll('.doc-block[data-block-index]').forEach((item) => {
+    item.classList.toggle('selected', Number(item.dataset.blockIndex) === index);
+  });
+  renderReview(state.currentSource);
+  activateTab('review');
+}
+
+function parseJsonField(value) {
+  if (!value) return {};
+  try {
+    return JSON.parse(value);
+  } catch {
+    return {};
+  }
+}
+
+function selectionForSelectedBlock(review) {
+  if (!state.selectedBlock) return null;
+  return (review?.selections || []).find((row) => (
+    row.document_id === state.selectedBlock.document_id && row.block_id === state.selectedBlock.block_id
+  )) || null;
+}
+
+function selectedReviewBase(source) {
+  const latest = source?.latest || {};
+  const selected = state.selectedBlock || {};
+  return {
+    source_evidence_id: latest.evidence_id || state.selectedId,
+    source_project: latest.source_project || '',
+    project: latest.source_project || '',
+    document_id: selected.document_id || '',
+    block_id: selected.block_id || '',
+    quote: selected.quote || '',
+    source_anchor: selected.source_anchor || {},
+  };
+}
+
+function renderReviewList(title, rows, renderer) {
+  return `
+    <section class="review-list">
+      <h3>${escapeHtml(title)} (${rows.length})</h3>
+      ${rows.length ? rows.map(renderer).join('') : '<p class="muted">None yet.</p>'}
+    </section>
+  `;
+}
+
+function renderReview(source) {
+  if (!source) return;
+  const review = source.review || {};
+  const selected = state.selectedBlock;
+  const attachedSelection = selectionForSelectedBlock(review);
+  $('tab-review').innerHTML = `
+    <div class="review-grid">
+      <section class="card review-form">
+        <h3>Selected Evidence</h3>
+        ${selected ? `
+          <div class="tag-line">
+            <span class="pill">${escapeHtml(selected.block_type || 'block')}</span>
+            <span class="pill">${escapeHtml(selected.document_id || '')}</span>
+            <span class="pill">${escapeHtml(selected.block_id || '')}</span>
+            ${attachedSelection ? `<span class="pill ok">saved selection</span>` : '<span class="pill warn">not saved yet</span>'}
+          </div>
+          <blockquote>${escapeHtml(selected.quote || '(empty block)')}</blockquote>
+          <label>Selection note
+            <textarea id="selectionNote" placeholder="Why this block matters, what it supports, or what needs review"></textarea>
+          </label>
+          <div class="form-actions">
+            <button id="saveSelection">Save evidence selection</button>
+          </div>
+        ` : `
+          <p class="muted">Select a block in the EvidenceDocument tab to anchor a selection, annotation, or proposed fact.</p>
+        `}
+      </section>
+
+      <section class="card review-form">
+        <h3>Annotation</h3>
+        <label>Type
+          <select id="annotationType">
+            <option value="note">Note</option>
+            <option value="correction">Correction</option>
+            <option value="question">Question</option>
+            <option value="claim_context">Claim context</option>
+            <option value="publication_note">Publication note</option>
+          </select>
+        </label>
+        <label>Body
+          <textarea id="annotationBody" placeholder="Reviewer note, correction, question, or publication thought"></textarea>
+        </label>
+        <div class="form-actions">
+          <button id="saveAnnotation">Save annotation</button>
+        </div>
+      </section>
+
+      <section class="card review-form">
+        <h3>Proposed Fact</h3>
+        <label>Fact type
+          <select id="factType">
+            <option value="model_release">Model release</option>
+            <option value="benchmark_result">Benchmark result</option>
+            <option value="product_feature">Product feature</option>
+            <option value="hardware_claim">Hardware claim</option>
+            <option value="repo_metadata">Repo metadata</option>
+            <option value="source_metadata">Source metadata</option>
+            <option value="general">General</option>
+          </select>
+        </label>
+        <label>Field path
+          <input id="factFieldPath" placeholder="example: model.name, benchmark.score, release.date">
+        </label>
+        <label>Raw value
+          <textarea id="factRawValue" placeholder="Value exactly as seen in the source">${escapeHtml(selected?.quote || '')}</textarea>
+        </label>
+        <label>Normalized value
+          <input id="factNormalizedValue" placeholder="Cleaned value, optional">
+        </label>
+        <label>Unit
+          <input id="factUnit" placeholder="%, WER, tokens/s, ms, etc.">
+        </label>
+        <label>Note
+          <textarea id="factNote" placeholder="Scope, qualifier, benchmark setting, uncertainty, or review concern"></textarea>
+        </label>
+        <div class="form-actions">
+          <button id="saveFact">Save proposed fact</button>
+        </div>
+      </section>
+    </div>
+
+    <div id="reviewStatus" class="review-status muted"></div>
+    <div class="review-history">
+      ${renderReviewList('Evidence selections', review.selections || [], (row) => `
+        <article class="review-item">
+          <div class="tag-line">
+            <span class="pill">${escapeHtml(row.status)}</span>
+            <span class="pill">${escapeHtml(row.selection_kind)}</span>
+            <span class="pill">${escapeHtml(row.block_id)}</span>
+          </div>
+          <p>${escapeHtml(row.quote)}</p>
+          ${row.note ? `<p class="muted">${escapeHtml(row.note)}</p>` : ''}
+          <div class="muted">${fmtDate(row.updated_at)} · ${escapeHtml(row.actor)}</div>
+        </article>
+      `)}
+      ${renderReviewList('Annotations', review.annotations || [], (row) => `
+        <article class="review-item">
+          <div class="tag-line">
+            <span class="pill">${escapeHtml(row.status)}</span>
+            <span class="pill">${escapeHtml(row.annotation_type)}</span>
+            ${row.evidence_selection_id ? `<span class="pill">${escapeHtml(row.evidence_selection_id)}</span>` : ''}
+          </div>
+          <p>${escapeHtml(row.body)}</p>
+          <div class="muted">${fmtDate(row.updated_at)} · ${escapeHtml(row.actor)}</div>
+        </article>
+      `)}
+      ${renderReviewList('Proposed facts', review.proposed_facts || [], (row) => `
+        <article class="review-item">
+          <div class="tag-line">
+            <span class="pill">${escapeHtml(row.status)}</span>
+            <span class="pill">${escapeHtml(row.fact_type)}</span>
+            ${row.field_path ? `<span class="pill">${escapeHtml(row.field_path)}</span>` : ''}
+          </div>
+          <p><strong>${escapeHtml(row.normalized_value || row.raw_value)}</strong>${row.unit ? ` ${escapeHtml(row.unit)}` : ''}</p>
+          ${row.evidence_quote ? `<p class="muted">${escapeHtml(row.evidence_quote)}</p>` : ''}
+          ${row.note ? `<p class="muted">${escapeHtml(row.note)}</p>` : ''}
+          <div class="muted">${fmtDate(row.updated_at)} · ${escapeHtml(row.actor)}</div>
+        </article>
+      `)}
+      ${renderReviewList('Review events', review.events || [], (row) => `
+        <article class="review-item compact">
+          <div class="tag-line">
+            <span class="pill">${escapeHtml(row.event_type)}</span>
+            <span class="pill">${escapeHtml(row.subject_type)}</span>
+          </div>
+          <pre>${escapeHtml(JSON.stringify(parseJsonField(row.payload_json), null, 2))}</pre>
+          <div class="muted">${fmtDate(row.created_at)} · ${escapeHtml(row.actor)}</div>
+        </article>
+      `)}
     </div>
   `;
-  $('saveNote').addEventListener('click', () => localStorage.setItem(key, $('noteText').value));
-  $('clearNote').addEventListener('click', () => {
-    localStorage.removeItem(key);
-    $('noteText').value = '';
+  wireReviewEvents(source, attachedSelection);
+}
+
+async function refreshReviewState() {
+  const source = await fetchJson(`/api/source?id=${encodeURIComponent(state.selectedId)}`);
+  state.currentSource = source;
+  renderReview(source);
+  renderRaw(source);
+}
+
+function wireReviewEvents(source, attachedSelection) {
+  const status = $('reviewStatus');
+  const saveSelection = $('saveSelection');
+  if (saveSelection) {
+    saveSelection.addEventListener('click', async () => {
+      try {
+        status.textContent = 'Saving evidence selection...';
+        const base = selectedReviewBase(source);
+        await postJson('/api/evidence/selections', {
+          ...base,
+          selection_kind: state.selectedBlock?.block_type || 'text',
+          note: $('selectionNote').value,
+          status: 'selected',
+        });
+        await refreshReviewState();
+      } catch (error) {
+        status.textContent = error.message;
+      }
+    });
+  }
+  $('saveAnnotation').addEventListener('click', async () => {
+    try {
+      status.textContent = 'Saving annotation...';
+      const base = selectedReviewBase(source);
+      await postJson('/api/annotations', {
+        ...base,
+        evidence_selection_id: attachedSelection?.selection_id || '',
+        annotation_type: $('annotationType').value,
+        body: $('annotationBody').value,
+        status: 'open',
+      });
+      await refreshReviewState();
+    } catch (error) {
+      status.textContent = error.message;
+    }
+  });
+  $('saveFact').addEventListener('click', async () => {
+    try {
+      status.textContent = 'Saving proposed fact...';
+      const base = selectedReviewBase(source);
+      await postJson('/api/proposed-facts', {
+        ...base,
+        evidence_selection_id: attachedSelection?.selection_id || '',
+        fact_type: $('factType').value,
+        field_path: $('factFieldPath').value,
+        raw_value: $('factRawValue').value,
+        normalized_value: $('factNormalizedValue').value,
+        unit: $('factUnit').value,
+        note: $('factNote').value,
+        evidence_quote: state.selectedBlock?.quote || '',
+        status: 'proposed',
+      });
+      await refreshReviewState();
+    } catch (error) {
+      status.textContent = error.message;
+    }
   });
 }
 
@@ -346,16 +640,19 @@ function renderRaw(source) {
   $('tab-raw').innerHTML = `<pre>${escapeHtml(JSON.stringify({
     latest: source.latest,
     observations: source.observations,
+    review: source.review,
   }, null, 2))}</pre>`;
 }
 
 async function selectSource(id) {
+  if (state.selectedId !== id) state.selectedBlock = null;
   state.selectedId = id;
   $('sourceEmpty').classList.add('hidden');
   $('sourceView').classList.remove('hidden');
   $('sourceTitle').textContent = 'Loading source...';
   try {
     const source = await fetchJson(`/api/source?id=${encodeURIComponent(id)}`);
+    state.currentSource = source;
     const latest = source.latest || {};
     $('sourceKind').textContent = latest.source_kind || 'source';
     $('sourceTitle').textContent = latest.title || latest.canonical_url || latest.evidence_id || '(untitled source)';
@@ -368,7 +665,7 @@ async function selectSource(id) {
     renderEnrichment(source);
     renderRelated(source);
     renderRaw(source);
-    renderNotes(source);
+    renderReview(source);
     document.querySelectorAll('.row').forEach((row) => row.classList.toggle('active', row.dataset.id === id));
   } catch (error) {
     $('sourceTitle').textContent = 'Source error';
@@ -411,12 +708,7 @@ function wireEvents() {
     loadInbox();
   });
   document.querySelectorAll('.tab').forEach((tab) => {
-    tab.addEventListener('click', () => {
-      document.querySelectorAll('.tab').forEach((item) => item.classList.remove('active'));
-      document.querySelectorAll('.tab-pane').forEach((item) => item.classList.remove('active'));
-      tab.classList.add('active');
-      $(`tab-${tab.dataset.tab}`).classList.add('active');
-    });
+    tab.addEventListener('click', () => activateTab(tab.dataset.tab));
   });
 }
 

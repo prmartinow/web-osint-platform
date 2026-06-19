@@ -3,7 +3,7 @@ name: web-osint-platform
 services:
   redpanda:
     image: docker.redpanda.com/redpandadata/redpanda:latest
-    container_name: web-osint-redpanda
+    container_name: ${WEB_OSINT_CONTAINER_PREFIX:-web-osint}-redpanda
     command:
       - redpanda
       - start
@@ -48,7 +48,7 @@ services:
 
   typesense:
     image: typesense/typesense:30.0
-    container_name: web-osint-typesense
+    container_name: ${WEB_OSINT_CONTAINER_PREFIX:-web-osint}-typesense
     env_file:
       - ../.env
     command:
@@ -67,7 +67,7 @@ services:
 
   qdrant:
     image: qdrant/qdrant:latest
-    container_name: web-osint-qdrant
+    container_name: ${WEB_OSINT_CONTAINER_PREFIX:-web-osint}-qdrant
     ports:
       - "127.0.0.1:16333:6333"
       - "127.0.0.1:16334:6334"
@@ -77,12 +77,12 @@ services:
 
   clickhouse:
     image: clickhouse/clickhouse-server:latest
-    container_name: web-osint-clickhouse
+    container_name: ${WEB_OSINT_CONTAINER_PREFIX:-web-osint}-clickhouse
     env_file:
       - ../.env
     environment:
       CLICKHOUSE_DB: web_osint
-      CLICKHOUSE_USER: web_osint
+      CLICKHOUSE_USER: ${CLICKHOUSE_USER:-web_osint}
       CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD}
       CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: "1"
     ports:
@@ -100,7 +100,7 @@ services:
   normalizer:
     build:
       context: ../workers/normalizer
-    container_name: web-osint-normalizer
+    container_name: ${WEB_OSINT_CONTAINER_PREFIX:-web-osint}-normalizer
     env_file:
       - ../.env
     environment:
@@ -112,8 +112,8 @@ services:
       QDRANT_URL: http://web-osint-qdrant:6333
       QDRANT_COLLECTION: web_osint_evidence_v1
       CLICKHOUSE_URL: http://web-osint-clickhouse:8123
-      CLICKHOUSE_DATABASE: web_osint
-      CLICKHOUSE_USER: web_osint
+      CLICKHOUSE_DATABASE: ${CLICKHOUSE_DATABASE:-web_osint}
+      CLICKHOUSE_USER: ${CLICKHOUSE_USER:-web_osint}
       PEBBLE_DIR: /data/pebble
       HTTP_ADDR: :8090
       WEB_OSINT_EMIT_OBSERVED_TOPICS: ${WEB_OSINT_EMIT_OBSERVED_TOPICS:-true}
@@ -131,13 +131,13 @@ services:
   research-planner:
     build:
       context: ../workers/research-planner
-    container_name: web-osint-research-planner
+    container_name: ${WEB_OSINT_CONTAINER_PREFIX:-web-osint}-research-planner
     env_file:
       - ../.env
     environment:
       CLICKHOUSE_URL: http://web-osint-clickhouse:8123
-      CLICKHOUSE_DATABASE: web_osint
-      CLICKHOUSE_USER: web_osint
+      CLICKHOUSE_DATABASE: ${CLICKHOUSE_DATABASE:-web_osint}
+      CLICKHOUSE_USER: ${CLICKHOUSE_USER:-web_osint}
       REDPANDA_PROXY_URL: http://web-osint-redpanda:8082
       HTTP_ADDR: :8092
       RESEARCH_PLANNER_INTERVAL_SECONDS: "300"
@@ -153,13 +153,13 @@ services:
   dashboard:
     build:
       context: ../dashboard
-    container_name: web-osint-dashboard
+    container_name: ${WEB_OSINT_CONTAINER_PREFIX:-web-osint}-dashboard
     env_file:
       - ../.env
     environment:
       CLICKHOUSE_URL: http://127.0.0.1:18123
-      CLICKHOUSE_DATABASE: web_osint
-      CLICKHOUSE_USER: web_osint
+      CLICKHOUSE_DATABASE: ${CLICKHOUSE_DATABASE:-web_osint}
+      CLICKHOUSE_USER: ${CLICKHOUSE_USER:-web_osint}
       TYPESENSE_URL: http://127.0.0.1:18108
       QDRANT_URL: http://127.0.0.1:16333
       QDRANT_COLLECTION: web_osint_evidence_v1
@@ -193,23 +193,25 @@ services:
   research-ui:
     build:
       context: ../research-ui
-    container_name: web-osint-research-ui
+    container_name: ${WEB_OSINT_CONTAINER_PREFIX:-web-osint}-research-ui
     env_file:
       - ../.env
     environment:
       CLICKHOUSE_URL: http://127.0.0.1:18123
-      CLICKHOUSE_DATABASE: web_osint
-      CLICKHOUSE_USER: web_osint
+      CLICKHOUSE_DATABASE: ${CLICKHOUSE_DATABASE:-web_osint}
+      CLICKHOUSE_USER: ${CLICKHOUSE_USER:-web_osint}
       WEB_OSINT_DATA_ROOT: ${WEB_OSINT_DATA_ROOT:-/mnt/data/web-osint-platform}
       MEDIA_ROOT: ${WEB_OSINT_DATA_ROOT:-/mnt/data/web-osint-platform}/media
       OCR_ROOT: ${WEB_OSINT_DATA_ROOT:-/mnt/data/web-osint-platform}/ocr
       WEB_ROOT: ${WEB_OSINT_DATA_ROOT:-/mnt/data/web-osint-platform}/web
       DERIVED_ROOT: ${WEB_OSINT_DATA_ROOT:-/mnt/data/web-osint-platform}/derived
+      REVIEW_ROOT: ${WEB_OSINT_DATA_ROOT:-/mnt/data/web-osint-platform}/review
       RESEARCH_UI_HOST: ${WEB_OSINT_RESEARCH_UI_BIND:-127.0.0.1}
       RESEARCH_UI_PORT: "18192"
     network_mode: host
     volumes:
       - ${WEB_OSINT_DATA_ROOT:-/mnt/data/web-osint-platform}:${WEB_OSINT_DATA_ROOT:-/mnt/data/web-osint-platform}:ro
+      - ${WEB_OSINT_DATA_ROOT:-/mnt/data/web-osint-platform}/review:${WEB_OSINT_DATA_ROOT:-/mnt/data/web-osint-platform}/review:rw
     depends_on:
       - clickhouse
     restart: unless-stopped
@@ -217,7 +219,7 @@ services:
   redpanda-connect-shadow:
     build:
       context: ../connect
-    container_name: web-osint-connect-shadow
+    container_name: ${WEB_OSINT_CONTAINER_PREFIX:-web-osint}-connect-shadow
     profiles:
       - shadow
     environment:
@@ -232,7 +234,7 @@ services:
   redpanda-connect-production:
     build:
       context: ../connect
-    container_name: web-osint-connect-production
+    container_name: ${WEB_OSINT_CONTAINER_PREFIX:-web-osint}-connect-production
     profiles:
       - production-routing
     command: ["-c", "/pipelines/capture-production-observed.yaml"]

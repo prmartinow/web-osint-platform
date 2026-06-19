@@ -1,0 +1,66 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Web OSINT Research Review Event",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "event_id",
+    "event_type",
+    "source_evidence_id",
+    "subject_type",
+    "subject_id",
+    "actor",
+    "created_at",
+    "payload"
+  ],
+  "properties": {
+    "schema_version": {"const": "research_review_event.v1"},
+    "event_id": {"type": "string", "minLength": 1},
+    "event_type": {
+      "type": "string",
+      "enum": [
+        "evidence_selection.created",
+        "evidence_selection.updated",
+        "annotation.created",
+        "annotation.updated",
+        "proposed_fact.created",
+        "proposed_fact.updated",
+        "entity_link.created",
+        "entity_link.updated",
+        "claim_stub.created",
+        "claim_stub.updated",
+        "review_state.changed"
+      ]
+    },
+    "project": {"type": "string"},
+    "source_evidence_id": {"type": "string", "minLength": 1},
+    "subject_type": {
+      "type": "string",
+      "enum": [
+        "evidence_selection",
+        "annotation",
+        "proposed_fact",
+        "entity_link",
+        "claim_stub",
+        "review_state"
+      ]
+    },
+    "subject_id": {"type": "string", "minLength": 1},
+    "actor": {"type": "string", "minLength": 1},
+    "created_at": {"type": "string", "format": "date-time"},
+    "payload": {"type": "object"},
+    "source_anchor": {
+      "type": "object",
+      "properties": {
+        "document_id": {"type": "string"},
+        "block_id": {"type": "string"},
+        "artifact_path": {"type": "string"},
+        "selector": {"type": "object"},
+        "quote": {"type": "string"}
+      },
+      "additionalProperties": true
+    },
+    "idempotency_key": {"type": "string"}
+  },
+  "additionalProperties": true
+}

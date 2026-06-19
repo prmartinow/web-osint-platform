@@ -331,6 +331,21 @@ pre {
   padding-top: 10px;
   margin-top: 10px;
 }
+.doc-block.selectable {
+  border: 1px solid var(--soft-line);
+  border-radius: 8px;
+  padding: 10px;
+  background: color-mix(in srgb, var(--panel) 52%, transparent);
+}
+.doc-block.selectable.selected {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 12%, var(--panel-2));
+}
+.doc-block-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 8px;
+}
 .doc-block p,
 .doc-asset p {
   margin: 8px 0 0;
@@ -355,6 +370,64 @@ pre {
   vertical-align: top;
   overflow-wrap: anywhere;
 }
+.review-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  align-items: start;
+}
+.review-form {
+  display: grid;
+  gap: 10px;
+}
+.review-form label {
+  display: grid;
+  gap: 5px;
+  color: var(--muted);
+  font-size: 12px;
+}
+.review-form textarea {
+  min-height: 92px;
+}
+.review-form blockquote {
+  margin: 0;
+  padding: 10px;
+  border-left: 3px solid var(--accent);
+  background: var(--input);
+  border-radius: 6px;
+  color: var(--text);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-height: 260px;
+  overflow: auto;
+}
+.form-actions {
+  display: flex;
+  justify-content: flex-end;
+}
+.review-status {
+  min-height: 22px;
+  margin: 10px 0;
+}
+.review-history {
+  display: grid;
+  gap: 12px;
+}
+.review-list {
+  border-top: 1px solid var(--line);
+  padding-top: 12px;
+}
+.review-item {
+  border: 1px solid var(--soft-line);
+  border-radius: 8px;
+  padding: 10px;
+  margin-top: 8px;
+  background: var(--panel-2);
+}
+.review-item.compact pre {
+  max-height: 220px;
+  overflow: auto;
+}
 .empty-state {
   padding: 28px;
 }
@@ -363,6 +436,7 @@ pre {
 @media (max-width: 1200px) {
   .research-shell { grid-template-columns: 220px minmax(300px, 440px) minmax(420px, 1fr); }
   .filters input { min-width: 220px; }
+  .review-grid { grid-template-columns: 1fr; }
 }
 
 @media (max-width: 900px) {

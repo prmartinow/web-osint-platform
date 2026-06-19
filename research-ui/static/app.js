@@ -185,6 +185,107 @@ function renderArtifacts(source) {
   }).join('')}</div>`;
 }
 
+function evidenceDocumentPath(source) {
+  const latest = source.latest || {};
+  const raw = latest.raw || {};
+  const reps = raw.content_representations || {};
+  return latest.evidence_document_path
+    || raw.evidence_document_path
+    || reps.canonical_evidence_document
+    || reps.evidence_document
+    || (latest.artifact_paths || []).map((item) => item.path).find((path) => /\/evidence_document\//.test(path))
+    || '';
+}
+
+function artifactUrl(path) {
+  return `/api/artifact?path=${encodeURIComponent(path)}`;
+}
+
+function renderEvidenceDocumentPlaceholder(source) {
+  const docPath = evidenceDocumentPath(source);
+  if (!docPath) {
+    $('tab-evidence-document').innerHTML = `<div class="empty-state"><h2>No EvidenceDocument</h2><p>This source does not expose a canonical EvidenceDocument artifact yet.</p></div>`;
+    return;
+  }
+  $('tab-evidence-document').innerHTML = `<div class="empty-state"><h2>Loading EvidenceDocument</h2><p>${escapeHtml(docPath)}</p></div>`;
+  fetch(artifactUrl(docPath), { cache: 'no-store' })
+    .then((response) => response.text().then((text) => ({ response, text })))
+    .then(({ response, text }) => {
+      if (!response.ok) throw new Error(text || response.statusText);
+      renderEvidenceDocument(JSON.parse(text), docPath);
+    })
+    .catch((error) => {
+      $('tab-evidence-document').innerHTML = `
+        <div class="empty-state">
+          <h2>EvidenceDocument error</h2>
+          <p>${escapeHtml(error.message)}</p>
+          <p><a href="${escapeHtml(artifactUrl(docPath))}" target="_blank" rel="noreferrer">${escapeHtml(docPath)}</a></p>
+        </div>
+      `;
+    });
+}
+
+function renderEvidenceDocument(doc, docPath) {
+  const blocks = doc.blocks || [];
+  const assets = doc.assets || [];
+  const quality = doc.revision?.quality || {};
+  $('tab-evidence-document').innerHTML = `
+    <div class="cards">
+      <div class="card">
+        <h3>${escapeHtml(doc.source?.title || doc.document_id || 'EvidenceDocument')}</h3>
+        ${renderKv([
+          ['Document ID', doc.document_id],
+          ['Revision', doc.revision?.revision_id || ''],
+          ['Producer', [doc.revision?.producer?.name, doc.revision?.producer?.version].filter(Boolean).join(' ')],
+          ['Canonical URL', doc.source?.canonical_url || ''],
+          ['Captured', doc.captures?.[0]?.captured_at || doc.created_at || ''],
+          ['Blocks', blocks.length],
+          ['Assets', assets.length],
+          ['Quality', Object.entries(quality).map(([k, v]) => `${k}: ${v}`).join(' · ')],
+        ])}
+        <p><a href="${escapeHtml(artifactUrl(docPath))}" target="_blank" rel="noreferrer">Open EvidenceDocument JSON</a></p>
+      </div>
+      <div class="card">
+        <h3>Blocks</h3>
+        <div class="doc-blocks">${blocks.slice(0, 180).map((block) => `
+          <div class="doc-block">
+            <div class="tag-line">
+              <span class="pill">${escapeHtml(block.type || 'block')}</span>
+              ${block.level ? `<span class="pill">${escapeHtml(block.level)}</span>` : ''}
+              ${block.anchor?.dom_path ? `<span class="pill">${escapeHtml(block.anchor.dom_path)}</span>` : ''}
+            </div>
+            ${block.rows ? renderMiniTable(block.rows) : `<p>${escapeHtml(block.text || '')}</p>`}
+          </div>
+        `).join('')}</div>
+      </div>
+      <div class="card">
+        <h3>Assets</h3>
+        ${assets.length ? assets.slice(0, 80).map((asset) => `
+          <div class="doc-asset">
+            <div class="tag-line">
+              <span class="pill">${escapeHtml(asset.type || 'asset')}</span>
+              ${asset.width || asset.height ? `<span class="pill">${asset.width || 0}x${asset.height || 0}</span>` : ''}
+            </div>
+            ${asset.path ? `<p><a href="${escapeHtml(artifactUrl(asset.path))}" target="_blank" rel="noreferrer">${escapeHtml(asset.path)}</a></p>` : ''}
+            ${asset.url ? `<p><a href="${escapeHtml(asset.url)}" target="_blank" rel="noreferrer">${escapeHtml(asset.alt || asset.url)}</a></p>` : ''}
+            ${asset.path && /\.(png|jpg|jpeg|gif|webp)$/i.test(asset.path) ? `<img class="artifact-img" src="${escapeHtml(artifactUrl(asset.path))}" alt="">` : ''}
+          </div>
+        `).join('') : '<p class="muted">No assets recorded.</p>'}
+      </div>
+    </div>
+  `;
+}
+
+function renderMiniTable(rows) {
+  return `
+    <div class="mini-table-wrap">
+      <table class="mini-table">
+        <tbody>${(rows || []).slice(0, 60).map((row) => `<tr>${(row || []).slice(0, 20).map((cell) => `<td>${escapeHtml(cell)}</td>`).join('')}</tr>`).join('')}</tbody>
+      </table>
+    </div>
+  `;
+}
+
 function renderEnrichment(source) {
   const annotations = source.annotations || [];
   const ocr = source.ocr || [];
@@ -262,6 +363,7 @@ async function selectSource(id) {
     $('sourceUrl').href = latest.canonical_url || '#';
     $('sourceMeta').textContent = `${latest.author_handle ? '@' + latest.author_handle + ' · ' : ''}${latest.domain || ''} · ${fmtDate(latest.captured_at)}`;
     renderNormalized(source);
+    renderEvidenceDocumentPlaceholder(source);
     renderArtifacts(source);
     renderEnrichment(source);
     renderRelated(source);

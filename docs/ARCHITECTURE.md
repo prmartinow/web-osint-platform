@@ -151,7 +151,7 @@ Collectors should emit one `capture_event` to `evidence.capture.events.v1` for e
 
 The normalizer materializes all of these into shared serving stores while preserving source-specific fields inside the raw JSON. Website content and user input are not side channels; they are first-class evidence with provenance and Meaning Layer annotations.
 
-Rebrowser-rendered capture is the primary capture path for opened research pages. It preserves the visible browser state, interaction context, dynamic DOM, screenshots/media, and source provenance the user actually inspected. Generic Playwright/Chrome collection advice should be translated into the preserved Rebrowser profile and site-specific pacing rules.
+Rebrowser-rendered capture is the primary capture path for opened research pages. The `collectors/rebrowser-rendered-web` collector preserves the visible browser state, interaction context, dynamic DOM, screenshots/media, and source provenance the user actually inspected, then publishes the page as a standard `web_documents` capture event. Generic Playwright/Chrome collection advice should be translated into the preserved Rebrowser profile and site-specific pacing rules.
 
 The webpage extraction worker is a companion parser/enrichment bridge, not the primary browser capture path. It fetches HTML, extracts readable article text, Markdown, tables, metadata, links, headings, images, canonical URLs, filesystem artifact paths, and a versioned `EvidenceDocument` block/asset artifact, then publishes the result as a standard `web_documents` capture event. Use it when HTTP extraction is explicitly appropriate, for batch parsing, or to enrich a Rebrowser-captured source with additional normalized projections.
 

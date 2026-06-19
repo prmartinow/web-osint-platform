@@ -115,6 +115,18 @@ Collector events may include `web_documents` for opened pages, articles, documen
 
 Rebrowser is the preferred capture surface for web pages that matter as research evidence. The webpage extraction worker is a companion parser/enrichment path that turns URLs into `web_documents` capture events with HTML/text/Markdown/table artifacts. Use it for launch blog posts, documentation pages, model cards, benchmark pages, and opened search results when HTTP extraction is explicitly useful or when a Rebrowser-captured source needs normalized projections.
 
+Capture a rendered page from the preserved Rebrowser session and publish it into the normal pipeline:
+
+```bash
+node collectors/rebrowser-rendered-web/rebrowser_rendered_capture.mjs \
+  --url https://www.example.com/blog/model-launch \
+  --source-project launch-blog-research \
+  --topic-label launch-blog \
+  --publish
+```
+
+The rendered collector opens a task-owned Rebrowser tab on `127.0.0.1:9225`, captures rendered DOM/text/links/images/tables, writes a full-page screenshot plus `EvidenceDocument`, uploads artifacts to `/mnt/data/x-research/web/rebrowser-rendered/...`, publishes through RPC-local Pandaproxy, and closes the task tab. It refuses X/Twitter URLs by default because those need the X-specific collector and pacing rules.
+
 Install its isolated venv under the data root:
 
 ```bash

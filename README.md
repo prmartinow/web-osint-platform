@@ -83,4 +83,4 @@ curl 'http://127.0.0.1:18090/lookup?key=post/1234567890'
 
 ## Status
 
-This is an early infrastructure baseline. The current implementation includes the Redpanda streaming backbone, materializer, exact lookup, search, vector-store initialization, local Qwen inference, Qdrant embedding enrichment, analytics schema, webpage extraction, deterministic labeling, research-planning seed generation, dashboard research search, media/OCR/VL enrichment workers, an end-to-end ingestion canary, and a shadow Redpanda Connect skeleton for stateless validation/routing parity work.
+This is an early infrastructure baseline. The current implementation includes the Redpanda streaming backbone, materializer, exact lookup, search, vector-store initialization, local Qwen inference, Qdrant embedding enrichment, analytics schema, Rebrowser rendered-page capture, static webpage extraction, deterministic labeling, research-planning seed generation, dashboard research search, media/OCR/VL enrichment workers, an end-to-end ingestion canary, and a shadow Redpanda Connect skeleton for stateless validation/routing parity work.

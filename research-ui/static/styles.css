@@ -321,6 +321,40 @@ pre {
   display: block;
   margin-top: 8px;
 }
+.doc-blocks {
+  display: grid;
+  gap: 10px;
+}
+.doc-block,
+.doc-asset {
+  border-top: 1px solid var(--soft-line);
+  padding-top: 10px;
+  margin-top: 10px;
+}
+.doc-block p,
+.doc-asset p {
+  margin: 8px 0 0;
+  color: var(--text);
+  overflow-wrap: anywhere;
+}
+.mini-table-wrap {
+  overflow: auto;
+  margin-top: 8px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+.mini-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+.mini-table td {
+  border-bottom: 1px solid var(--soft-line);
+  border-right: 1px solid var(--soft-line);
+  padding: 6px 8px;
+  vertical-align: top;
+  overflow-wrap: anywhere;
+}
 .empty-state {
   padding: 28px;
 }

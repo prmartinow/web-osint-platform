@@ -392,58 +392,6 @@ tbody tr:hover { background: color-mix(in srgb, var(--accent) 12%, transparent);
 .flow-name { margin-top: 8px; font-weight: 800; }
 .flow-foot { color: var(--muted); font-size: 12px; margin-top: 2px; overflow-wrap: anywhere; }
 
-.workflow-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
-  gap: 10px;
-}
-.workflow-card {
-  display: grid;
-  grid-template-columns: 30px minmax(0, 1fr);
-  gap: 10px;
-  border: 1px solid var(--line-soft);
-  border-radius: 8px;
-  background: var(--input);
-  padding: 10px;
-}
-.workflow-index {
-  width: 28px;
-  height: 28px;
-  display: grid;
-  place-items: center;
-  border-radius: 50%;
-  background: var(--panel-2);
-  color: var(--muted);
-  font-size: 12px;
-  font-weight: 800;
-}
-.workflow-card h3 {
-  margin: 0 0 4px;
-  font-size: 14px;
-}
-.workflow-card p {
-  margin: 0 0 8px;
-  color: var(--muted);
-  font-size: 13px;
-  line-height: 1.35;
-}
-.object-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
-  gap: 10px;
-}
-.object-card {
-  border: 1px solid var(--line-soft);
-  border-radius: 8px;
-  background: var(--input);
-  padding: 10px;
-}
-.object-card p {
-  margin: 5px 0 0;
-  color: var(--muted);
-  line-height: 1.35;
-}
-
 .bars {
   display: grid;
   gap: 5px;

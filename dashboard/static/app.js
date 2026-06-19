@@ -355,70 +355,6 @@ function renderFlow(data) {
     </div>`).join('');
 }
 
-async function loadResearchWorkbench() {
-  const data = await api(`/api/research/workbench?${params({ frame: frame() })}`);
-  const c = data.cards || {};
-  $('#researchWorkbenchCards').innerHTML = [
-    card('Evidence', fmtNum(c.unique_evidence), `${fmtNum(c.rows)} rows`),
-    card('Collector runs', fmtNum(c.collector_runs), `${fmtNum(c.projects)} projects`),
-    card('Annotations', fmtNum(c.annotations), 'anchored labels'),
-    card('Claims', fmtNum(c.claims), `${fmtNum(c.relations)} relations`),
-    card('Benchmark facts', fmtNum(c.benchmark_facts), 'structured comparisons'),
-    card('Last ingest', ageText((Date.now() - new Date(c.last_ingested_at || 0).getTime()) / 1000), fmtDate(c.last_ingested_at)),
-  ].join('');
-  renderWorkbenchFlow(data.workflow || []);
-  renderTable($('#researchWorkbenchSources'), [
-    { key: 'source_kind', label: 'Source', width: 150, render: r => stageLabel(r.source_kind) },
-    { key: 'evidence', label: 'Evidence', width: 100, render: r => fmtNum(r.evidence) },
-    { key: 'rows', label: 'Rows', width: 100, render: r => fmtNum(r.rows) },
-    { key: 'runs', label: 'Runs', width: 100, render: r => fmtNum(r.runs) },
-    { key: 'last_seen', label: 'Last Seen', width: 180, render: r => fmtDate(r.last_seen) },
-  ], data.source_counts || [], { id: 'research-workbench-sources' });
-  renderTable($('#researchWorkbenchQueues'), [
-    { key: 'queue', label: 'Queue', width: 190 },
-    { key: 'count', label: 'Count', width: 90, render: r => fmtNum(r.count) },
-    { key: 'next_action', label: 'Next Action', width: 360 },
-  ], data.review_queues || [], { id: 'research-workbench-queues' });
-  $('#researchWorkbenchObjects').innerHTML = (data.object_model || []).map(row => `
-    <article class="object-card">
-      <strong>${escapeHtml(row.object)}</strong>
-      <p>${escapeHtml(row.role)}</p>
-    </article>
-  `).join('');
-  $('#researchWorkbenchPrinciples').innerHTML = (data.principles || [])
-    .map(text => `<div class="note info">${escapeHtml(text)}</div>`)
-    .join('');
-  renderTable($('#researchWorkbenchRecent'), [
-    { key: 'source_kind', label: 'Kind', width: 120, render: r => stageLabel(r.source_kind) },
-    { key: 'title', label: 'Title', width: 340 },
-    { key: 'canonical_url', label: 'URL', width: 340, render: r => linkCell(r.canonical_url) },
-    { key: 'author_handle', label: 'Handle', width: 130, render: r => r.author_handle ? `@${escapeHtml(r.author_handle)}` : '' },
-    { key: 'text_chars', label: 'Text', width: 90, render: r => fmtNum(r.text_chars) },
-    { key: 'source_project', label: 'Project', width: 190 },
-    { key: 'capture_method', label: 'Capture', width: 180 },
-    { key: 'latest_ingested_at', label: 'Ingested', width: 180, render: r => fmtDate(r.latest_ingested_at) },
-  ], data.recent_sources || [], { id: 'research-workbench-recent', onRow: row => openDetail(row.evidence_id, 'Recent evidence source', row) });
-  renderTable($('#researchWorkbenchProjects'), [
-    { key: 'source_project', label: 'Project', width: 260 },
-    { key: 'evidence', label: 'Evidence', width: 110, render: r => fmtNum(r.evidence) },
-    { key: 'rows', label: 'Rows', width: 110, render: r => fmtNum(r.rows) },
-    { key: 'last_seen', label: 'Last Seen', width: 190, render: r => fmtDate(r.last_seen) },
-  ], data.project_counts || [], { id: 'research-workbench-projects' });
-}
-
-function renderWorkbenchFlow(workflow) {
-  $('#researchWorkbenchFlow').innerHTML = workflow.map((step, idx) => `
-    <article class="workflow-card">
-      <div class="workflow-index">${idx + 1}</div>
-      <div>
-        <h3>${escapeHtml(step.step)}</h3>
-        <p>${escapeHtml(step.purpose)}</p>
-        <div class="meta-line">${fmtNum(step.count)} ${escapeHtml(step.unit || '')}</div>
-      </div>
-    </article>
-  `).join('');
-}
-
 function runColumns() {
   return [
     { key: 'updated_at', label: 'Updated', width: 176, render: r => fmtDate(r.updated_at) },
@@ -1064,7 +1000,6 @@ async function loadActive(options = {}) {
   const id = state.activeView;
   try {
     if (id === 'live') await loadLive();
-    else if (id === 'research-workbench') await loadResearchWorkbench();
     else if (id === 'collectors') await loadCollectors();
     else if (id === 'stream') await loadStream();
     else if (id === 'models') await loadModelsStage();

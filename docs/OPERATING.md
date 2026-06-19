@@ -152,7 +152,7 @@ The worker stores raw HTML, text, Markdown, tables, metadata, and an `evidence_d
 
 Use the static worker as the first pass for ordinary pages. If text is missing, tables/images are only visible after client-side rendering, a page requires interaction, or the browser view carries important evidence, escalate to Rebrowser rendered-DOM capture. Rebrowser is the required rendered-browser collection surface for this platform; rendered captures should preserve the same raw artifact and `EvidenceDocument` contract instead of becoming ad hoc screenshots.
 
-The research workbench consumes those normalized artifacts separately from the metrics dashboard. Use the workbench for source triage, evidence inspection, entity/claim review, comparison, and publication preparation; use the pipeline dashboard for service health and store monitoring.
+The Research UI should consume those normalized artifacts from a separate app/service, not from a metrics-dashboard tab. Use the Research UI for Inbox triage, source workbench inspection, evidence extraction, normalized-content correction, entity/claim review, comparison, and publication preparation; use the pipeline dashboard only for service health and store monitoring.
 
 Run the continuous request-topic worker as a user service on the RPC node:
 

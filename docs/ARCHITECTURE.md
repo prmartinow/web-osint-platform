@@ -50,8 +50,8 @@ Meaning Layer
   release signals, research signals, questions, tasks, and wiki projections.
 
 Consumption
-  The metrics dashboard, research workbench, agents, research reports, and
-  websites query the serving stores.
+  The metrics dashboard, separate Research UI service, agents, research reports,
+  and websites query the serving stores.
 ```
 
 ## Topic Families
@@ -168,16 +168,18 @@ Source
 
 An `EvidenceDocument` contains source metadata, capture metadata, content blocks, media/assets, source anchors, omitted-content records, and links to raw artifacts. Anchors can target exact text quotes, extracted order, DOM paths when available, visual bounding boxes when available, table rows/cells, OCR blocks, or artifact paths. Rebrowser-rendered captures should write the same shape as the static webpage extraction worker.
 
-## Research Workbench
+## Research UI Product Boundary
 
-The research UI is separate from the infrastructure metrics dashboard. Its workflow is:
+The Research UI is a separate app/service, not a metrics-dashboard tab. The metrics dashboard remains dedicated to infrastructure health, pipeline stages, stores, workers, and model services. The Research UI starts with an Inbox and handles human source triage, source inspection, evidence extraction, normalized-content editing, entity and claim work, comparison, review, and publication preparation.
+
+The Research UI workflow is:
 
 ```text
-Capture -> Triage -> Inspect -> Extract evidence -> Resolve entities
+Inbox -> Source workbench -> Extract evidence -> Resolve entities
 -> Form claims -> Compare -> Review -> Publish
 ```
 
-Core objects are `Source`, `Capture`, `EvidenceDocument`, `Evidence`, `Entity`, `Claim`, `Relation`, `Annotation`, `Review task`, and `Publication release`. The workbench should show source and normalized content side by side when possible, keep raw artifacts inspectable, expose review queues, and keep v1 human-led. Autonomous research loops are deferred.
+Core objects are `Source`, `Capture`, `EvidenceDocument`, `Evidence`, `Entity`, `Claim`, `Relation`, `Annotation`, `Review task`, and `Publication release`. The first v1 validation case is the Datalab Chandra 2.1 X post and blog. Source viewer priority is X first, then web/blog. V1 editing includes evidence selection, normalized extraction correction, entity links, claims, annotations, review state, comparison rows, and publication drafts. Autonomous research loops are deferred.
 
 ## Meaning Layer
 
@@ -234,5 +236,5 @@ v1.2:
 
 See [Redpanda Native Architecture](REDPANDA_NATIVE_ARCHITECTURE.md) and
 [Topic Catalog](TOPIC_CATALOG.md). See
-[Research UI And Extraction Direction](RESEARCH_UI_AND_EXTRACTION.md) for the
-human research workbench and EvidenceDocument contract.
+[Research UI Product Spec](RESEARCH_UI_PRODUCT_SPEC.md) for the separate
+Research UI service, Inbox-first flow, and source workbench product contract.

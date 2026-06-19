@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Web OSINT Research UI</title>
+  <script>
+    (() => {
+      const stored = localStorage.getItem('web-osint-research-theme');
+      const theme = stored || (matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark');
+      document.documentElement.dataset.theme = theme;
+    })();
+  </script>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <header class="topbar">
+    <div>
+      <h1>Web OSINT Research UI</h1>
+      <p>Inbox-driven evidence review, source inspection, normalized content, and provenance.</p>
+    </div>
+    <div class="top-actions">
+      <button id="datalabCase" class="secondary">Datalab case</button>
+      <button id="refreshButton">Refresh</button>
+      <button id="themeSwitch" class="theme-switch" role="switch" aria-checked="false" title="Toggle theme">
+        <span class="sun"></span><span class="moon"></span><span class="knob"></span>
+      </button>
+    </div>
+  </header>
+
+  <main class="research-shell">
+    <aside class="queues">
+      <section class="panel">
+        <h2>Queues</h2>
+        <div id="queueList" class="queue-list"></div>
+      </section>
+      <section class="panel">
+        <h2>Source Types</h2>
+        <div id="kindList" class="facet-list"></div>
+      </section>
+      <section class="panel">
+        <h2>Domains</h2>
+        <div id="domainList" class="facet-list compact"></div>
+      </section>
+    </aside>
+
+    <section class="inbox panel">
+      <div class="section-head">
+        <div>
+          <h2>Inbox</h2>
+          <div id="totals" class="muted">Loading...</div>
+        </div>
+        <div class="filters">
+          <input id="searchInput" type="search" placeholder="Search sources, handles, URLs, text">
+          <select id="projectSelect"><option value="">All projects</option></select>
+          <select id="limitSelect">
+            <option value="40">40</option>
+            <option value="80" selected>80</option>
+            <option value="150">150</option>
+            <option value="200">200</option>
+          </select>
+        </div>
+      </div>
+      <div id="inboxRows" class="inbox-rows"></div>
+    </section>
+
+    <section class="workbench panel">
+      <div id="sourceEmpty" class="empty-state">
+        <h2>Source Workbench</h2>
+        <p>Select an inbox item to inspect the normalized content, raw capture, related rows, OCR/VL outputs, semantic annotations, and local review notes.</p>
+      </div>
+      <div id="sourceView" class="source-view hidden">
+        <div class="source-titlebar">
+          <div>
+            <div id="sourceKind" class="pill">Source</div>
+            <h2 id="sourceTitle"></h2>
+            <a id="sourceUrl" href="#" target="_blank" rel="noreferrer"></a>
+          </div>
+          <div id="sourceMeta" class="meta"></div>
+        </div>
+        <nav class="tabs" aria-label="Source detail tabs">
+          <button class="tab active" data-tab="normalized">Normalized</button>
+          <button class="tab" data-tab="artifacts">Artifacts</button>
+          <button class="tab" data-tab="enrichment">Enrichment</button>
+          <button class="tab" data-tab="related">Related</button>
+          <button class="tab" data-tab="raw">Raw</button>
+          <button class="tab" data-tab="notes">Notes</button>
+        </nav>
+        <div id="tab-normalized" class="tab-pane active"></div>
+        <div id="tab-artifacts" class="tab-pane"></div>
+        <div id="tab-enrichment" class="tab-pane"></div>
+        <div id="tab-related" class="tab-pane"></div>
+        <div id="tab-raw" class="tab-pane"></div>
+        <div id="tab-notes" class="tab-pane"></div>
+      </div>
+    </section>
+  </main>
+  <script src="/app.js"></script>
+</body>
+</html>

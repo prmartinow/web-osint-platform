@@ -154,6 +154,15 @@ Use the static worker as the first pass for ordinary pages. If text is missing, 
 
 The Research UI should consume those normalized artifacts from a separate app/service, not from a metrics-dashboard tab. Use the Research UI for Inbox triage, source workbench inspection, evidence extraction, normalized-content correction, entity/claim review, comparison, and publication preparation; use the pipeline dashboard only for service health and store monitoring.
 
+Run the Research UI as a separate Compose service:
+
+```bash
+docker compose --env-file .env -f compose/docker-compose.yml up -d --build research-ui
+curl http://127.0.0.1:18192/healthz
+```
+
+The service is intentionally read-oriented in v1. It queries ClickHouse evidence rows, related semantic/OCR/VL enrichment rows, and safe artifact files under the configured Web OSINT data root. The production deployment can bind it to a LAN-scoped host address while keeping direct data services on RPC localhost.
+
 Run the continuous request-topic worker as a user service on the RPC node:
 
 ```bash

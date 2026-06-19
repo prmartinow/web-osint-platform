@@ -190,6 +190,30 @@ services:
       - research-planner
     restart: unless-stopped
 
+  research-ui:
+    build:
+      context: ../research-ui
+    container_name: web-osint-research-ui
+    env_file:
+      - ../.env
+    environment:
+      CLICKHOUSE_URL: http://127.0.0.1:18123
+      CLICKHOUSE_DATABASE: web_osint
+      CLICKHOUSE_USER: web_osint
+      WEB_OSINT_DATA_ROOT: ${WEB_OSINT_DATA_ROOT:-/mnt/data/web-osint-platform}
+      MEDIA_ROOT: ${WEB_OSINT_DATA_ROOT:-/mnt/data/web-osint-platform}/media
+      OCR_ROOT: ${WEB_OSINT_DATA_ROOT:-/mnt/data/web-osint-platform}/ocr
+      WEB_ROOT: ${WEB_OSINT_DATA_ROOT:-/mnt/data/web-osint-platform}/web
+      DERIVED_ROOT: ${WEB_OSINT_DATA_ROOT:-/mnt/data/web-osint-platform}/derived
+      RESEARCH_UI_HOST: ${WEB_OSINT_RESEARCH_UI_BIND:-127.0.0.1}
+      RESEARCH_UI_PORT: "18192"
+    network_mode: host
+    volumes:
+      - ${WEB_OSINT_DATA_ROOT:-/mnt/data/web-osint-platform}:${WEB_OSINT_DATA_ROOT:-/mnt/data/web-osint-platform}:ro
+    depends_on:
+      - clickhouse
+    restart: unless-stopped
+
   redpanda-connect-shadow:
     build:
       context: ../connect

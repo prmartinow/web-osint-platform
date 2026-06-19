@@ -2,6 +2,31 @@
 
 Web OSINT Platform is a streaming evidence infrastructure stack for automated internet research.
 
+## Architecture Stance
+
+The platform is a provenance-first, human-led Web OSINT research workbench.
+The 2026-06-19 research-agent review concluded that v1 should center on
+captured evidence, reviewable observations, curated assertions, and frozen
+publication snapshots rather than autonomous research loops or chatbot-only
+interaction.
+
+The core separation is:
+
+```text
+captured evidence
+-> derived observations
+-> curated assertions
+-> published claims
+```
+
+Extracted text, OCR, VLM descriptions, entity matches, relation candidates,
+structured JSON, classifier labels, and factuality scores are derived
+observations until they are reviewed against source anchors. Serving stores and
+indexes are projections; they are not the canonical source of evidence.
+
+See [Derived Architecture Implementation Plan](DERIVED_ARCHITECTURE_IMPLEMENTATION_PLAN.md)
+for the 21-research-job coverage audit and phased implementation roadmap.
+
 ## Layers
 
 ```text
@@ -49,6 +74,11 @@ Serving Stores
 Meaning Layer
   Versioned annotations, entities, claims, relations, benchmark facts,
   release signals, research signals, questions, tasks, and wiki projections.
+
+Review And Curation
+  The Research UI writes append-only review events for evidence selections,
+  annotations, proposed facts, entity links, claim records, corrections, and
+  publication draft actions.
 
 Consumption
   The metrics dashboard, separate Research UI service, agents, research reports,
@@ -138,6 +168,29 @@ ClickHouse is the analytics layer for evidence events, entities, claims, labels,
 
 Large media and OCR artifacts should live on the filesystem with content-addressed paths. Store paths and hashes in event/state records.
 
+## Canonical Object Model
+
+Implementation should converge on these objects:
+
+| Object | Role |
+|---|---|
+| `SourceLocator` | URL, platform ID, query, repo path, paper ID, manual document ID, or other external/source-native locator |
+| `Capture` | Immutable observation with collector run, source identity, capture time, hashes, headers/redirects where relevant, and interaction recipe |
+| `Artifact` | Content-addressed raw/rendered/media file such as HTML, DOM, screenshot, crop, video, transcript, OCR JSON, source bundle, or extracted table |
+| `EvidenceDocument` | Versioned normalized block/asset/anchor representation over one or more captures |
+| `Segment` | Reviewable source fragment: text span, table cell, image region, OCR block, video time range, repo line range, or whole-source reference |
+| `Run` | Collector/extractor/model execution record with tool/model version, config, inputs, outputs, timing, and errors |
+| `Observation` | Deterministic or model-derived suggestion anchored to source evidence |
+| `EntityMention` | Source-linked occurrence of a handle, person, lab, model, repo, benchmark, paper, hardware, tool, topic, or other entity |
+| `Entity` | Reviewed canonical thing built from mentions and evidence |
+| `Assertion` | Reviewed or contested claim/fact with qualifiers and evidence links |
+| `EvidenceLink` | Support, refute, mention, context, or uncertainty link from a claim/entity/fact to a segment |
+| `Assessment` | Reviewer or verifier judgment with dimensions such as extraction confidence, evidence directness, contradiction state, and review status |
+| `PublicationSnapshot` | Frozen approved release bundle for public site/report/wiki reuse |
+
+The time model must keep source published/updated time, capture time, ingestion
+time, extraction time, review time, and publication time separate.
+
 ## Evidence Inputs
 
 Collectors should emit one `capture_event` to `evidence.capture.events.v1` for each coherent browser/API collection step. A capture event can include:
@@ -168,6 +221,18 @@ Source
 ```
 
 An `EvidenceDocument` contains source metadata, capture metadata, content blocks, media/assets, source anchors, omitted-content records, and links to raw artifacts. Anchors can target exact text quotes, extracted order, DOM paths when available, visual bounding boxes when available, table rows/cells, OCR blocks, or artifact paths. Rebrowser-rendered captures should write the same shape as the static webpage extraction worker.
+
+Web capture should follow this order:
+
+1. Use source-native adapters for structured authoritative sources such as
+   GitHub, Hugging Face, arXiv, benchmark APIs, and model registries.
+2. Use static extraction for suitable pages and batch parsing.
+3. Use Rebrowser-rendered capture when visible browser state, dynamic content,
+   layout, screenshots, media, or human-inspected page state matters.
+
+Preserve omitted/chrome content as inspectable omitted-content records. Do not
+permanently delete source material just because an extractor classifies it as
+boilerplate.
 
 ## Research UI Product Boundary
 
@@ -218,6 +283,38 @@ The labels inside each family are versioned concepts in `label_concepts`. Unknow
 High-value extracted objects are promoted from the generic annotation ledger into typed ClickHouse tables such as `claim_assertions`, `relation_assertions`, `benchmark_facts`, `release_signals`, `research_signals`, `research_questions`, and `autonomous_tasks`. Generated wiki pages are derived projections and must keep backlinks to source evidence and annotation IDs.
 
 The initial research planner is deliberately deterministic. It scans recent evidence and annotations, identifies actionable signals such as user-supplied seeds, comparison opportunities, verification needs, and source-expansion leads, then writes deduped rows to `research_signals`, `research_questions`, and `autonomous_tasks` while also publishing replay events to the matching `osint.*` topics. Later LLM or human feedback loops can replace or augment this planner without changing the storage contract.
+
+## Retrieval And Enrichment Lanes
+
+Baseline retrieval is hybrid:
+
+```text
+Typesense keyword/facet candidates
+-> Qdrant dense semantic candidates
+-> fusion
+-> bounded Qwen rerank
+-> hydration from Pebble/ClickHouse/artifacts
+```
+
+Neural sparse retrieval, late-interaction retrieval, visual retrieval, and
+visual reranking are optional precision lanes. Add them only after private Web
+OSINT evaluation shows they improve evidence recall, citation correctness,
+filtered retrieval, or review productivity.
+
+Enrichment workers should follow a grounded cascade:
+
+```text
+deterministic extraction
+-> model-generated candidate observations
+-> schema/source-anchor validation
+-> human review
+-> curated assertion or rejected suggestion
+```
+
+Priority enrichment families are deterministic entity/ID extraction, GLiNER-like
+entity mentions, relation/event candidates, structured proposed facts,
+claim-passage factuality assessments, PaddleOCR/PP-Structure-style layout OCR,
+chart/table extraction, and Qwen3-VL visual observations.
 
 ## Redpanda-Native Migration
 

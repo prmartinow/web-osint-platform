@@ -2,6 +2,13 @@
 
 The Research UI is a separate human research product surface for Web OSINT evidence work. It must not live inside the infrastructure metrics dashboard.
 
+This spec is the product surface for the broader architecture in
+[Derived Architecture Implementation Plan](DERIVED_ARCHITECTURE_IMPLEMENTATION_PLAN.md).
+That plan keeps capture, observations, curation, projections, and publication
+snapshots separate so the UI can show exactly which facts are source evidence,
+which are model suggestions, which are human-reviewed, and which are approved
+for publication.
+
 ## Product Boundary
 
 The platform has two separate user surfaces:

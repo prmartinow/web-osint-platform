@@ -1,0 +1,116 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Web OSINT Evidence Document",
+  "type": "object",
+  "required": ["schema_version", "document_id", "created_at", "source", "captures", "revision", "blocks", "assets"],
+  "properties": {
+    "schema_version": {"const": "v1"},
+    "document_id": {"type": "string"},
+    "created_at": {"type": "string", "format": "date-time"},
+    "source": {
+      "type": "object",
+      "required": ["source_kind", "canonical_url"],
+      "properties": {
+        "source_kind": {"type": "string"},
+        "source_url": {"type": "string"},
+        "final_url": {"type": "string"},
+        "canonical_url": {"type": "string"},
+        "domain": {"type": "string"},
+        "title": {"type": "string"},
+        "description": {"type": "string"},
+        "published_at": {"type": ["string", "null"]},
+        "topics": {"type": "array", "items": {"type": "string"}}
+      },
+      "additionalProperties": true
+    },
+    "captures": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["capture_id", "collector_run_id", "capture_method", "captured_at"],
+        "properties": {
+          "capture_id": {"type": "string"},
+          "collector_run_id": {"type": "string"},
+          "event_index": {"type": "integer"},
+          "capture_method": {"type": "string"},
+          "captured_at": {"type": "string", "format": "date-time"},
+          "http_status": {"type": ["integer", "null"]},
+          "content_type": {"type": "string"},
+          "html_sha256": {"type": "string"},
+          "text_sha256": {"type": "string"},
+          "artifacts": {"type": "array", "items": {"type": "string"}},
+          "context": {"type": "object"}
+        },
+        "additionalProperties": true
+      }
+    },
+    "revision": {
+      "type": "object",
+      "required": ["revision_id", "producer", "generated_at", "extraction_methods", "quality"],
+      "properties": {
+        "revision_id": {"type": "string"},
+        "producer": {"type": "object"},
+        "generated_at": {"type": "string", "format": "date-time"},
+        "extraction_methods": {"type": "array", "items": {"type": "string"}},
+        "quality": {"type": "object"}
+      },
+      "additionalProperties": true
+    },
+    "blocks": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["block_id", "type", "anchor"],
+        "properties": {
+          "block_id": {"type": "string"},
+          "type": {"type": "string"},
+          "text": {"type": "string"},
+          "level": {"type": ["string", "null"]},
+          "rows": {"type": "array"},
+          "anchor": {"$ref": "#/$defs/source_anchor"},
+          "metadata": {"type": "object"}
+        },
+        "additionalProperties": true
+      }
+    },
+    "assets": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["asset_id", "type", "anchor"],
+        "properties": {
+          "asset_id": {"type": "string"},
+          "type": {"type": "string"},
+          "url": {"type": "string"},
+          "alt": {"type": "string"},
+          "title": {"type": "string"},
+          "anchor": {"$ref": "#/$defs/source_anchor"},
+          "metadata": {"type": "object"}
+        },
+        "additionalProperties": true
+      }
+    },
+    "omitted_content": {
+      "type": "array",
+      "items": {"type": "object"}
+    },
+    "projections": {"type": "object"}
+  },
+  "$defs": {
+    "source_anchor": {
+      "type": "object",
+      "required": ["selector_type"],
+      "properties": {
+        "selector_type": {"type": "string"},
+        "source": {"type": "string"},
+        "index": {"type": "integer"},
+        "exact": {"type": "string"},
+        "prefix": {"type": "string"},
+        "suffix": {"type": "string"},
+        "bbox": {"type": "object"}
+      },
+      "additionalProperties": true
+    }
+  },
+  "additionalProperties": true
+}

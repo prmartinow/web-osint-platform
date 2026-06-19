@@ -54,6 +54,13 @@
           <button class="subtab" data-view="live" data-pane="data">Data</button>
         </div>
       </div>
+      <div class="stage-group" data-stage="research-workbench">
+        <button class="stage-tab" data-view="research-workbench">Research Workbench</button>
+        <div class="stage-subnav">
+          <button class="subtab" data-view="research-workbench" data-pane="metrics">Overview</button>
+          <button class="subtab" data-view="research-workbench" data-pane="data">Evidence</button>
+        </div>
+      </div>
       <div class="stage-group" data-stage="collectors">
         <button class="stage-tab" data-view="collectors">Collectors</button>
         <div class="stage-subnav">
@@ -157,6 +164,46 @@
             <div id="liveRuns"></div>
           </section>
         </div>
+      </div>
+    </section>
+
+    <section id="research-workbench" class="view">
+      <div class="pane active" data-pane="metrics">
+        <div class="cards" id="researchWorkbenchCards"></div>
+        <section class="panel">
+          <h2>Human Research Flow</h2>
+          <div id="researchWorkbenchFlow" class="workflow-grid"></div>
+        </section>
+        <div class="panel-grid">
+          <section class="panel">
+            <h2>Source Mix</h2>
+            <div id="researchWorkbenchSources"></div>
+          </section>
+          <section class="panel">
+            <h2>Review Queues</h2>
+            <div id="researchWorkbenchQueues"></div>
+          </section>
+        </div>
+      </div>
+      <div class="pane" data-pane="data">
+        <div class="panel-grid">
+          <section class="panel">
+            <h2>Research Object Model</h2>
+            <div id="researchWorkbenchObjects" class="object-grid"></div>
+          </section>
+          <section class="panel">
+            <h2>Operating Principles</h2>
+            <div id="researchWorkbenchPrinciples" class="note-list"></div>
+          </section>
+        </div>
+        <section class="panel">
+          <h2>Recent Evidence Sources</h2>
+          <div id="researchWorkbenchRecent"></div>
+        </section>
+        <section class="panel">
+          <h2>Projects</h2>
+          <div id="researchWorkbenchProjects"></div>
+        </section>
       </div>
     </section>
 

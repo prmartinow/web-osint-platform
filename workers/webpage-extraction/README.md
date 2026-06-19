@@ -1,8 +1,9 @@
 # Webpage Extraction Worker
 
 Fetches HTML webpages, extracts article/main text, markdown, links, metadata,
-tables, headings, images, JSON-LD, and artifact files, then publishes ordinary
-`web_documents` capture events to `evidence.capture.events.v1`.
+tables, headings, images, JSON-LD, artifact files, and an `EvidenceDocument`
+block/asset artifact, then publishes ordinary `web_documents` capture events to
+`evidence.capture.events.v1`.
 
 The normalizer already handles those events, so extracted pages flow through:
 
@@ -33,6 +34,10 @@ OSINT_DATA_ROOT=/tmp/web-osint-extract-test \
 ```
 
 Add `--publish` to send the capture event through Pandaproxy.
+
+Static extraction is the first pass. If the page is dynamic, interaction-heavy,
+or visibly richer in the browser than the static capture, escalate to Rebrowser
+rendered-DOM capture and preserve the same artifact/EvidenceDocument contract.
 
 ## Continuous worker
 

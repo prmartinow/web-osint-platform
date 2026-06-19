@@ -6,9 +6,10 @@ Web OSINT Platform is a streaming evidence infrastructure stack for automated in
 
 ```text
 Collection
-  Browser/API collectors extract complete evidence records.
-  Website pages, search results, social posts, media, and user notes share
-  the same capture envelope.
+  Rebrowser is the required rendered-browser collection and escalation surface
+  for Google, X, and dynamic webpages. Browser/API collectors extract complete
+  evidence records. Website pages, search results, social posts, media, and
+  user notes share the same capture envelope.
 
 Ingress
   A local outbox and producer publish records to Redpanda.
@@ -29,7 +30,8 @@ Processing
   it runs with observed-topic emission disabled, and can resume that emission as
   fallback.
   The webpage extraction worker turns opened URLs, launch blogs, docs pages,
-  model cards, and research result pages into first-class web_document captures.
+  model cards, and research result pages into first-class web_document captures
+  and writes EvidenceDocument block/asset artifacts for normalized inspection.
   The embedding worker enriches observed evidence with local Qwen vectors and
   upserts them into Qdrant.
   The research planner derives research signals, questions, and task seeds
@@ -48,7 +50,8 @@ Meaning Layer
   release signals, research signals, questions, tasks, and wiki projections.
 
 Consumption
-  Agents, dashboards, research reports, and websites query the serving stores.
+  The metrics dashboard, research workbench, agents, research reports, and
+  websites query the serving stores.
 ```
 
 ## Topic Families
@@ -147,7 +150,34 @@ Collectors should emit one `capture_event` to `evidence.capture.events.v1` for e
 
 The normalizer materializes all of these into shared serving stores while preserving source-specific fields inside the raw JSON. Website content and user input are not side channels; they are first-class evidence with provenance and Meaning Layer annotations.
 
-The webpage extraction worker is a collector-side enrichment bridge for ordinary URLs. It fetches HTML, extracts readable article text, Markdown, tables, metadata, links, headings, images, canonical URLs, and filesystem artifact paths, then publishes the result as a standard `web_documents` capture event. This keeps launch blogs and opened Google/X-linked pages on the same replay path as manual research documents and social captures.
+The webpage extraction worker is a collector-side enrichment bridge for ordinary URLs. It fetches HTML, extracts readable article text, Markdown, tables, metadata, links, headings, images, canonical URLs, filesystem artifact paths, and a versioned `EvidenceDocument` block/asset artifact, then publishes the result as a standard `web_documents` capture event. This keeps launch blogs and opened Google/X-linked pages on the same replay path as manual research documents and social captures.
+
+Static HTTP extraction is only the first pass. If the compact row has missing content, dynamic page state, important interaction-only details, or visual evidence that the static parser cannot see, the collection path should escalate to Rebrowser rendered-DOM capture and publish the rendered result through the same capture envelope. Generic Playwright/Chrome collection advice should be translated into the preserved Rebrowser profile and site-specific pacing rules.
+
+## Evidence Document Model
+
+The canonical normalized page representation is a versioned `EvidenceDocument`; Markdown, cleaned HTML, screenshots, and readable text are projections over immutable source artifacts.
+
+```text
+Source
+-> Capture(s)
+-> EvidenceDocument revision
+-> Blocks + assets + anchors
+-> Evidence, claims, entities, relations, review tasks, publications
+```
+
+An `EvidenceDocument` contains source metadata, capture metadata, content blocks, media/assets, source anchors, omitted-content records, and links to raw artifacts. Anchors can target exact text quotes, extracted order, DOM paths when available, visual bounding boxes when available, table rows/cells, OCR blocks, or artifact paths. Rebrowser-rendered captures should write the same shape as the static webpage extraction worker.
+
+## Research Workbench
+
+The research UI is separate from the infrastructure metrics dashboard. Its workflow is:
+
+```text
+Capture -> Triage -> Inspect -> Extract evidence -> Resolve entities
+-> Form claims -> Compare -> Review -> Publish
+```
+
+Core objects are `Source`, `Capture`, `EvidenceDocument`, `Evidence`, `Entity`, `Claim`, `Relation`, `Annotation`, `Review task`, and `Publication release`. The workbench should show source and normalized content side by side when possible, keep raw artifacts inspectable, expose review queues, and keep v1 human-led. Autonomous research loops are deferred.
 
 ## Meaning Layer
 
@@ -203,4 +233,6 @@ v1.2:
 ```
 
 See [Redpanda Native Architecture](REDPANDA_NATIVE_ARCHITECTURE.md) and
-[Topic Catalog](TOPIC_CATALOG.md).
+[Topic Catalog](TOPIC_CATALOG.md). See
+[Research UI And Extraction Direction](RESEARCH_UI_AND_EXTRACTION.md) for the
+human research workbench and EvidenceDocument contract.

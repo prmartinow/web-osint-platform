@@ -66,6 +66,7 @@ MAX_TEXT_CHARS = int(env("WEBPAGE_EXTRACTION_MAX_TEXT_CHARS", "120000"))
 MAX_LINKS = int(env("WEBPAGE_EXTRACTION_MAX_LINKS", "500"))
 MAX_TABLES = int(env("WEBPAGE_EXTRACTION_MAX_TABLES", "40"))
 MAX_TABLE_ROWS = int(env("WEBPAGE_EXTRACTION_MAX_TABLE_ROWS", "200"))
+MAX_EVIDENCE_BLOCKS = int(env("WEBPAGE_EXTRACTION_MAX_EVIDENCE_BLOCKS", "800"))
 USER_AGENT = env(
     "WEBPAGE_EXTRACTION_USER_AGENT",
     "Mozilla/5.0 (compatible; WebOSINTBot/1.0; +https://example.invalid/web-osint)",
@@ -142,6 +143,10 @@ def write_bytes_artifact(kind: str, digest: str, suffix: str, data: bytes) -> st
     path = artifact_path(kind, digest, suffix)
     path.write_bytes(data)
     return str(path)
+
+
+def write_json_artifact(kind: str, digest: str, value: Any) -> str:
+    return write_text_artifact(kind, digest, "json", json.dumps(value, ensure_ascii=False, indent=2, default=str))
 
 
 def fetch_url(url: str, *, timeout: float = REQUEST_TIMEOUT, max_bytes: int = MAX_HTML_BYTES) -> tuple[str, bytes, dict[str, str], int]:
@@ -337,6 +342,207 @@ def extract_main(html: str) -> tuple[str, str, str]:
     return text, markdown, ""
 
 
+def split_text_blocks(text: str) -> list[str]:
+    pieces = [clean_ws(piece) for piece in re.split(r"\n\s*\n", text or "")]
+    pieces = [piece for piece in pieces if piece]
+    if len(pieces) <= 3:
+        line_pieces = [clean_ws(line) for line in str(text or "").splitlines()]
+        pieces = [piece for piece in line_pieces if piece]
+    blocks: list[str] = []
+    for piece in pieces:
+        if len(piece) <= 1800:
+            blocks.append(piece)
+            continue
+        for idx in range(0, len(piece), 1400):
+            chunk = clean_ws(piece[idx:idx + 1400])
+            if chunk:
+                blocks.append(chunk)
+    return blocks[:MAX_EVIDENCE_BLOCKS]
+
+
+def text_anchor(text: str, index: int, source: str = "readability_text") -> dict[str, Any]:
+    exact = clean_ws(text)[:320]
+    return {
+        "selector_type": "text_quote",
+        "source": source,
+        "index": index,
+        "exact": exact,
+        "prefix": "",
+        "suffix": "",
+    }
+
+
+def order_anchor(index: int, source: str) -> dict[str, Any]:
+    return {"selector_type": "extracted_order", "source": source, "index": index}
+
+
+def build_evidence_document(
+    *,
+    document_id: str,
+    source_url: str,
+    final_url: str,
+    canonical_url: str,
+    title: str,
+    description: str,
+    domain: str,
+    fetched_at: str,
+    capture_method: str,
+    collector_run_id: str,
+    event_index: int,
+    status: int,
+    content_type: str,
+    published_at: str | None,
+    html_sha: str,
+    text_sha: str,
+    extracted_text: str,
+    markdown: str,
+    headings: list[dict[str, str]],
+    tables: list[dict[str, Any]],
+    images: list[dict[str, str]],
+    artifact_paths: list[str],
+    json_ld_count: int,
+    topics: list[str],
+    context: dict[str, Any] | None,
+) -> dict[str, Any]:
+    blocks: list[dict[str, Any]] = []
+    if title:
+        blocks.append({
+            "block_id": f"{document_id}:title:0",
+            "type": "title",
+            "text": title,
+            "anchor": order_anchor(0, "metadata_title"),
+            "metadata": {"role": "document_title"},
+        })
+    if description:
+        blocks.append({
+            "block_id": f"{document_id}:description:0",
+            "type": "summary",
+            "text": description,
+            "anchor": order_anchor(0, "metadata_description"),
+            "metadata": {"role": "meta_description"},
+        })
+    for idx, heading in enumerate(headings[:200]):
+        text = clean_ws(heading.get("text"))
+        if not text:
+            continue
+        blocks.append({
+            "block_id": f"{document_id}:heading:{idx}",
+            "type": "heading",
+            "text": text,
+            "level": heading.get("level"),
+            "anchor": text_anchor(text, idx, "dom_heading"),
+            "metadata": {},
+        })
+    for idx, paragraph in enumerate(split_text_blocks(extracted_text)):
+        blocks.append({
+            "block_id": f"{document_id}:text:{idx}",
+            "type": "paragraph",
+            "text": paragraph,
+            "anchor": text_anchor(paragraph, idx),
+            "metadata": {"source_representation": "readability_or_dom_text"},
+        })
+    for table in tables:
+        table_index = int(table.get("table_index") or 0)
+        blocks.append({
+            "block_id": f"{document_id}:table:{table_index}",
+            "type": "table",
+            "text": clean_ws(table.get("caption")) or f"Table {table_index + 1}",
+            "rows": table.get("rows") or [],
+            "anchor": order_anchor(table_index, "dom_table"),
+            "metadata": {
+                "caption": table.get("caption") or "",
+                "row_count": table.get("row_count") or 0,
+                "column_count": table.get("column_count") or 0,
+            },
+        })
+    blocks = blocks[:MAX_EVIDENCE_BLOCKS]
+
+    assets = []
+    for idx, image in enumerate(images):
+        assets.append({
+            "asset_id": f"{document_id}:image:{idx}",
+            "type": "image",
+            "url": image.get("url") or "",
+            "alt": image.get("alt") or "",
+            "title": image.get("title") or "",
+            "anchor": order_anchor(idx, "dom_image"),
+            "metadata": {},
+        })
+
+    omitted = []
+    if len(extracted_text) > MAX_TEXT_CHARS:
+        omitted.append({
+            "kind": "text_tail",
+            "reason": "capture_event_text_truncated",
+            "available_in_artifact": "text",
+            "omitted_chars": len(extracted_text) - MAX_TEXT_CHARS,
+        })
+    if len(markdown) > MAX_TEXT_CHARS:
+        omitted.append({
+            "kind": "markdown_tail",
+            "reason": "capture_event_markdown_truncated",
+            "available_in_artifact": "markdown",
+            "omitted_chars": len(markdown) - MAX_TEXT_CHARS,
+        })
+
+    return {
+        "schema_version": "v1",
+        "document_id": document_id,
+        "created_at": fetched_at,
+        "source": {
+            "source_kind": "web_page",
+            "source_url": source_url,
+            "final_url": final_url,
+            "canonical_url": canonical_url,
+            "domain": domain,
+            "title": title,
+            "description": description,
+            "published_at": published_at,
+            "topics": topics,
+        },
+        "captures": [
+            {
+                "capture_id": f"{collector_run_id}:{event_index}",
+                "collector_run_id": collector_run_id,
+                "event_index": event_index,
+                "capture_method": capture_method,
+                "captured_at": fetched_at,
+                "http_status": status,
+                "content_type": content_type,
+                "html_sha256": html_sha,
+                "text_sha256": text_sha,
+                "artifacts": artifact_paths,
+                "context": context or {},
+            }
+        ],
+        "revision": {
+            "revision_id": stable_hash(document_id, text_sha, PRODUCER_NAME, PRODUCER_VERSION)[:24],
+            "producer": {"name": PRODUCER_NAME, "version": PRODUCER_VERSION},
+            "generated_at": fetched_at,
+            "extraction_methods": ["http_fetch", "readability", "dom_fallback", "markdownify"],
+            "quality": {
+                "text_chars": len(extracted_text),
+                "markdown_chars": len(markdown),
+                "block_count": len(blocks),
+                "asset_count": len(assets),
+                "table_count": len(tables),
+                "json_ld_count": json_ld_count,
+                "needs_rebrowser_rendered_capture": len(clean_ws(extracted_text)) < 80,
+            },
+        },
+        "blocks": blocks,
+        "assets": assets,
+        "omitted_content": omitted,
+        "projections": {
+            "raw_html": next((p for p in artifact_paths if "/html/" in p), ""),
+            "text": next((p for p in artifact_paths if "/text/" in p), ""),
+            "markdown": next((p for p in artifact_paths if "/markdown/" in p), ""),
+            "tables_json": next((p for p in artifact_paths if "/tables/" in p), ""),
+            "metadata_json": next((p for p in artifact_paths if "/metadata/" in p), ""),
+        },
+    }
+
+
 @dataclass
 class ExtractedPage:
     url: str
@@ -412,10 +618,44 @@ def extract_page(
     }
     meta_path = write_text_artifact("metadata", text_sha, "json", json.dumps(meta, ensure_ascii=False, indent=2))
     artifact_paths.extend([tables_path, meta_path])
+    evidence_document = build_evidence_document(
+        document_id=document_id,
+        source_url=url,
+        final_url=final_url,
+        canonical_url=canonical_url,
+        title=title,
+        description=description,
+        domain=domain_of(canonical_url),
+        fetched_at=fetched_at,
+        capture_method=capture_method,
+        collector_run_id=collector_run_id,
+        event_index=event_index,
+        status=status,
+        content_type=headers.get("content-type", ""),
+        published_at=meta["published_at"],
+        html_sha=html_sha,
+        text_sha=text_sha,
+        extracted_text=extracted_text,
+        markdown=markdown,
+        headings=headings,
+        tables=tables,
+        images=images,
+        artifact_paths=artifact_paths,
+        json_ld_count=len(json_ld),
+        topics=topics,
+        context=context,
+    )
+    evidence_document_path = write_json_artifact("evidence_document", text_sha, evidence_document)
+    artifact_paths.append(evidence_document_path)
+    evidence_document["captures"][0]["artifacts"] = artifact_paths
+    evidence_document["projections"]["evidence_document"] = evidence_document_path
+    write_json_artifact("evidence_document", text_sha, evidence_document)
 
     document = {
         "schema_version": "v1",
         "document_id": document_id,
+        "evidence_document_id": evidence_document["document_id"],
+        "evidence_document_path": evidence_document_path,
         "canonical_url": canonical_url,
         "domain": domain_of(canonical_url),
         "title": title,
@@ -442,6 +682,9 @@ def extract_page(
             "event_text_chars": len(text),
             "markdown_chars": len(markdown),
             "event_markdown_chars": len(markdown_for_event),
+            "evidence_document_blocks": len(evidence_document["blocks"]),
+            "evidence_document_assets": len(evidence_document["assets"]),
+            "needs_rebrowser_rendered_capture": evidence_document["revision"]["quality"]["needs_rebrowser_rendered_capture"],
             "link_count": len(links),
             "image_count": len(images),
             "table_count": len(tables),
@@ -457,6 +700,22 @@ def extract_page(
             "headings": headings,
             "images": images,
             "json_ld_count": len(json_ld),
+        },
+        "content_representations": {
+            "canonical_evidence_document": evidence_document_path,
+            "raw_html": evidence_document["projections"]["raw_html"],
+            "text": evidence_document["projections"]["text"],
+            "markdown": evidence_document["projections"]["markdown"],
+            "tables_json": evidence_document["projections"]["tables_json"],
+            "metadata_json": evidence_document["projections"]["metadata_json"],
+        },
+        "capture_bundle": {
+            "source_url": url,
+            "final_url": final_url,
+            "capture_method": capture_method,
+            "rendered_browser_surface": "rebrowser",
+            "static_extraction_method": "http_fetch_readability_dom",
+            "rendered_capture_required": evidence_document["revision"]["quality"]["needs_rebrowser_rendered_capture"],
         },
     }
     capture_event = {
@@ -727,6 +986,7 @@ def cmd_extract_url(args: argparse.Namespace) -> None:
             "title": page.title,
             "text_chars": len(page.text),
             "artifact_paths": page.artifact_paths,
+            "evidence_document_paths": [path for path in page.artifact_paths if "/evidence_document/" in path],
         }
         if args.publish:
             item["pandaproxy_response"] = post_capture_event(page.capture_event, pandaproxy_url=args.pandaproxy_url)

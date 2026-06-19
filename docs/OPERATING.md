@@ -148,7 +148,11 @@ Run the launch-blog canary from the live RPC tree:
 python3 scripts/run_webpage_extraction_canary.py --env-file .env
 ```
 
-The worker stores raw HTML, text, Markdown, tables, and metadata below the configured data root before publishing a compact event containing text, provenance, quality signals, and artifact paths.
+The worker stores raw HTML, text, Markdown, tables, metadata, and an `evidence_document` JSON artifact below the configured data root before publishing a compact event containing text, provenance, quality signals, content representation paths, and artifact paths.
+
+Use the static worker as the first pass for ordinary pages. If text is missing, tables/images are only visible after client-side rendering, a page requires interaction, or the browser view carries important evidence, escalate to Rebrowser rendered-DOM capture. Rebrowser is the required rendered-browser collection surface for this platform; rendered captures should preserve the same raw artifact and `EvidenceDocument` contract instead of becoming ad hoc screenshots.
+
+The research workbench consumes those normalized artifacts separately from the metrics dashboard. Use the workbench for source triage, evidence inspection, entity/claim review, comparison, and publication preparation; use the pipeline dashboard for service health and store monitoring.
 
 Run the continuous request-topic worker as a user service on the RPC node:
 

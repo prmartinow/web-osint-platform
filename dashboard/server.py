@@ -925,6 +925,184 @@ def evidence_inspector(params):
     }
 
 
+def research_workbench(params):
+    frame = params.get("frame", ["24h"])[0]
+    _, (window, bucket_minutes) = timeframe({"frame": [frame]})
+    totals = ch_data(
+        """
+        SELECT
+          count() AS rows,
+          uniqExact(evidence_id) AS unique_evidence,
+          uniqExact(collector_run_id) AS collector_runs,
+          uniqExact(source_project) AS projects,
+          max(ingested_at) AS last_ingested_at
+        FROM evidence_events
+        """
+    )[0]
+    recent_window = ch_data(
+        f"""
+        SELECT
+          count() AS rows,
+          uniqExact(evidence_id) AS unique_evidence,
+          uniqExact(collector_run_id) AS collector_runs
+        FROM evidence_events
+        WHERE ingested_at >= now64() - INTERVAL {window}
+        """
+    )[0]
+    source_counts = ch_data(
+        """
+        SELECT
+          source_kind,
+          count() AS rows,
+          uniqExact(evidence_id) AS evidence,
+          uniqExact(collector_run_id) AS runs,
+          max(ingested_at) AS last_seen
+        FROM evidence_events
+        GROUP BY source_kind
+        ORDER BY rows DESC, source_kind ASC
+        LIMIT 100
+        """
+    )
+    project_counts = ch_data(
+        """
+        SELECT
+          source_project,
+          count() AS rows,
+          uniqExact(evidence_id) AS evidence,
+          max(ingested_at) AS last_seen
+        FROM evidence_events
+        GROUP BY source_project
+        ORDER BY last_seen DESC, rows DESC
+        LIMIT 100
+        """
+    )
+    recent_sources = ch_data(
+        """
+        SELECT
+          evidence_id,
+          argMax(source_kind, ingested_at) AS source_kind,
+          argMax(source_project, ingested_at) AS source_project,
+          argMax(capture_method, ingested_at) AS capture_method,
+          argMax(canonical_url, ingested_at) AS canonical_url,
+          argMax(author_handle, ingested_at) AS author_handle,
+          argMax(domain, ingested_at) AS domain,
+          argMax(title, ingested_at) AS title,
+          length(argMax(text, ingested_at)) AS text_chars,
+          max(captured_at) AS latest_captured_at,
+          max(ingested_at) AS latest_ingested_at
+        FROM evidence_events
+        GROUP BY evidence_id
+        ORDER BY latest_ingested_at DESC
+        LIMIT 120
+        """
+    )
+    annotation_totals = optional_ch_data(
+        """
+        SELECT
+          count() AS annotations,
+          uniqExact(evidence_id) AS annotated_evidence,
+          uniqExact(label_id) AS labels,
+          max(created_at) AS last_annotation_at
+        FROM semantic_annotations
+        """,
+        [{"annotations": 0, "annotated_evidence": 0, "labels": 0, "last_annotation_at": ""}],
+    )[0]
+    annotation_families = optional_ch_data(
+        """
+        SELECT
+          annotation_family,
+          count() AS annotations,
+          uniqExact(evidence_id) AS evidence,
+          max(created_at) AS last_seen
+        FROM semantic_annotations
+        GROUP BY annotation_family
+        ORDER BY annotations DESC
+        LIMIT 80
+        """
+    )
+    claims = optional_ch_data(
+        "SELECT count() AS rows, uniqExact(evidence_id) AS evidence, max(created_at) AS last_seen FROM claim_assertions",
+        [{"rows": 0, "evidence": 0, "last_seen": ""}],
+    )[0]
+    relations = optional_ch_data(
+        "SELECT count() AS rows, uniqExact(evidence_id) AS evidence, max(created_at) AS last_seen FROM relation_assertions",
+        [{"rows": 0, "evidence": 0, "last_seen": ""}],
+    )[0]
+    benchmark_facts = optional_ch_data(
+        "SELECT count() AS rows, uniqExact(evidence_id) AS evidence, max(created_at) AS last_seen FROM benchmark_facts",
+        [{"rows": 0, "evidence": 0, "last_seen": ""}],
+    )[0]
+    research_questions = optional_ch_data(
+        """
+        SELECT status, count() AS rows, max(created_at) AS last_seen
+        FROM research_questions
+        GROUP BY status
+        ORDER BY rows DESC
+        """,
+    )
+    publication_releases = optional_ch_data(
+        "SELECT count() AS rows, max(created_at) AS last_seen FROM publication_releases",
+        [{"rows": 0, "last_seen": ""}],
+    )[0]
+    workflow = [
+        {"step": "Capture", "purpose": "Collect immutable evidence through Rebrowser, manual docs, and API-safe sources.", "count": recent_window.get("unique_evidence", 0), "unit": f"evidence in {frame}"},
+        {"step": "Triage", "purpose": "Decide which captured sources deserve inspection or follow-up.", "count": totals.get("unique_evidence", 0), "unit": "available evidence"},
+        {"step": "Inspect", "purpose": "Open a source bundle with normalized text, original artifacts, media, OCR/VL, and provenance.", "count": totals.get("rows", 0), "unit": "materialized rows"},
+        {"step": "Extract Evidence", "purpose": "Turn passages, tables, media regions, and source spans into anchored evidence blocks.", "count": annotation_totals.get("annotations", 0), "unit": "annotations"},
+        {"step": "Resolve Entities", "purpose": "Connect accounts, labs, repos, papers, models, benchmarks, tools, and hardware.", "count": sum(int(row.get("annotations") or 0) for row in annotation_families if row.get("annotation_family") == "entity"), "unit": "entity annotations"},
+        {"step": "Form Claims", "purpose": "Promote source-backed factual claims, benchmark facts, releases, and relations.", "count": claims.get("rows", 0), "unit": "claims"},
+        {"step": "Compare", "purpose": "Build comparison tables and timelines from structured model/tool/hardware facts.", "count": benchmark_facts.get("rows", 0), "unit": "benchmark facts"},
+        {"step": "Review", "purpose": "Keep uncertain, conflicting, or high-value findings in a human review queue.", "count": sum(int(row.get("rows") or 0) for row in research_questions), "unit": "questions"},
+        {"step": "Publish", "purpose": "Freeze reviewed evidence into website-ready releases with backlinks.", "count": publication_releases.get("rows", 0), "unit": "releases"},
+    ]
+    object_model = [
+        {"object": "Source", "role": "External page, post, account, repo, paper, video, or manual file."},
+        {"object": "Capture", "role": "Immutable collection event with method, time, run, and raw artifacts."},
+        {"object": "EvidenceDocument", "role": "Versioned block-and-asset model; Markdown/HTML are projections, not canonical truth."},
+        {"object": "Evidence", "role": "Anchored passage, table cell, media region, OCR block, or source span."},
+        {"object": "Entity", "role": "Resolved account, person, lab, model, repo, paper, benchmark, hardware, or topic."},
+        {"object": "Claim", "role": "Contestable statement with source support, contradiction, and review state."},
+        {"object": "Relation", "role": "Typed connection between entities, claims, sources, and topics."},
+        {"object": "Publication", "role": "Reviewed release or website-ready output that keeps source backlinks."},
+    ]
+    review_queues = [
+        {"queue": "Needs rendered capture", "count": sum(1 for row in recent_sources if row.get("source_kind") == "web_page" and not int(row.get("text_chars") or 0)), "next_action": "Use Rebrowser rendered-DOM capture."},
+        {"queue": "Needs annotation", "count": max(0, int(totals.get("unique_evidence") or 0) - int(annotation_totals.get("annotated_evidence") or 0)), "next_action": "Run classification/entity/claim extraction or inspect manually."},
+        {"queue": "Research questions", "count": sum(int(row.get("rows") or 0) for row in research_questions), "next_action": "Open and resolve question queue."},
+        {"queue": "Benchmark facts", "count": int(benchmark_facts.get("rows") or 0), "next_action": "Compare and verify structured benchmark claims."},
+    ]
+    return {
+        "generated_at": ch_data("SELECT now64() AS now")[0]["now"],
+        "frame": frame,
+        "cards": {
+            "unique_evidence": totals.get("unique_evidence", 0),
+            "rows": totals.get("rows", 0),
+            "collector_runs": totals.get("collector_runs", 0),
+            "projects": totals.get("projects", 0),
+            "annotations": annotation_totals.get("annotations", 0),
+            "claims": claims.get("rows", 0),
+            "relations": relations.get("rows", 0),
+            "benchmark_facts": benchmark_facts.get("rows", 0),
+            "last_ingested_at": totals.get("last_ingested_at"),
+        },
+        "workflow": workflow,
+        "object_model": object_model,
+        "source_counts": source_counts,
+        "project_counts": project_counts,
+        "recent_sources": recent_sources,
+        "annotation_families": annotation_families,
+        "review_queues": review_queues,
+        "research_questions": research_questions,
+        "principles": [
+            "Rebrowser remains the required rendered-browser collection and escalation surface.",
+            "Raw captures and artifacts stay immutable; normalized views are replayable projections.",
+            "Evidence is anchored to source text, table rows/cells, media regions, OCR blocks, or capture artifacts.",
+            "The research workbench is separate from infrastructure metrics and stays human-led for v1.",
+        ],
+        "activity": activity_rows(frame),
+    }
+
+
 def allowed_fs_roots():
     return [MEDIA_ROOT, OCR_ROOT, WEB_ROOT]
 
@@ -2627,6 +2805,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self.send_json(type_search(params))
             if parsed.path == "/api/research/search":
                 return self.send_json(research_search(params_to_search_body(params)))
+            if parsed.path == "/api/research/workbench":
+                return self.send_json(research_workbench(params))
             if parsed.path == "/api/evidence/inspect":
                 return self.send_json(evidence_inspector(params))
             if parsed.path == "/api/lookup":

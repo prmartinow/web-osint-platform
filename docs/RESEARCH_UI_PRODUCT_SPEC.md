@@ -18,13 +18,6 @@ metrics dashboard: 192.168.1.16:18191
 research UI:       192.168.1.16:18192
 ```
 
-An internal DNS setup is possible later. DNS alone maps hostnames to IPs, not ports; if the goal is clean URLs without port numbers, use internal DNS plus a LAN-only reverse proxy. Candidate names:
-
-```text
-metrics.web-osint.lan  -> metrics dashboard
-research.web-osint.lan -> research UI
-```
-
 Do not expose the Research UI publicly in v1. Keep it LAN/WireGuard scoped unless there is a separate exposure review.
 
 ## V1 Decisions
@@ -348,7 +341,6 @@ The public research site is a projection of an approved release, not a live rend
 4. Build the web/blog source workbench using the Datalab blog as the second test case.
 5. Add evidence selection, normalized-content correction, entity linking, claim editing, annotations, and review state.
 6. Add publication draft bundle scaffolding.
-7. Add internal DNS/reverse proxy only after the separate service is stable.
 
 ## Acceptance Criteria
 

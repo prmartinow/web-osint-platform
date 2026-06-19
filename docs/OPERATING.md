@@ -113,7 +113,7 @@ Collector events may include `web_documents` for opened pages, articles, documen
 
 ### Webpage Extraction
 
-The webpage extraction worker turns ordinary URLs into `web_documents` capture events. It is meant for launch blog posts, documentation pages, model cards, benchmark pages, and opened search results where HTML should be captured and normalized rather than treated as a screenshot-only artifact.
+Rebrowser is the preferred capture surface for web pages that matter as research evidence. The webpage extraction worker is a companion parser/enrichment path that turns URLs into `web_documents` capture events with HTML/text/Markdown/table artifacts. Use it for launch blog posts, documentation pages, model cards, benchmark pages, and opened search results when HTTP extraction is explicitly useful or when a Rebrowser-captured source needs normalized projections.
 
 Install its isolated venv under the data root:
 
@@ -150,7 +150,7 @@ python3 scripts/run_webpage_extraction_canary.py --env-file .env
 
 The worker stores raw HTML, text, Markdown, tables, metadata, and an `evidence_document` JSON artifact below the configured data root before publishing a compact event containing text, provenance, quality signals, content representation paths, and artifact paths.
 
-Use the static worker as the first pass for ordinary pages. If text is missing, tables/images are only visible after client-side rendering, a page requires interaction, or the browser view carries important evidence, escalate to Rebrowser rendered-DOM capture. Rebrowser is the required rendered-browser collection surface for this platform; rendered captures should preserve the same raw artifact and `EvidenceDocument` contract instead of becoming ad hoc screenshots.
+Do not treat static extraction as the default evidence capture path. For analyst-facing web research, capture the page through Rebrowser first, then use static extraction only as a companion parser when it adds useful normalized artifacts. If static extraction misses content, that confirms it is incomplete; it should not replace the Rebrowser-rendered capture.
 
 The Research UI should consume those normalized artifacts from a separate app/service, not from a metrics-dashboard tab. Use the Research UI for Inbox triage, source workbench inspection, evidence extraction, normalized-content correction, entity/claim review, comparison, and publication preparation; use the pipeline dashboard only for service health and store monitoring.
 

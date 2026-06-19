@@ -6,10 +6,10 @@ Web OSINT Platform is a streaming evidence infrastructure stack for automated in
 
 ```text
 Collection
-  Rebrowser is the required rendered-browser collection and escalation surface
-  for Google, X, and dynamic webpages. Browser/API collectors extract complete
-  evidence records. Website pages, search results, social posts, media, and
-  user notes share the same capture envelope.
+  Rebrowser is the first-choice rendered-browser collection surface for Google,
+  X, and web pages that matter as research evidence. Browser/API collectors
+  extract complete evidence records. Website pages, search results, social
+  posts, media, and user notes share the same capture envelope.
 
 Ingress
   A local outbox and producer publish records to Redpanda.
@@ -29,9 +29,10 @@ Processing
   stateful Pebble/ClickHouse/Typesense/Qdrant writes. In production routing mode
   it runs with observed-topic emission disabled, and can resume that emission as
   fallback.
-  The webpage extraction worker turns opened URLs, launch blogs, docs pages,
-  model cards, and research result pages into first-class web_document captures
-  and writes EvidenceDocument block/asset artifacts for normalized inspection.
+  The webpage extraction worker is an auxiliary parser/enrichment path for URLs,
+  launch blogs, docs pages, model cards, and research result pages that need
+  HTML/text/Markdown/table artifacts. Rebrowser capture remains the preferred
+  browser evidence path; static extraction should complement it, not displace it.
   The embedding worker enriches observed evidence with local Qwen vectors and
   upserts them into Qdrant.
   The research planner derives research signals, questions, and task seeds
@@ -150,9 +151,9 @@ Collectors should emit one `capture_event` to `evidence.capture.events.v1` for e
 
 The normalizer materializes all of these into shared serving stores while preserving source-specific fields inside the raw JSON. Website content and user input are not side channels; they are first-class evidence with provenance and Meaning Layer annotations.
 
-The webpage extraction worker is a collector-side enrichment bridge for ordinary URLs. It fetches HTML, extracts readable article text, Markdown, tables, metadata, links, headings, images, canonical URLs, filesystem artifact paths, and a versioned `EvidenceDocument` block/asset artifact, then publishes the result as a standard `web_documents` capture event. This keeps launch blogs and opened Google/X-linked pages on the same replay path as manual research documents and social captures.
+Rebrowser-rendered capture is the primary capture path for opened research pages. It preserves the visible browser state, interaction context, dynamic DOM, screenshots/media, and source provenance the user actually inspected. Generic Playwright/Chrome collection advice should be translated into the preserved Rebrowser profile and site-specific pacing rules.
 
-Static HTTP extraction is only the first pass. If the compact row has missing content, dynamic page state, important interaction-only details, or visual evidence that the static parser cannot see, the collection path should escalate to Rebrowser rendered-DOM capture and publish the rendered result through the same capture envelope. Generic Playwright/Chrome collection advice should be translated into the preserved Rebrowser profile and site-specific pacing rules.
+The webpage extraction worker is a companion parser/enrichment bridge, not the primary browser capture path. It fetches HTML, extracts readable article text, Markdown, tables, metadata, links, headings, images, canonical URLs, filesystem artifact paths, and a versioned `EvidenceDocument` block/asset artifact, then publishes the result as a standard `web_documents` capture event. Use it when HTTP extraction is explicitly appropriate, for batch parsing, or to enrich a Rebrowser-captured source with additional normalized projections.
 
 ## Evidence Document Model
 

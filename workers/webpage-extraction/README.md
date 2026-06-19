@@ -5,6 +5,12 @@ tables, headings, images, JSON-LD, artifact files, and an `EvidenceDocument`
 block/asset artifact, then publishes ordinary `web_documents` capture events to
 `evidence.capture.events.v1`.
 
+This worker is the static HTML parser/enrichment path. Rebrowser is the
+first-choice rendered-browser capture surface for web pages that matter as
+research evidence; use this worker when HTTP extraction is explicitly useful,
+for batch parsing, or to add normalized projections to a Rebrowser-captured
+source.
+
 The normalizer already handles those events, so extracted pages flow through:
 
 ```text
@@ -35,9 +41,10 @@ OSINT_DATA_ROOT=/tmp/web-osint-extract-test \
 
 Add `--publish` to send the capture event through Pandaproxy.
 
-Static extraction is the first pass. If the page is dynamic, interaction-heavy,
-or visibly richer in the browser than the static capture, escalate to Rebrowser
-rendered-DOM capture and preserve the same artifact/EvidenceDocument contract.
+Static extraction is not the default evidence capture path. For analyst-facing
+web research, capture the page through Rebrowser first and preserve the same
+artifact/EvidenceDocument contract. Treat a sparse static result as incomplete,
+not as a reason to skip browser capture.
 
 ## Continuous worker
 

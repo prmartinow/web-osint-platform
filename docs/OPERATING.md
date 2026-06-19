@@ -18,6 +18,8 @@ The stack binds service ports to `127.0.0.1` on the RPC node:
 - ClickHouse native: `127.0.0.1:19000`
 - Normalizer lookup API: `127.0.0.1:18090`
 - Research planner API: `127.0.0.1:18091`
+- Redpanda Connect production router: `127.0.0.1:14194`
+- Redpanda Connect shadow router: `127.0.0.1:14195`
 
 Use an SSH tunnel for remote collector publishing. Keep service ports private by default.
 
@@ -34,6 +36,7 @@ curl http://127.0.0.1:18090/healthz
 curl http://127.0.0.1:18090/stats
 curl 'http://127.0.0.1:18090/lookup?key=post/<post_id>'
 curl http://127.0.0.1:18091/stats
+curl http://127.0.0.1:14194/ready
 ```
 
 Exact lookup keys currently use these prefixes:
@@ -76,6 +79,7 @@ Shadow Connect topics:
 - `evidence.capture.shadow.validated.v1`
 - `evidence.capture.shadow.errors.v1`
 - `evidence.capture.shadow.observed.v1`
+- `osint.media.enrichment.shadow.requested.v1`
 
 Meaning Layer topics:
 
@@ -97,7 +101,13 @@ Meaning Layer topics:
 
 Redpanda topics are durable replay source. Pebble state, Typesense, Qdrant, and ClickHouse are rebuildable views. Media and OCR artifacts live under the configured data root.
 
-The normalizer consumes `evidence.capture.events.v1`, emits observed/state topics, writes materialized records to Pebble, inserts analytics rows into ClickHouse, upserts evidence text into Typesense, emits deterministic semantic annotations, and passes Qdrant named vectors through when a collector or enrichment worker includes them.
+In guarded production-routing mode, Redpanda Connect consumes
+`evidence.capture.events.v1` and emits observed topics plus media request
+topics. The normalizer consumes the same raw capture stream, runs with
+`WEB_OSINT_EMIT_OBSERVED_TOPICS=false`, emits state topics, writes materialized
+records to Pebble, inserts analytics rows into ClickHouse, upserts evidence text
+into Typesense, emits deterministic semantic annotations, and passes Qdrant
+named vectors through when a collector or enrichment worker includes them.
 
 Collector events may include `web_documents` for opened pages, articles, documentation, PDFs, leaderboards, and table captures. They may include `user_inputs` for user notes, pasted research, corrections, attachments, or research seeds. These records use the same replay, search, analytics, and labeling path as X and Google evidence.
 
@@ -178,15 +188,46 @@ python3 scripts/produce_research_documents.py \
 ### Shadow Redpanda Connect
 
 The Connect shadow service is disabled by default and runs only under the
-`shadow` Compose profile. It validates capture envelopes into shadow topics and
+`shadow` Compose profile. It validates capture envelopes, projects observed
+events into shadow wrappers, builds shadow-only media request wrappers, and
 does not feed serving stores.
 
 ```bash
 docker compose --env-file .env -f compose/docker-compose.yml --profile shadow up -d --build redpanda-connect-shadow
 python3 scripts/run_e2e_canary.py --expect-shadow
+python3 scripts/run_connect_shadow_parity.py
 ```
 
 See [Connect Shadow Pipeline](CONNECT_SHADOW.md).
+
+### Production Redpanda Connect Routing
+
+The production Connect router is disabled by default in Compose and runs under
+the `production-routing` profile. Start it with the normalizer observed-topic
+emission gate disabled:
+
+```bash
+WEB_OSINT_EMIT_OBSERVED_TOPICS=false \
+  docker compose --env-file .env -f compose/docker-compose.yml --profile production-routing up -d --build normalizer redpanda-connect-production
+curl http://127.0.0.1:14194/ready
+curl http://127.0.0.1:18090/stats
+```
+
+While production Connect owns media request fan-out, stop the legacy router but
+leave it installed:
+
+```bash
+systemctl --user stop web-osint-media-router.service
+```
+
+Fallback:
+
+```bash
+docker rm -f web-osint-connect-production
+WEB_OSINT_EMIT_OBSERVED_TOPICS=true \
+  docker compose --env-file .env -f compose/docker-compose.yml up -d --build normalizer
+systemctl --user start web-osint-media-router.service
+```
 
 The script chunks long documents before publishing so embedding coverage favors accuracy over latency. Reusing the same document content gives stable `input_id` values; downstream stores should hydrate by `evidence_id` and tolerate repeated capture observations.
 

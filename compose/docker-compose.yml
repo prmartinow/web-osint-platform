@@ -116,6 +116,7 @@ services:
       CLICKHOUSE_USER: web_osint
       PEBBLE_DIR: /data/pebble
       HTTP_ADDR: :8090
+      WEB_OSINT_EMIT_OBSERVED_TOPICS: ${WEB_OSINT_EMIT_OBSERVED_TOPICS:-true}
     ports:
       - "127.0.0.1:18090:8090"
     volumes:
@@ -200,6 +201,22 @@ services:
       REDPANDA_CONNECT_SHADOW_GROUP: web-osint-connect-shadow-v1
     ports:
       - "127.0.0.1:14195:4195"
+    depends_on:
+      - redpanda
+    restart: unless-stopped
+
+  redpanda-connect-production:
+    build:
+      context: ../connect
+    container_name: web-osint-connect-production
+    profiles:
+      - production-routing
+    command: ["-c", "/pipelines/capture-production-observed.yaml"]
+    environment:
+      REDPANDA_BROKERS: web-osint-redpanda:9092
+      REDPANDA_CONNECT_PRODUCTION_GROUP: web-osint-connect-production-v1
+    ports:
+      - "127.0.0.1:14194:4195"
     depends_on:
       - redpanda
     restart: unless-stopped

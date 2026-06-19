@@ -132,7 +132,8 @@ Redpanda Connect custom distribution
   DLQ enrichment
 
 Go materializer service
-  consumes observed topics
+  consumes raw captures during the guarded cutover
+  can resume observed-topic emission as fallback
   writes Pebble exact lookup
   inserts ClickHouse rows
   indexes Typesense
@@ -141,6 +142,10 @@ Go materializer service
 
 The production materializer remains custom because cross-store state,
 idempotency, and external writes need explicit control.
+
+As of the guarded 2026-06-19 cutover, Connect owns observed-topic and media
+request production routing. The Go service still materializes from raw captures
+and runs with `WEB_OSINT_EMIT_OBSERVED_TOPICS=false` in production routing mode.
 
 ## Migration Phases
 
@@ -154,10 +159,12 @@ idempotency, and external writes need explicit control.
    stable fields against the current Go normalizer output.
 4. **Move stateless routing.** Add source-kind routing, observed-event
    projection, media request building, and DLQ enrichment as compiled plugins.
-5. **Cut over routing only.** After parity is stable, Connect emits observed
-   topics and the Go materializer consumes observed topics only.
+5. **Cut over routing only.** Connect emits observed topics and media requests;
+   the Go service keeps materializing from raw captures with observed-topic
+   emission disabled.
 6. **Keep rollback.** The Go normalizer can resume observed-topic production
-   until the cutover is proven over replay and canary runs.
+   and the legacy media router can restart until the cutover is proven over
+   replay and canary runs.
 
 ## Semantics
 

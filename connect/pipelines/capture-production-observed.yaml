@@ -19,26 +19,29 @@ input:
       - ${REDPANDA_BROKERS:web-osint-redpanda:9092}
     topics:
       - evidence.capture.events.v1
-    consumer_group: ${REDPANDA_CONNECT_SHADOW_GROUP:web-osint-connect-shadow-v1}
-    start_from_oldest: true
+    consumer_group: ${REDPANDA_CONNECT_PRODUCTION_GROUP:web-osint-connect-production-v1}
+    start_from_oldest: false
     auto_replay_nacks: false
 
 pipeline:
   threads: 1
   processors:
     - mapping: |
-        meta shadow_output_topic = "evidence.capture.shadow.validated.v1"
+        meta shadow_output_topic = "evidence.index.errors.v1"
         meta shadow_output_key = metadata("kafka_key")
-        meta validation_plugin = "capture_envelope_validate"
-        meta validation_plugin_version = "0.1.0"
+        meta routing_pipeline = "capture-production-observed"
     - capture_envelope_validate: {}
     - source_kind_router: {}
     - observed_event_projector:
-        include_validated: true
-    - media_enrichment_request_builder: {}
+        mode: production
+        include_validated: false
+    - media_enrichment_request_builder:
+        mode: production
     - catch:
         - dlq_error_enricher:
-            pipeline_name: "capture-shadow-validate"
+            pipeline_name: "capture-production-observed"
+            output_topic: "evidence.index.errors.v1"
+            error_class: "redpanda_connect_production"
 
 output:
   kafka_franz:

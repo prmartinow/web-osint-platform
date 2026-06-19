@@ -8,13 +8,13 @@ operator-facing map for replay, parity checks, and future Connect migration.
 
 | Topic | Owner | Producer | Consumers | Policy | Schema | DLQ | Canary |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| `evidence.capture.events.v1` | collection | Mac/RPC producers, canaries | normalizer, shadow Connect | delete | `schemas/capture_event.schema.json` | `evidence.index.errors.v1`, `evidence.capture.shadow.errors.v1` | E2E, media |
-| `evidence.posts.observed.v1` | normalization | normalizer | embedding worker, materializer/search | delete | `schemas/post_observed.schema.json` | `osint.semantic.deadletter.v1` | E2E |
-| `evidence.accounts.observed.v1` | normalization | normalizer | embedding worker, materializer/search | delete | current payload contract | `osint.semantic.deadletter.v1` | E2E |
-| `evidence.media.observed.v1` | normalization | normalizer | embedding worker, media router | delete | current payload contract | `osint.semantic.deadletter.v1` | media |
-| `evidence.search.results.v1` | normalization | normalizer | embedding worker, materializer/search | delete | `schemas/search_result.schema.json` | `osint.semantic.deadletter.v1` | E2E |
-| `evidence.web.documents.observed.v1` | normalization | normalizer | embedding worker, materializer/search | delete | `schemas/web_document.schema.json` | `osint.semantic.deadletter.v1` | E2E |
-| `evidence.user.inputs.observed.v1` | normalization | normalizer | embedding worker, materializer/search | delete | `schemas/user_input.schema.json` | `osint.semantic.deadletter.v1` | E2E |
+| `evidence.capture.events.v1` | collection | Mac/RPC producers, canaries | normalizer/materializer, shadow Connect, production Connect router | delete | `schemas/capture_event.schema.json` | `evidence.index.errors.v1`, `evidence.capture.shadow.errors.v1` | E2E, media |
+| `evidence.posts.observed.v1` | normalization | production Connect router; normalizer fallback | embedding worker, materializer/search | delete | `schemas/post_observed.schema.json` | `osint.semantic.deadletter.v1` | E2E |
+| `evidence.accounts.observed.v1` | normalization | production Connect router; normalizer fallback | embedding worker, materializer/search | delete | current payload contract | `osint.semantic.deadletter.v1` | E2E |
+| `evidence.media.observed.v1` | normalization | production Connect router; normalizer fallback | embedding worker, media request route | delete | current payload contract | `osint.semantic.deadletter.v1` | media |
+| `evidence.search.results.v1` | normalization | production Connect router; normalizer fallback | embedding worker, materializer/search | delete | `schemas/search_result.schema.json` | `osint.semantic.deadletter.v1` | E2E |
+| `evidence.web.documents.observed.v1` | normalization | production Connect router; normalizer fallback | embedding worker, materializer/search | delete | `schemas/web_document.schema.json` | `osint.semantic.deadletter.v1` | E2E |
+| `evidence.user.inputs.observed.v1` | normalization | production Connect router; normalizer fallback | embedding worker, materializer/search | delete | `schemas/user_input.schema.json` | `osint.semantic.deadletter.v1` | E2E |
 
 ## Compacted State Topics
 
@@ -42,24 +42,25 @@ operator-facing map for replay, parity checks, and future Connect migration.
 
 | Topic | Owner | Producer | Consumers | Policy | DLQ/Failure |
 | --- | --- | --- | --- | --- | --- |
-| `osint.media.enrichment.requested.v1` | media router | media router / later Connect | OCR/VL routers | delete | failed lane topics |
-| `osint.media.ocr.requested.v1` | OCR | media router / later Connect | OCR worker | delete | `osint.media.ocr.failed.v1` |
+| `osint.media.enrichment.requested.v1` | media router | production Connect router; media router fallback | OCR/VL routers | delete | failed lane topics |
+| `osint.media.ocr.requested.v1` | OCR | production Connect router; media router fallback | OCR worker | delete | `osint.media.ocr.failed.v1` |
 | `osint.media.ocr.completed.v1` | OCR | OCR worker | canary, analytics | delete | n/a |
 | `osint.media.ocr.failed.v1` | OCR | OCR worker | operators, dashboard | delete | n/a |
-| `osint.media.vl_embedding.requested.v1` | VL | media router / later Connect | VL worker | delete | `osint.media.vl_embedding.failed.v1` |
+| `osint.media.vl_embedding.requested.v1` | VL | production Connect router; media router fallback | VL worker | delete | `osint.media.vl_embedding.failed.v1` |
 | `osint.media.vl_embedding.completed.v1` | VL | VL worker | canary, analytics | delete | n/a |
 | `osint.media.vl_embedding.failed.v1` | VL | VL worker | operators, dashboard | delete | n/a |
 
 ## Shadow Connect Topics
 
 These topics are not production-serving. They exist to prove Redpanda Connect
-compiled plugins match the current normalizer before any cutover.
+compiled plugins match the materialized output and stay healthy after cutover.
 
 | Topic | Owner | Producer | Consumers | Policy | Purpose |
 | --- | --- | --- | --- | --- | --- |
 | `evidence.capture.shadow.validated.v1` | Connect shadow | `web-osint-connect` | canary/parity checks | delete | capture envelope validated by compiled plugin |
 | `evidence.capture.shadow.errors.v1` | Connect shadow | `web-osint-connect` | operators/canary | delete | validation or pipeline errors with original offset metadata |
-| `evidence.capture.shadow.observed.v1` | Connect shadow | future projector plugin | canary/parity checks | delete | future observed-event parity output |
+| `evidence.capture.shadow.observed.v1` | Connect shadow | `observed_event_projector` | canary/parity checks | delete | shadow observed-event wrappers for normalizer parity checks |
+| `osint.media.enrichment.shadow.requested.v1` | Connect shadow | `media_enrichment_request_builder` | canary/parity checks | delete | shadow-only media request wrappers; never consumed by OCR/VL workers |
 
 ## Catalog Rules
 

@@ -63,6 +63,7 @@ type config struct {
 	ClickUser     string
 	ClickPassword string
 	HTTPAddr      string
+	EmitObserved  bool
 }
 
 type app struct {
@@ -191,7 +192,7 @@ func main() {
 	defer a.reader.Close()
 
 	go a.serveHTTP()
-	log.Printf("web-osint normalizer starting group=%s brokers=%s pebble=%s", cfg.GroupID, strings.Join(cfg.Brokers, ","), cfg.PebbleDir)
+	log.Printf("web-osint normalizer starting group=%s brokers=%s pebble=%s emit_observed_topics=%t", cfg.GroupID, strings.Join(cfg.Brokers, ","), cfg.PebbleDir, cfg.EmitObserved)
 	a.run(context.Background())
 }
 
@@ -209,6 +210,7 @@ func loadConfig() config {
 		ClickUser:     env("CLICKHOUSE_USER", "web_osint"),
 		ClickPassword: os.Getenv("CLICKHOUSE_PASSWORD"),
 		HTTPAddr:      env("HTTP_ADDR", ":8090"),
+		EmitObserved:  envBool("WEB_OSINT_EMIT_OBSERVED_TOPICS", true),
 	}
 }
 
@@ -384,7 +386,7 @@ func (a *app) handlePost(ctx context.Context, ev captureEvent, msg kafka.Message
 	if post["vectors"] != nil {
 		observed["vectors"] = post["vectors"]
 	}
-	if err := a.publishJSON(ctx, postsObserved, postID, observed); err != nil {
+	if err := a.publishObservedJSON(ctx, postsObserved, postID, observed); err != nil {
 		return err
 	}
 	state := map[string]any{
@@ -469,7 +471,7 @@ func (a *app) handleAccount(ctx context.Context, ev captureEvent, msg kafka.Mess
 	if account["vectors"] != nil {
 		observed["vectors"] = account["vectors"]
 	}
-	if err := a.publishJSON(ctx, accountsObserved, handle, observed); err != nil {
+	if err := a.publishObservedJSON(ctx, accountsObserved, handle, observed); err != nil {
 		return err
 	}
 	if err := a.publishJSON(ctx, accountsState, handle, observed); err != nil {
@@ -543,7 +545,7 @@ func (a *app) handleMedia(ctx context.Context, ev captureEvent, msg kafka.Messag
 	if media["vectors"] != nil {
 		observed["vectors"] = media["vectors"]
 	}
-	if err := a.publishJSON(ctx, mediaObserved, mediaID, observed); err != nil {
+	if err := a.publishObservedJSON(ctx, mediaObserved, mediaID, observed); err != nil {
 		return err
 	}
 	if err := a.publishJSON(ctx, mediaState, mediaID, observed); err != nil {
@@ -616,7 +618,7 @@ func (a *app) handleSearchResult(ctx context.Context, ev captureEvent, msg kafka
 		"challenge":         asBool(result["challenge"]) || challengeFlag(ev.Quality),
 		"raw":               result,
 	}
-	if err := a.publishJSON(ctx, searchObserved, id, observed); err != nil {
+	if err := a.publishObservedJSON(ctx, searchObserved, id, observed); err != nil {
 		return err
 	}
 	if err := a.setPebble("search/"+id, envelope("search_result", id, observed, msg)); err != nil {
@@ -703,7 +705,7 @@ func (a *app) handleWebDocument(ctx context.Context, ev captureEvent, msg kafka.
 	if document["vectors"] != nil {
 		observed["vectors"] = document["vectors"]
 	}
-	if err := a.publishJSON(ctx, webDocsObserved, evidenceID, observed); err != nil {
+	if err := a.publishObservedJSON(ctx, webDocsObserved, evidenceID, observed); err != nil {
 		return err
 	}
 	state := map[string]any{
@@ -800,7 +802,7 @@ func (a *app) handleUserInput(ctx context.Context, ev captureEvent, msg kafka.Me
 	if input["vectors"] != nil {
 		observed["vectors"] = input["vectors"]
 	}
-	if err := a.publishJSON(ctx, userInputsObserved, evidenceID, observed); err != nil {
+	if err := a.publishObservedJSON(ctx, userInputsObserved, evidenceID, observed); err != nil {
 		return err
 	}
 	state := map[string]any{
@@ -861,6 +863,13 @@ func (a *app) publishJSON(ctx context.Context, topic, key string, v any) error {
 		return err
 	}
 	return a.writers[topic].WriteMessages(ctx, kafka.Message{Key: []byte(key), Value: payload})
+}
+
+func (a *app) publishObservedJSON(ctx context.Context, topic, key string, v any) error {
+	if !a.cfg.EmitObserved {
+		return nil
+	}
+	return a.publishJSON(ctx, topic, key, v)
 }
 
 func (a *app) publishError(ctx context.Context, msg kafka.Message, err error) error {
@@ -1142,6 +1151,7 @@ func (a *app) serveHTTP() {
 			"web_documents_indexed": a.webDocsIndexed.Load(),
 			"user_inputs_indexed":   a.userInputsIndexed.Load(),
 			"labels_emitted":        a.labelsEmitted.Load(),
+			"emit_observed_topics":  a.cfg.EmitObserved,
 		})
 	})
 	mux.HandleFunc("/pebble", func(w http.ResponseWriter, r *http.Request) {
@@ -1671,6 +1681,21 @@ func env(key, fallback string) string {
 		return v
 	}
 	return fallback
+}
+
+func envBool(key string, fallback bool) bool {
+	v := strings.TrimSpace(strings.ToLower(os.Getenv(key)))
+	if v == "" {
+		return fallback
+	}
+	switch v {
+	case "1", "true", "t", "yes", "y", "on":
+		return true
+	case "0", "false", "f", "no", "n", "off":
+		return false
+	default:
+		return fallback
+	}
 }
 
 func envFirst(preferred, legacy, fallback string) string {

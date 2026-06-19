@@ -18,15 +18,16 @@ Event Log
   topics. Kafka-compatible client APIs are a data-plane detail, not the
   architecture name.
 
-Shadow Stream Plumbing
-  Redpanda Connect hosts compiled Go plugins for future stateless validation,
-  projection, routing, and DLQ enrichment. Shadow pipelines must prove parity
-  before replacing production routing.
+Stream Plumbing
+  Redpanda Connect hosts compiled Go plugins for stateless validation,
+  projection, routing, and DLQ enrichment. Shadow pipelines keep proving parity;
+  the guarded production router owns observed-topic and media request fan-out.
 
 Processing
-  The normalizer/materializer validates, normalizes, fans records out, and owns
-  stateful Pebble/ClickHouse/Typesense/Qdrant materialization. Stateless routing
-  can move to Connect only after shadow parity.
+  The normalizer/materializer keeps raw-capture materialization and owns
+  stateful Pebble/ClickHouse/Typesense/Qdrant writes. In production routing mode
+  it runs with observed-topic emission disabled, and can resume that emission as
+  fallback.
   The webpage extraction worker turns opened URLs, launch blogs, docs pages,
   model cards, and research result pages into first-class web_document captures.
   The embedding worker enriches observed evidence with local Qwen vectors and
@@ -191,13 +192,13 @@ The target migration is:
 
 ```text
 v1.1:
-  current Go normalizer/materializer remains production
   Redpanda Connect runs shadow validation/projection topics
-  canaries compare shadow output against production output
+  canaries compare shadow output against materialized output
 
 v1.2:
-  Redpanda Connect emits observed topics for proven stateless routing
-  Go materializer consumes observed topics and keeps stateful store writes
+  Redpanda Connect emits observed topics and media requests for proven stateless routing
+  Go normalizer/materializer keeps stateful store writes from raw captures
+  Go observed-topic emission and legacy media router remain fallback paths
   Python Qwen/OCR/VL services keep direct Redpanda topic consumers
 ```
 

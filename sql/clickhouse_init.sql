@@ -633,6 +633,26 @@ ENGINE = ReplacingMergeTree(updated_at)
 PARTITION BY toYYYYMM(created_at)
 ORDER BY (source_evidence_id, proposed_fact_id);
 
+CREATE TABLE IF NOT EXISTS web_osint.normalized_corrections
+(
+    correction_id String,
+    source_evidence_id String,
+    document_id String,
+    block_id String,
+    correction_kind LowCardinality(String),
+    original_text String,
+    corrected_text String,
+    source_anchor_json String,
+    status LowCardinality(String),
+    note String,
+    actor String,
+    created_at DateTime64(3, 'UTC'),
+    updated_at DateTime64(3, 'UTC')
+)
+ENGINE = ReplacingMergeTree(updated_at)
+PARTITION BY toYYYYMM(created_at)
+ORDER BY (source_evidence_id, correction_id);
+
 CREATE TABLE IF NOT EXISTS web_osint.entity_links
 (
     entity_link_id String,

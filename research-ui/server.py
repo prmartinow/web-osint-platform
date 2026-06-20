@@ -259,6 +259,27 @@ def ensure_review_tables():
         ORDER BY (source_evidence_id, proposed_fact_id)
         """,
         """
+        CREATE TABLE IF NOT EXISTS normalized_corrections
+        (
+            correction_id String,
+            source_evidence_id String,
+            document_id String,
+            block_id String,
+            correction_kind LowCardinality(String),
+            original_text String,
+            corrected_text String,
+            source_anchor_json String,
+            status LowCardinality(String),
+            note String,
+            actor String,
+            created_at DateTime64(3, 'UTC'),
+            updated_at DateTime64(3, 'UTC')
+        )
+        ENGINE = ReplacingMergeTree(updated_at)
+        PARTITION BY toYYYYMM(created_at)
+        ORDER BY (source_evidence_id, correction_id)
+        """,
+        """
         CREATE TABLE IF NOT EXISTS entity_links
         (
             entity_link_id String,
@@ -458,6 +479,7 @@ def review_counts():
           (SELECT count() FROM evidence_selections FINAL) AS selections,
           (SELECT count() FROM review_annotations FINAL) AS annotations,
           (SELECT count() FROM proposed_facts FINAL) AS proposed_facts,
+          (SELECT count() FROM normalized_corrections FINAL) AS normalized_corrections,
           (SELECT count() FROM entity_links FINAL) AS entity_links,
           (SELECT count() FROM claim_records FINAL) AS claim_records,
           (SELECT count() FROM research_review_events) AS review_events
@@ -587,6 +609,18 @@ def evidence_ledger(params):
         """,
         fallback=[],
     )
+    corrections = ch_data(
+        f"""
+        SELECT
+          correction_id, source_evidence_id, document_id, block_id, correction_kind,
+          original_text, corrected_text, source_anchor_json, status, note,
+          actor, created_at, updated_at
+        FROM normalized_corrections FINAL
+        ORDER BY updated_at DESC
+        LIMIT {limit}
+        """,
+        fallback=[],
+    )
     recent = ch_data(
         f"""
         SELECT
@@ -612,10 +646,12 @@ def evidence_ledger(params):
         "summary": {
             "selections": len(selections),
             "proposed_facts": len(proposed),
+            "normalized_corrections": len(corrections),
             "recent_sources": len(recent),
         },
         "selections": selections,
         "proposed_facts": proposed,
+        "normalized_corrections": corrections,
         "recent_sources": recent,
     }
 
@@ -725,6 +761,7 @@ def reviews_read_model(params):
         {"id": "proposed_evidence", "label": "Proposed evidence", "count": int(counts.get("selections") or 0), "reason": "Accept, correct, or reject"},
         {"id": "proposed_claims", "label": "Proposed claims", "count": int(counts.get("claim_records") or 0), "reason": "Review wording and evidence relation"},
         {"id": "proposed_facts", "label": "Proposed facts", "count": int(counts.get("proposed_facts") or 0), "reason": "Validate value and qualifiers"},
+        {"id": "normalized_corrections", "label": "Normalized corrections", "count": int(counts.get("normalized_corrections") or 0), "reason": "Review corrected extraction overlays"},
     ]
     return {"counts": counts, "queue": queue, "events": events}
 
@@ -861,7 +898,7 @@ def home_summary():
         fallback=[],
     )
     source_map = {row.get("source_kind"): int(row.get("sources") or 0) for row in source_counts}
-    review_total = sum(int(review_counts.get(key) or 0) for key in ("selections", "annotations", "proposed_facts", "entity_links", "claim_records"))
+    review_total = sum(int(review_counts.get(key) or 0) for key in ("selections", "annotations", "proposed_facts", "normalized_corrections", "entity_links", "claim_records"))
     unique = int(totals.get("unique_evidence") or 0)
     extracted = int(totals.get("extracted_rows") or 0)
     ocr_rows = int(totals.get("ocr_rows") or 0)
@@ -876,12 +913,14 @@ def home_summary():
     ]
     gaps = sum(1 for row in coverage_rows for key in ("x", "web", "papers", "media") if int(row.get(key) or 0) == 0)
     proposed_facts = int(review_counts.get("proposed_facts") or 0)
+    normalized_corrections = int(review_counts.get("normalized_corrections") or 0)
     claim_records = int(review_counts.get("claim_records") or 0)
     blockers = max(0, gaps // 3)
     queue = [
         {"label": "New captures", "count": unique, "hint": "triage evidence"},
         {"label": "Evidence selections", "count": int(review_counts.get("selections") or 0), "hint": "anchors ready"},
         {"label": "Proposed facts", "count": proposed_facts, "hint": "needs validation"},
+        {"label": "Corrections", "count": normalized_corrections, "hint": "versioned overlays"},
         {"label": "Claim stubs", "count": claim_records, "hint": "review wording"},
     ]
     return {
@@ -964,6 +1003,19 @@ def review_state_for_source(evidence_id):
         """,
         fallback=[],
     )
+    normalized_corrections = ch_data(
+        f"""
+        SELECT
+          correction_id, source_evidence_id, document_id, block_id, correction_kind,
+          original_text, corrected_text, source_anchor_json, status, note,
+          actor, created_at, updated_at
+        FROM normalized_corrections FINAL
+        WHERE source_evidence_id = {quoted}
+        ORDER BY updated_at DESC, created_at DESC
+        LIMIT 200
+        """,
+        fallback=[],
+    )
     entity_links = ch_data(
         f"""
         SELECT
@@ -1006,6 +1058,7 @@ def review_state_for_source(evidence_id):
         "selections": selections,
         "annotations": annotations,
         "proposed_facts": proposed_facts,
+        "normalized_corrections": normalized_corrections,
         "entity_links": entity_links,
         "claim_records": claim_records,
         "events": events,
@@ -1013,6 +1066,7 @@ def review_state_for_source(evidence_id):
             "selections": len(selections),
             "annotations": len(annotations),
             "proposed_facts": len(proposed_facts),
+            "normalized_corrections": len(normalized_corrections),
             "entity_links": len(entity_links),
             "claim_records": len(claim_records),
             "events": len(events),
@@ -1311,6 +1365,47 @@ def create_proposed_fact(payload):
     return {"event": event, "proposed_fact": normalized}
 
 
+def create_normalized_correction(payload):
+    correction_id = compact_text(payload.get("correction_id"), 300) or make_id("normalized_correction")
+    original_text = compact_text(payload.get("original_text") or payload.get("quote"), 50000)
+    corrected_text = compact_text(payload.get("corrected_text"), 50000)
+    if not original_text:
+        raise ResearchUiError(400, "original_text is required")
+    if not corrected_text:
+        raise ResearchUiError(400, "corrected_text is required")
+    now = now_iso()
+    normalized = {
+        **payload,
+        "correction_id": correction_id,
+        "subject_type": "normalized_correction",
+        "subject_id": correction_id,
+        "correction_kind": compact_text(payload.get("correction_kind") or "normalized_text", 120),
+        "original_text": original_text,
+        "corrected_text": corrected_text,
+        "status": compact_text(payload.get("status") or "proposed", 80),
+        "note": compact_text(payload.get("note"), 20000),
+        "created_at": payload.get("created_at") or now,
+        "updated_at": now,
+    }
+    event = persist_review_event(build_review_event("normalized_correction.created", normalized))
+    ch_insert_json_each_row("normalized_corrections", [{
+        "correction_id": correction_id,
+        "source_evidence_id": normalized["source_evidence_id"],
+        "document_id": compact_text(normalized.get("document_id"), 500),
+        "block_id": compact_text(normalized.get("block_id"), 500),
+        "correction_kind": normalized["correction_kind"],
+        "original_text": normalized["original_text"],
+        "corrected_text": normalized["corrected_text"],
+        "source_anchor_json": json_text(normalized.get("source_anchor")),
+        "status": normalized["status"],
+        "note": normalized["note"],
+        "actor": compact_text(normalized.get("actor") or REVIEW_ACTOR, 200),
+        "created_at": normalized["created_at"],
+        "updated_at": normalized["updated_at"],
+    }])
+    return {"event": event, "normalized_correction": normalized}
+
+
 def create_entity_link(payload):
     entity_link_id = compact_text(payload.get("entity_link_id"), 300) or make_id("entity_link")
     mention_text = compact_text(payload.get("mention_text") or payload.get("quote"), 20000)
@@ -1389,6 +1484,93 @@ def create_claim_record(payload):
         "updated_at": normalized["updated_at"],
     }])
     return {"event": event, "claim_record": normalized}
+
+
+REVIEW_OBJECT_CONFIGS = {
+    "evidence_selection": {
+        "table": "evidence_selections",
+        "id_column": "selection_id",
+        "columns": ["selection_id", "source_evidence_id", "document_id", "block_id", "selection_kind", "quote", "context_before", "context_after", "source_anchor_json", "note", "status", "actor", "created_at", "updated_at"],
+    },
+    "annotation": {
+        "table": "review_annotations",
+        "id_column": "annotation_id",
+        "columns": ["annotation_id", "source_evidence_id", "evidence_selection_id", "annotation_type", "body", "status", "source_anchor_json", "actor", "created_at", "updated_at"],
+    },
+    "proposed_fact": {
+        "table": "proposed_facts",
+        "id_column": "proposed_fact_id",
+        "columns": ["proposed_fact_id", "source_evidence_id", "evidence_selection_id", "fact_type", "field_path", "raw_value", "normalized_value", "unit", "entities_json", "evidence_quote", "source_anchor_json", "status", "note", "actor", "created_at", "updated_at"],
+    },
+    "normalized_correction": {
+        "table": "normalized_corrections",
+        "id_column": "correction_id",
+        "columns": ["correction_id", "source_evidence_id", "document_id", "block_id", "correction_kind", "original_text", "corrected_text", "source_anchor_json", "status", "note", "actor", "created_at", "updated_at"],
+    },
+    "entity_link": {
+        "table": "entity_links",
+        "id_column": "entity_link_id",
+        "columns": ["entity_link_id", "source_evidence_id", "evidence_selection_id", "mention_text", "entity_type", "canonical_entity_id", "canonical_name", "source_anchor_json", "status", "note", "actor", "created_at", "updated_at"],
+    },
+    "claim_stub": {
+        "table": "claim_records",
+        "id_column": "claim_id",
+        "columns": ["claim_id", "source_evidence_id", "evidence_selection_id", "claim_text", "claim_type", "evidence_relation", "qualifier_json", "source_anchor_json", "status", "note", "actor", "created_at", "updated_at"],
+    },
+}
+
+
+def fetch_review_object(subject_type, subject_id):
+    config = REVIEW_OBJECT_CONFIGS.get(subject_type)
+    if not config:
+        raise ResearchUiError(400, f"Unsupported subject_type: {subject_type}")
+    rows = ch_data(
+        f"""
+        SELECT {", ".join(config["columns"])}
+        FROM {config["table"]} FINAL
+        WHERE {config["id_column"]} = {sql_string(subject_id)}
+        LIMIT 1
+        """,
+        fallback=[],
+    )
+    if not rows:
+        raise ResearchUiError(404, f"Review object not found: {subject_type}/{subject_id}")
+    return config, rows[0]
+
+
+def update_review_state(payload):
+    subject_type = compact_text(payload.get("subject_type"), 80)
+    subject_id = compact_text(payload.get("subject_id"), 300)
+    status = compact_text(payload.get("status"), 80)
+    if not subject_type or not subject_id:
+        raise ResearchUiError(400, "subject_type and subject_id are required")
+    if not status:
+        raise ResearchUiError(400, "status is required")
+    config, current = fetch_review_object(subject_type, subject_id)
+    previous_status = current.get("status") or ""
+    now = now_iso()
+    updated = {column: current.get(column, "") for column in config["columns"]}
+    updated["status"] = status
+    updated["updated_at"] = now
+    updated["actor"] = compact_text(payload.get("actor") or REVIEW_ACTOR, 200)
+    note = compact_text(payload.get("note"), 20000)
+    if note and "note" in updated:
+        updated["note"] = note
+    source_anchor = parse_raw_json(current.get("source_anchor_json", ""))
+    event_payload = {
+        **payload,
+        "source_evidence_id": compact_text(payload.get("source_evidence_id") or current.get("source_evidence_id"), 1000),
+        "subject_type": subject_type,
+        "subject_id": subject_id,
+        "before_status": previous_status,
+        "after_status": status,
+        "status": status,
+        "note": note,
+        "source_anchor": source_anchor,
+    }
+    event = persist_review_event(build_review_event("review_state.changed", event_payload))
+    ch_insert_json_each_row(config["table"], [updated])
+    return {"event": event, "object": updated, "before_status": previous_status, "after_status": status}
 
 
 def create_generic_review_event(payload):
@@ -1560,10 +1742,14 @@ class ResearchUiHandler(BaseHTTPRequestHandler):
                 return self.send_json(create_review_annotation(payload), status=201)
             if parsed.path == "/api/proposed-facts":
                 return self.send_json(create_proposed_fact(payload), status=201)
+            if parsed.path == "/api/normalized-corrections":
+                return self.send_json(create_normalized_correction(payload), status=201)
             if parsed.path == "/api/entity-links":
                 return self.send_json(create_entity_link(payload), status=201)
             if parsed.path == "/api/claim-records":
                 return self.send_json(create_claim_record(payload), status=201)
+            if parsed.path == "/api/review-state":
+                return self.send_json(update_review_state(payload), status=201)
             raise ResearchUiError(404, "Not found")
         except ResearchUiError as exc:
             self.send_json({"error": exc.message}, status=exc.status)

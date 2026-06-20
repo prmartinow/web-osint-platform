@@ -43,10 +43,14 @@ First-cut review foundation already implemented:
 - Added EvidenceDocument block selection.
 - Added append-only JSONL mirror under `/mnt/data/x-research/review/events/`.
 - Validated durable annotation, evidence selection, and proposed fact persistence on the Datalab Chandra 2.1 case.
+- Added first-cut `entity_links`, `claim_records`, `normalized_corrections`,
+  and generic review-state transitions. Normalized corrections are stored as
+  versioned overlays and review-state changes reinsert materialized rows while
+  emitting immutable `review_state.changed` events.
 
 Main remaining gap:
 
-- The Research UI has a first durable review landing zone, but it is not yet the full workbench. Entity links and claim records now have first-cut persistence/API/UI support. Normalized-content corrections, review-state transitions, source/artifact navigation, review-task Inbox rows, and publication draft objects still need first-class persistence and UI flows.
+- The Research UI has a first durable review landing zone, but it is not yet the full workbench. Source/artifact navigation, review-task Inbox rows, comparison rows, publication draft objects, and the eventual Redpanda review-event materializer still need first-class persistence and UI flows.
 
 ## Implementation Principle
 

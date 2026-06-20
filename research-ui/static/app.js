@@ -22,6 +22,11 @@ function escapeHtml(value) {
   })[char]);
 }
 
+function cssEscape(value) {
+  if (window.CSS?.escape) return CSS.escape(value);
+  return String(value ?? '').replace(/["\\]/g, '\\$&');
+}
+
 function fmtDate(value) {
   if (!value) return '';
   return String(value).replace('T', ' ').replace(/Z$/, '');
@@ -348,12 +353,14 @@ function renderLibraryPage(data) {
 function renderEvidencePage(data) {
   const selections = data.selections || [];
   const facts = data.proposed_facts || [];
+  const corrections = data.normalized_corrections || [];
   const recent = data.recent_sources || [];
   $('routePage').innerHTML = `
     ${pageHeader('Evidence Ledger', 'Anchored selections, proposed facts, and high-value captured sources.')}
     ${metricCards([
       { label: 'Selections', value: selections.length },
       { label: 'Proposed facts', value: facts.length },
+      { label: 'Corrections', value: corrections.length },
       { label: 'Recent sources', value: recent.length },
     ])}
     <section class="page-two-col">
@@ -377,6 +384,19 @@ function renderEvidencePage(data) {
           </article>
         `).join('') || '<p class="muted padded">No proposed facts yet.</p>'}
       </div>
+    </section>
+    <section class="panel page-panel">
+      <div class="panel-title-row"><h2>Normalized Corrections</h2><span class="status-badge warn">overlay layer</span></div>
+      ${corrections.map((row) => `
+        <article class="review-item">
+          <div class="tag-line"><span class="pill">${escapeHtml(row.status)}</span><span class="pill">${escapeHtml(row.correction_kind)}</span><span class="pill">${escapeHtml(row.block_id)}</span></div>
+          <div class="diff-pair">
+            <div><strong>Original</strong><p>${escapeHtml(row.original_text)}</p></div>
+            <div><strong>Corrected</strong><p>${escapeHtml(row.corrected_text)}</p></div>
+          </div>
+          <button class="secondary object-link" data-id="${escapeHtml(row.source_evidence_id)}">Open source</button>
+        </article>
+      `).join('') || '<p class="muted padded">No normalized corrections yet.</p>'}
     </section>
     <section class="panel page-panel">
       <div class="panel-title-row"><h2>Recent Evidence Sources</h2><span class="status-badge info">source trail</span></div>
@@ -637,6 +657,8 @@ function renderKv(items) {
 
 function renderNormalized(source) {
   const latest = source.latest || {};
+  const review = source.review || {};
+  const corrections = review.normalized_corrections || [];
   const links = (latest.links || []).map((link) => `<a href="${escapeHtml(link)}" target="_blank" rel="noreferrer">${escapeHtml(link)}</a>`).join('<br>');
   const raw = latest.raw || {};
   $('tab-normalized').innerHTML = `
@@ -685,6 +707,26 @@ function renderNormalized(source) {
         <div class="source-text">${escapeHtml(latest.text || '(no extracted text)')}</div>
       </section>
     </div>
+    ${corrections.length ? `
+      <section class="card correction-overlay">
+        <div class="pane-title"><h3>Correction overlay</h3><span class="status-badge warn">reviewed separately</span></div>
+        <div class="cards">${corrections.map((row) => `
+          <article class="review-item compact">
+            <div class="tag-line">
+              <span class="pill">${escapeHtml(row.status)}</span>
+              <span class="pill">${escapeHtml(row.correction_kind)}</span>
+              ${row.block_id ? `<span class="pill">${escapeHtml(row.block_id)}</span>` : ''}
+            </div>
+            <div class="diff-pair">
+              <div><strong>Original</strong><p>${escapeHtml(row.original_text)}</p></div>
+              <div><strong>Corrected</strong><p>${escapeHtml(row.corrected_text)}</p></div>
+            </div>
+            ${row.note ? `<p class="muted">${escapeHtml(row.note)}</p>` : ''}
+            <div class="muted">${fmtDate(row.updated_at)} · ${escapeHtml(row.actor)}</div>
+          </article>
+        `).join('')}</div>
+      </section>
+    ` : ''}
   `;
 }
 
@@ -946,6 +988,32 @@ function parseJsonField(value) {
   }
 }
 
+const reviewStatusOptions = {
+  evidence_selection: ['selected', 'accepted', 'rejected', 'needs_more_evidence', 'superseded'],
+  annotation: ['open', 'accepted', 'resolved', 'rejected', 'superseded'],
+  proposed_fact: ['proposed', 'accepted', 'rejected', 'needs_more_evidence', 'superseded'],
+  normalized_correction: ['proposed', 'accepted', 'rejected', 'needs_more_evidence', 'superseded'],
+  entity_link: ['proposed', 'matched', 'created', 'rejected', 'merged', 'superseded'],
+  claim_stub: ['draft', 'under_review', 'accepted', 'disputed', 'rejected', 'superseded'],
+};
+
+function reviewStateControls(subjectType, subjectId, currentStatus) {
+  const options = reviewStatusOptions[subjectType] || ['open', 'accepted', 'rejected', 'superseded'];
+  return `
+    <div class="review-state-controls">
+      <label>Status
+        <select data-review-status="${escapeHtml(subjectType)}:${escapeHtml(subjectId)}">
+          ${options.map((option) => `<option value="${escapeHtml(option)}" ${option === currentStatus ? 'selected' : ''}>${escapeHtml(option)}</option>`).join('')}
+        </select>
+      </label>
+      <label>Decision note
+        <input data-review-note="${escapeHtml(subjectType)}:${escapeHtml(subjectId)}" placeholder="Optional reason or correction note">
+      </label>
+      <button class="secondary" data-review-update="${escapeHtml(subjectType)}:${escapeHtml(subjectId)}">Update state</button>
+    </div>
+  `;
+}
+
 function selectionForSelectedBlock(review) {
   if (!state.selectedBlock) return null;
   return (review?.selections || []).find((row) => (
@@ -1021,6 +1089,36 @@ function renderReview(source) {
         <div class="form-actions">
           <button id="saveAnnotation">Save annotation</button>
         </div>
+      </section>
+
+      <section class="card review-form">
+        <h3>Normalized Correction</h3>
+        ${selected ? `
+          <label>Correction kind
+            <select id="correctionKind">
+              <option value="normalized_text">Normalized text</option>
+              <option value="ocr_text">OCR text</option>
+              <option value="transcript">Transcript</option>
+              <option value="table_cell">Table cell</option>
+              <option value="layout">Layout / reading order</option>
+              <option value="metadata">Metadata</option>
+            </select>
+          </label>
+          <label>Original text
+            <textarea id="correctionOriginal">${escapeHtml(selected.quote || '')}</textarea>
+          </label>
+          <label>Corrected text
+            <textarea id="correctionCorrected">${escapeHtml(selected.quote || '')}</textarea>
+          </label>
+          <label>Correction note
+            <textarea id="correctionNote" placeholder="What changed and why this correction is safer"></textarea>
+          </label>
+          <div class="form-actions">
+            <button id="saveCorrection">Save correction overlay</button>
+          </div>
+        ` : `
+          <p class="muted">Select a block in the EvidenceDocument tab to create a versioned normalized/OCR/transcript correction.</p>
+        `}
       </section>
 
       <section class="card review-form">
@@ -1138,6 +1236,7 @@ function renderReview(source) {
           <p>${escapeHtml(row.quote)}</p>
           ${row.note ? `<p class="muted">${escapeHtml(row.note)}</p>` : ''}
           <div class="muted">${fmtDate(row.updated_at)} · ${escapeHtml(row.actor)}</div>
+          ${reviewStateControls('evidence_selection', row.selection_id, row.status)}
         </article>
       `)}
       ${renderReviewList('Annotations', review.annotations || [], (row) => `
@@ -1149,6 +1248,23 @@ function renderReview(source) {
           </div>
           <p>${escapeHtml(row.body)}</p>
           <div class="muted">${fmtDate(row.updated_at)} · ${escapeHtml(row.actor)}</div>
+          ${reviewStateControls('annotation', row.annotation_id, row.status)}
+        </article>
+      `)}
+      ${renderReviewList('Normalized corrections', review.normalized_corrections || [], (row) => `
+        <article class="review-item">
+          <div class="tag-line">
+            <span class="pill">${escapeHtml(row.status)}</span>
+            <span class="pill">${escapeHtml(row.correction_kind)}</span>
+            ${row.block_id ? `<span class="pill">${escapeHtml(row.block_id)}</span>` : ''}
+          </div>
+          <div class="diff-pair">
+            <div><strong>Original</strong><p>${escapeHtml(row.original_text)}</p></div>
+            <div><strong>Corrected</strong><p>${escapeHtml(row.corrected_text)}</p></div>
+          </div>
+          ${row.note ? `<p class="muted">${escapeHtml(row.note)}</p>` : ''}
+          <div class="muted">${fmtDate(row.updated_at)} · ${escapeHtml(row.actor)}</div>
+          ${reviewStateControls('normalized_correction', row.correction_id, row.status)}
         </article>
       `)}
       ${renderReviewList('Proposed facts', review.proposed_facts || [], (row) => `
@@ -1162,6 +1278,7 @@ function renderReview(source) {
           ${row.evidence_quote ? `<p class="muted">${escapeHtml(row.evidence_quote)}</p>` : ''}
           ${row.note ? `<p class="muted">${escapeHtml(row.note)}</p>` : ''}
           <div class="muted">${fmtDate(row.updated_at)} · ${escapeHtml(row.actor)}</div>
+          ${reviewStateControls('proposed_fact', row.proposed_fact_id, row.status)}
         </article>
       `)}
       ${renderReviewList('Entity links', review.entity_links || [], (row) => `
@@ -1175,6 +1292,7 @@ function renderReview(source) {
           ${row.mention_text ? `<p class="muted">${escapeHtml(row.mention_text)}</p>` : ''}
           ${row.note ? `<p class="muted">${escapeHtml(row.note)}</p>` : ''}
           <div class="muted">${fmtDate(row.updated_at)} · ${escapeHtml(row.actor)}</div>
+          ${reviewStateControls('entity_link', row.entity_link_id, row.status)}
         </article>
       `)}
       ${renderReviewList('Claim stubs', review.claim_records || [], (row) => `
@@ -1188,6 +1306,7 @@ function renderReview(source) {
           <p><strong>${escapeHtml(row.claim_text)}</strong></p>
           ${row.note ? `<p class="muted">${escapeHtml(row.note)}</p>` : ''}
           <div class="muted">${fmtDate(row.updated_at)} · ${escapeHtml(row.actor)}</div>
+          ${reviewStateControls('claim_stub', row.claim_id, row.status)}
         </article>
       `)}
       ${renderReviewList('Review events', review.events || [], (row) => `
@@ -1208,7 +1327,9 @@ function renderReview(source) {
 async function refreshReviewState() {
   const source = await fetchJson(`/api/source?id=${encodeURIComponent(state.selectedId)}`);
   state.currentSource = source;
+  renderNormalized(source);
   renderReview(source);
+  renderProvenance(source);
   renderRaw(source);
 }
 
@@ -1248,6 +1369,26 @@ function wireReviewEvents(source, attachedSelection) {
       status.textContent = error.message;
     }
   });
+  const saveCorrection = $('saveCorrection');
+  if (saveCorrection) {
+    saveCorrection.addEventListener('click', async () => {
+      try {
+        status.textContent = 'Saving correction overlay...';
+        const base = selectedReviewBase(source);
+        await postJson('/api/normalized-corrections', {
+          ...base,
+          correction_kind: $('correctionKind').value,
+          original_text: $('correctionOriginal').value,
+          corrected_text: $('correctionCorrected').value,
+          note: $('correctionNote').value,
+          status: 'proposed',
+        });
+        await refreshReviewState();
+      } catch (error) {
+        status.textContent = error.message;
+      }
+    });
+  }
   $('saveFact').addEventListener('click', async () => {
     try {
       status.textContent = 'Saving proposed fact...';
@@ -1316,6 +1457,31 @@ function wireReviewEvents(source, attachedSelection) {
     } catch (error) {
       status.textContent = error.message;
     }
+  });
+  document.querySelectorAll('[data-review-update]').forEach((button) => {
+    button.addEventListener('click', async () => {
+      const key = button.dataset.reviewUpdate || '';
+      const separator = key.indexOf(':');
+      const subjectType = key.slice(0, separator);
+      const subjectId = key.slice(separator + 1);
+      const statusSelect = document.querySelector(`[data-review-status="${cssEscape(key)}"]`);
+      const noteInput = document.querySelector(`[data-review-note="${cssEscape(key)}"]`);
+      try {
+        status.textContent = 'Updating review state...';
+        await postJson('/api/review-state', {
+          source_evidence_id: source.latest?.evidence_id || state.selectedId,
+          source_project: source.latest?.source_project || '',
+          project: source.latest?.source_project || '',
+          subject_type: subjectType,
+          subject_id: subjectId,
+          status: statusSelect?.value || '',
+          note: noteInput?.value || '',
+        });
+        await refreshReviewState();
+      } catch (error) {
+        status.textContent = error.message;
+      }
+    });
   });
 }
 

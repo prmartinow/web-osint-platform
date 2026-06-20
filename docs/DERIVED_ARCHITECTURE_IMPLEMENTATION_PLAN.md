@@ -331,13 +331,14 @@ Implemented:
 - Research UI review APIs
 - EvidenceDocument block selection
 - durable annotation, evidence selection, and proposed fact creation
+- first-cut entity links, claim stubs, normalized correction overlays, and generic review-state transitions
 - JSONL mirror under `/mnt/data/x-research/review/events/`
 - Datalab smoke validation
 
 Remaining:
 
 - move direct ClickHouse/JSONL writes behind `research.review.events.v1` and a review materializer when UX stabilizes
-- add normalized-content correction events and review-state transitions
+- add richer source/artifact navigation, review-task Inbox rows, comparison rows, and publication draft objects
 
 ### P0B - Source Workbench Product Shape
 

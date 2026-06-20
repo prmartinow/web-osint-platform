@@ -25,6 +25,8 @@
         "annotation.updated",
         "proposed_fact.created",
         "proposed_fact.updated",
+        "normalized_correction.created",
+        "normalized_correction.updated",
         "entity_link.created",
         "entity_link.updated",
         "claim_stub.created",
@@ -40,6 +42,7 @@
         "evidence_selection",
         "annotation",
         "proposed_fact",
+        "normalized_correction",
         "entity_link",
         "claim_stub",
         "review_state"

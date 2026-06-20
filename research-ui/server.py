@@ -2614,13 +2614,20 @@ def claim_queue_counts(rows):
     ]
 
 
-def make_claim_row(row, source_map, type_counts, text_counts, evidence_by_source, facts_by_source, entities_by_source):
+def claim_proposition_key(parts):
+    return "|".join([
+        str(parts.get("subject") or "").lower(),
+        str(parts.get("property") or "").lower(),
+    ])
+
+
+def make_claim_row(row, source_map, proposition_counts, text_counts, evidence_by_source, facts_by_source, entities_by_source):
     source_id = row.get("source_evidence_id") or ""
     source = source_for_ledger_row(source_map, source_id)
     parts = claim_subject_value({**row, **source})
     qualifier = parse_raw_json(row.get("qualifier_json", ""))
     relation = row.get("evidence_relation") or ""
-    cluster_size = int(type_counts.get(row.get("claim_type") or "") or 1)
+    cluster_size = int(proposition_counts.get(claim_proposition_key(parts)) or 1)
     duplicate_count = int(text_counts.get((row.get("claim_text") or "").lower()) or 1)
     contradiction = claim_contradiction_state(row, cluster_size)
     support_count = 1 if relation.lower() in ("supports", "supporting", "supports_claim") else 0
@@ -2849,13 +2856,19 @@ def claims_ledger(params):
     for rows in (claims, selections, facts, entities, events):
         source_ids.extend(row.get("source_evidence_id") for row in rows)
     source_map = hydrate_source_rows(source_ids)
-    type_counts = {}
+    proposition_groups = {}
     text_counts = {}
     for claim in claims:
-        claim_type_key = claim.get("claim_type") or ""
+        source = source_for_ledger_row(source_map, claim.get("source_evidence_id") or "")
+        parts = claim_subject_value({**claim, **source})
+        proposition_key = claim_proposition_key(parts)
         text_key = (claim.get("claim_text") or "").lower()
-        type_counts[claim_type_key] = type_counts.get(claim_type_key, 0) + 1
+        proposition_groups.setdefault(proposition_key, []).append({**claim, **parts})
         text_counts[text_key] = text_counts.get(text_key, 0) + 1
+    proposition_counts = {}
+    for key, rows in proposition_groups.items():
+        values = {str(row.get("value") or row.get("claim_text") or "").lower() for row in rows}
+        proposition_counts[key] = len(rows) if len(values) > 1 else 1
     evidence_by_source = group_rows(selections, "source_evidence_id")
     facts_by_source = group_rows(facts, "source_evidence_id")
     entities_by_source = group_rows(entities, "source_evidence_id")
@@ -2866,7 +2879,7 @@ def claims_ledger(params):
         if event.get("source_evidence_id"):
             events_by_subject.setdefault(event.get("source_evidence_id"), []).append(event)
 
-    claim_rows = [make_claim_row(row, source_map, type_counts, text_counts, evidence_by_source, facts_by_source, entities_by_source) for row in claims]
+    claim_rows = [make_claim_row(row, source_map, proposition_counts, text_counts, evidence_by_source, facts_by_source, entities_by_source) for row in claims]
     rows = make_claim_cluster_rows(claim_rows) + claim_rows
     rows.sort(key=lambda row: str(row.get("updated_at") or ""), reverse=True)
     filtered = [row for row in rows if claim_row_matches(row, q, queue, claim_type, review_state, contradiction_state, source_kind, project)]

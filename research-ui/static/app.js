@@ -2689,7 +2689,11 @@ function renderClaimPreview(data) {
       <button class="secondary" data-claim-action="reject">Reject</button>
       <button class="secondary" data-claim-action="dispute">Dispute</button>
       <button class="secondary" data-claim-action="revise">Revise</button>
+      <button class="secondary" data-claim-action="edit_assertion">Edit assertion</button>
+      <button class="secondary" data-claim-action="edit_qualifiers">Edit qualifiers</button>
+      <button class="secondary" data-claim-action="select_preferred_assertion">Select preferred</button>
       <button class="secondary" data-claim-action="link_evidence">Link evidence</button>
+      <button class="secondary" data-claim-action="unlink_evidence">Unlink evidence</button>
       <button class="secondary" data-claim-action="change_stance">Change stance</button>
       <button class="secondary" data-claim-action="merge">Merge</button>
       <button class="secondary" data-claim-action="split">Split</button>
@@ -2740,7 +2744,7 @@ function renderClaimsPage(data) {
         </div>
         <div class="claim-bulk-toolbar">
           <label><input type="checkbox" id="claimSelectAll"> Select visible</label>
-          ${['accept', 'dispute', 'reject', 'defer', 'revise', 'merge', 'split', 'add_to_draft'].map((action) => `<button class="secondary" data-claim-bulk-action="${action}">${escapeHtml(titleCase(action))}</button>`).join('')}
+          ${['accept', 'dispute', 'reject', 'defer', 'revise', 'select_preferred_assertion', 'merge', 'split', 'add_to_draft'].map((action) => `<button class="secondary" data-claim-bulk-action="${action}">${escapeHtml(titleCase(action))}</button>`).join('')}
           <span id="claimBulkStatus" class="muted"></span>
         </div>
         <div class="claim-results-list">
@@ -2804,7 +2808,11 @@ function claimEventTypeForAction(action) {
     reject: 'claim.rejected',
     defer: 'claim.deferred',
     revise: 'claim.revision.requested',
+    edit_assertion: 'claim.assertion_edit.requested',
+    edit_qualifiers: 'claim.qualifier_edit.requested',
+    select_preferred_assertion: 'claim.preferred_assertion.selected',
     link_evidence: 'claim.evidence_link.requested',
+    unlink_evidence: 'claim.evidence_unlink.requested',
     change_stance: 'claim.evidence_stance_change.requested',
     merge: 'claim.merge.requested',
     split: 'claim.split.requested',
@@ -2939,7 +2947,7 @@ function bindClaimKeyboard() {
     } else if (['a', 'u', 'r', 'd', 'e', 'o'].includes(key)) {
       event.preventDefault();
       const row = state.claimRows.find((item) => claimRowKey(item) === state.claimSelectedId);
-      const action = key === 'a' ? 'accept' : key === 'u' ? 'dispute' : key === 'r' ? 'reject' : key === 'd' ? 'defer' : key === 'e' ? 'revise' : 'open_source';
+      const action = key === 'a' ? 'accept' : key === 'u' ? 'dispute' : key === 'r' ? 'reject' : key === 'd' ? 'defer' : key === 'e' ? 'edit_assertion' : 'open_source';
       try {
         await applyClaimAction(row, action);
       } catch (error) {

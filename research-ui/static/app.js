@@ -431,11 +431,11 @@ function setSidebarCollapsed(collapsed) {
   localStorage.setItem('web-osint-sidebar-collapsed', state.sidebarCollapsed ? '1' : '0');
   const toggle = $('sidebarToggle');
   if (!toggle) return;
+  const label = state.sidebarCollapsed ? 'Open sidebar' : 'Close sidebar';
   toggle.setAttribute('aria-expanded', state.sidebarCollapsed ? 'false' : 'true');
-  toggle.setAttribute('aria-label', state.sidebarCollapsed ? 'Open sidebar' : 'Close sidebar');
-  toggle.setAttribute('title', state.sidebarCollapsed ? 'Open sidebar' : 'Close sidebar');
-  const label = toggle.querySelector('.rail-toggle-label');
-  if (label) label.textContent = state.sidebarCollapsed ? 'Open' : 'Close';
+  toggle.setAttribute('aria-label', label);
+  toggle.setAttribute('title', label);
+  toggle.dataset.tooltip = label;
 }
 
 function renderFacets(data) {

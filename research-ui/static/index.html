@@ -17,14 +17,12 @@
   <main class="research-shell">
     <aside class="workspace-rail" aria-label="Research workspace">
       <div class="brand-lockup">
-        <span class="brand-mark">T</span>
-        <div>
-          <strong>TRACE</strong>
-          <span>Research</span>
-        </div>
-        <button id="sidebarToggle" class="rail-toggle" type="button" title="Close sidebar" aria-label="Close sidebar" aria-expanded="true">
-          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h16v14H4z"></path><path d="M9 5v14"></path><path d="m15 9-3 3 3 3"></path></svg>
-          <span class="rail-toggle-label">Close</span>
+        <a class="rail-home" href="#home" aria-label="TRACE Research home">
+          <span class="brand-mark" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="m3 11 9-8 9 8"></path><path d="M5 10v10h14V10"></path><path d="M9 20v-6h6v6"></path></svg></span>
+          <span class="brand-text"><strong>TRACE</strong><span>Research</span></span>
+        </a>
+        <button id="sidebarToggle" class="rail-toggle" type="button" title="Close sidebar" aria-label="Close sidebar" aria-expanded="true" data-tooltip="Close sidebar">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="5" width="16" height="14" rx="2"></rect><path d="M9 5v14"></path></svg>
         </button>
       </div>
       <nav class="primary-nav" aria-label="Primary research navigation">

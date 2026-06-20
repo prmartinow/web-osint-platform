@@ -47,10 +47,15 @@ First-cut review foundation already implemented:
   and generic review-state transitions. Normalized corrections are stored as
   versioned overlays and review-state changes reinsert materialized rows while
   emitting immutable `review_state.changed` events.
+- Added first-cut review-task Inbox rows. `/api/inbox` now returns derived
+  `review_task` rows from source state plus selections, annotations, proposed
+  facts, normalized corrections, entity links, and claim stubs. The task rows
+  still open the source workbench and switch to the Review tab for derived
+  review objects.
 
 Main remaining gap:
 
-- The Research UI has a first durable review landing zone, but it is not yet the full workbench. Source/artifact navigation, review-task Inbox rows, comparison rows, publication draft objects, and the eventual Redpanda review-event materializer still need first-class persistence and UI flows.
+- The Research UI has a first durable review landing zone, but it is not yet the full workbench. Source/artifact navigation, persisted task lifecycle/assignment, comparison rows, publication draft objects, and the eventual Redpanda review-event materializer still need first-class persistence and UI flows.
 
 ## Implementation Principle
 

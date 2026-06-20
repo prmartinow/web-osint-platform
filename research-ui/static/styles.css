@@ -797,6 +797,16 @@ body.has-source .research-shell {
   font-weight: 720;
   overflow-wrap: anywhere;
 }
+.task-title {
+  font-weight: 800;
+  overflow-wrap: anywhere;
+}
+.task-source {
+  margin-top: 2px;
+  color: var(--muted);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
 .row-snippet {
   color: var(--muted);
   margin-top: 5px;
@@ -825,6 +835,22 @@ body.has-source .research-shell {
 }
 .pill.ok { color: var(--ok); }
 .pill.warn { color: var(--warn); }
+.pill.task-priority.high { color: var(--warn); }
+.pill.task-priority.blocking { color: var(--danger); }
+.task-object {
+  margin-top: 7px;
+  padding: 8px 9px;
+  border: 1px solid var(--soft-line);
+  border-radius: 7px;
+  background: var(--panel-2);
+  color: var(--text);
+  font-size: 12px;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+}
 
 .workbench {
   display: none;

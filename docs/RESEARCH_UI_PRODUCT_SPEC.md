@@ -343,7 +343,7 @@ The public research site is a projection of an approved release, not a live rend
 ## V1 Build Plan
 
 1. Create a separate `research-ui` service and route surface on `192.168.1.16:18192`.
-2. Build Inbox as the first page.
+2. Build Inbox as the first page with review-task rows, not only source rows.
 3. Build the X source workbench using the Datalab X post as the first test case.
 4. Build the web/blog source workbench using the Datalab blog as the second test case.
 5. Add evidence selection, normalized-content correction, entity linking, claim editing, annotations, and review state.

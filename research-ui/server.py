@@ -341,41 +341,37 @@ def source_kind_label(kind):
     return labels.get(kind or "", kind or "unknown")
 
 
-def inbox(params):
-    limit = sql_int(params.get("limit", ["80"])[0], 80)
-    q = (params.get("q", [""])[0] or "").strip()
-    kind = (params.get("kind", [""])[0] or "").strip()
-    project = (params.get("project", [""])[0] or "").strip()
-    queue = (params.get("queue", ["all"])[0] or "all").strip()
+TASK_QUEUE_LABELS = [
+    ("all", "All tasks"),
+    ("source_triage", "Source triage"),
+    ("extraction_review", "Extraction review"),
+    ("media_review", "Media/OCR/VL"),
+    ("evidence_selection", "Evidence selection"),
+    ("version_review", "Versions"),
+    ("entity_resolution", "Entities"),
+    ("claim_review", "Claims"),
+    ("fact_review", "Facts"),
+    ("correction_review", "Corrections"),
+    ("selection_review", "Suggested evidence"),
+    ("annotation_followup", "Annotations"),
+    ("needs_review", "Needs review"),
+    ("x_sources", "X sources"),
+    ("web_sources", "Web/blog"),
+    ("manual_docs", "Manual docs"),
+]
 
-    clauses = ["1 = 1"]
-    if q:
-        like = sql_string(q)
-        clauses.append(
-            "("
-            f"positionCaseInsensitive(evidence_events.title, {like}) > 0 OR "
-            f"positionCaseInsensitive(evidence_events.text, {like}) > 0 OR "
-            f"positionCaseInsensitive(evidence_events.canonical_url, {like}) > 0 OR "
-            f"positionCaseInsensitive(evidence_events.author_handle, {like}) > 0 OR "
-            f"positionCaseInsensitive(evidence_events.domain, {like}) > 0 OR "
-            f"positionCaseInsensitive(evidence_events.evidence_id, {like}) > 0"
-            ")"
-        )
-    if kind:
-        clauses.append(f"evidence_events.source_kind = {sql_string(kind)}")
-    if project:
-        clauses.append(f"evidence_events.source_project = {sql_string(project)}")
-    if queue == "needs_review":
-        clauses.append("(evidence_events.has_ocr = 0 OR length(evidence_events.text) < 120 OR evidence_events.source_kind IN ('media', 'capture'))")
-    elif queue == "x_sources":
-        clauses.append("evidence_events.source_kind IN ('x_post', 'x_account', 'x_page', 'media')")
-    elif queue == "web_sources":
-        clauses.append("evidence_events.source_kind IN ('web_page', 'search_result', 'google_search_page')")
-    elif queue == "manual_docs":
-        clauses.append("evidence_events.source_kind = 'user_input'")
+TASK_TYPE_LABELS = dict(TASK_QUEUE_LABELS)
+SOURCE_QUEUE_FILTERS = {
+    "x_sources": "evidence_events.source_kind IN ('x_post', 'x_account', 'x_page', 'media')",
+    "web_sources": "evidence_events.source_kind IN ('web_page', 'search_result', 'google_search_page')",
+    "manual_docs": "evidence_events.source_kind = 'user_input'",
+}
+HIGH_REVIEW_TASKS = {"extraction_review", "media_review", "version_review", "entity_resolution", "claim_review", "fact_review", "correction_review"}
+REVIEW_TASK_TYPES = {queue_id for queue_id, _ in TASK_QUEUE_LABELS} - {"all", "needs_review", "x_sources", "web_sources", "manual_docs"}
 
-    where = " AND ".join(clauses)
-    rows = ch_data(
+
+def latest_source_rows(where, limit):
+    return ch_data(
         f"""
         SELECT
           evidence_id,
@@ -401,12 +397,329 @@ def inbox(params):
         GROUP BY evidence_id
         ORDER BY last_ingested_at DESC
         LIMIT {limit}
-        """
+        """,
+        fallback=[],
     )
+
+
+def hydrate_source_rows(source_ids):
+    unique_ids = []
+    seen = set()
+    for source_id in source_ids:
+        if source_id and source_id not in seen:
+            unique_ids.append(source_id)
+            seen.add(source_id)
+    if not unique_ids:
+        return {}
+    quoted = ", ".join(sql_string(source_id) for source_id in unique_ids[:500])
+    rows = latest_source_rows(f"evidence_events.evidence_id IN ({quoted})", 500)
     for row in rows:
-        row["source_label"] = source_kind_label(row.get("source_kind"))
-        row["review_hint"] = review_hint(row)
-    return {"rows": rows, "limit": limit, "queue": queue}
+        decorate_source_row(row)
+    return {row.get("evidence_id"): row for row in rows}
+
+
+def decorate_source_row(row):
+    row["source_label"] = source_kind_label(row.get("source_kind"))
+    row["review_hint"] = review_hint(row)
+    return row
+
+
+def task_priority(task_type, source_row=None):
+    if task_type in ("extraction_review", "media_review"):
+        if source_row and int(source_row.get("text_chars") or 0) == 0:
+            return "blocking"
+        return "high"
+    if task_type in ("entity_resolution", "claim_review", "fact_review", "correction_review"):
+        return "high"
+    if task_type == "version_review":
+        return "normal"
+    return "normal"
+
+
+def task_priority_rank(priority):
+    return {"blocking": 3, "high": 2, "normal": 1}.get(priority or "normal", 0)
+
+
+def make_task(source_row, task_type, task_label, task_reason, object_type="source", object_id=None, object_text="", status="open", updated_at=None):
+    source_id = source_row.get("evidence_id") or source_row.get("source_evidence_id") or ""
+    object_id = object_id or source_id
+    updated_at = updated_at or source_row.get("last_ingested_at") or source_row.get("updated_at") or source_row.get("captured_at") or ""
+    task = {
+        **source_row,
+        "row_kind": "review_task",
+        "task_id": f"{task_type}/{object_id}",
+        "task_type": task_type,
+        "task_label": task_label,
+        "task_reason": task_reason,
+        "task_state": status or "open",
+        "task_priority": task_priority(task_type, source_row),
+        "task_updated_at": updated_at,
+        "object_type": object_type,
+        "object_id": object_id,
+        "object_text": object_text,
+        "source_evidence_id": source_id,
+        "evidence_id": source_id,
+    }
+    task.setdefault("source_label", source_kind_label(task.get("source_kind")))
+    task.setdefault("review_hint", review_hint(task))
+    return task
+
+
+def source_tasks_for_row(row):
+    text_chars = int(row.get("text_chars") or 0)
+    observations = int(row.get("observations") or 0)
+    tasks = [
+        make_task(
+            row,
+            "source_triage",
+            "Triage source",
+            "Decide whether this captured source belongs in the active research set.",
+        )
+    ]
+    if text_chars < 120 or row.get("source_kind") in ("media", "capture"):
+        tasks.append(make_task(
+            row,
+            "extraction_review",
+            "Review extraction",
+            "Normalized text is empty, sparse, or capture-like and needs a human extraction check.",
+        ))
+    if row.get("has_media") and not row.get("has_ocr"):
+        tasks.append(make_task(
+            row,
+            "media_review",
+            "Review media/OCR/VL",
+            "This source has media but no OCR flag yet; inspect image, video, OCR, or VL outputs.",
+        ))
+    if row.get("source_kind") in ("x_post", "web_page", "user_input") and text_chars > 0:
+        tasks.append(make_task(
+            row,
+            "evidence_selection",
+            "Select evidence",
+            "Promote useful quotes, table cells, media regions, or whole-source anchors into review evidence.",
+        ))
+    if observations > 1:
+        tasks.append(make_task(
+            row,
+            "version_review",
+            "Review source versions",
+            "Multiple captures exist; compare versions before relying on the normalized content.",
+        ))
+    return tasks
+
+
+def review_object_rows():
+    configs = [
+        {
+            "task_type": "fact_review",
+            "object_type": "proposed_fact",
+            "id_column": "proposed_fact_id",
+            "source_column": "source_evidence_id",
+            "label": "Validate proposed fact",
+            "reason": "A structured fact needs value, unit, qualifier, and source-anchor review.",
+            "query": """
+                SELECT
+                  proposed_fact_id AS object_id, source_evidence_id,
+                  fact_type AS object_kind,
+                  concat(field_path, ' ', raw_value, ' ', normalized_value) AS object_text,
+                  status, updated_at
+                FROM proposed_facts FINAL
+                WHERE lower(status) NOT IN ('accepted', 'rejected', 'superseded', 'published')
+                ORDER BY updated_at DESC
+                LIMIT 200
+            """,
+        },
+        {
+            "task_type": "correction_review",
+            "object_type": "normalized_correction",
+            "id_column": "correction_id",
+            "source_column": "source_evidence_id",
+            "label": "Review normalized correction",
+            "reason": "A correction overlay needs acceptance, rejection, or more evidence.",
+            "query": """
+                SELECT
+                  correction_id AS object_id, source_evidence_id,
+                  correction_kind AS object_kind,
+                  concat(original_text, ' -> ', corrected_text) AS object_text,
+                  status, updated_at
+                FROM normalized_corrections FINAL
+                WHERE lower(status) NOT IN ('accepted', 'rejected', 'superseded', 'published')
+                ORDER BY updated_at DESC
+                LIMIT 200
+            """,
+        },
+        {
+            "task_type": "entity_resolution",
+            "object_type": "entity_link",
+            "id_column": "entity_link_id",
+            "source_column": "source_evidence_id",
+            "label": "Resolve entity link",
+            "reason": "A mention or canonical entity candidate needs merge/identity review.",
+            "query": """
+                SELECT
+                  entity_link_id AS object_id, source_evidence_id,
+                  entity_type AS object_kind,
+                  concat(mention_text, ' ', canonical_name, ' ', canonical_entity_id) AS object_text,
+                  status, updated_at
+                FROM entity_links FINAL
+                WHERE lower(status) NOT IN ('accepted', 'resolved', 'merged', 'rejected', 'superseded', 'published')
+                ORDER BY updated_at DESC
+                LIMIT 200
+            """,
+        },
+        {
+            "task_type": "claim_review",
+            "object_type": "claim_stub",
+            "id_column": "claim_id",
+            "source_column": "source_evidence_id",
+            "label": "Review claim",
+            "reason": "A claim needs wording, evidence relation, and publication readiness review.",
+            "query": """
+                SELECT
+                  claim_id AS object_id, source_evidence_id,
+                  claim_type AS object_kind,
+                  claim_text AS object_text,
+                  status, updated_at
+                FROM claim_records FINAL
+                WHERE lower(status) NOT IN ('accepted', 'rejected', 'superseded', 'published')
+                ORDER BY updated_at DESC
+                LIMIT 200
+            """,
+        },
+        {
+            "task_type": "selection_review",
+            "object_type": "evidence_selection",
+            "id_column": "selection_id",
+            "source_column": "source_evidence_id",
+            "label": "Review selected evidence",
+            "reason": "A selected quote or anchor needs review before it supports claims or publication.",
+            "query": """
+                SELECT
+                  selection_id AS object_id, source_evidence_id,
+                  selection_kind AS object_kind,
+                  quote AS object_text,
+                  status, updated_at
+                FROM evidence_selections FINAL
+                WHERE lower(status) NOT IN ('accepted', 'rejected', 'archived', 'superseded', 'published')
+                ORDER BY updated_at DESC
+                LIMIT 200
+            """,
+        },
+        {
+            "task_type": "annotation_followup",
+            "object_type": "annotation",
+            "id_column": "annotation_id",
+            "source_column": "source_evidence_id",
+            "label": "Follow up annotation",
+            "reason": "An open annotation may need an evidence selection, entity link, claim, or correction.",
+            "query": """
+                SELECT
+                  annotation_id AS object_id, source_evidence_id,
+                  annotation_type AS object_kind,
+                  body AS object_text,
+                  status, updated_at
+                FROM review_annotations FINAL
+                WHERE lower(status) NOT IN ('closed', 'accepted', 'rejected', 'archived', 'superseded', 'published')
+                ORDER BY updated_at DESC
+                LIMIT 200
+            """,
+        },
+    ]
+    object_rows = []
+    for config in configs:
+        for row in ch_data(config["query"], fallback=[]):
+            row["task_type"] = config["task_type"]
+            row["object_type"] = config["object_type"]
+            row["label"] = config["label"]
+            row["reason"] = config["reason"]
+            object_rows.append(row)
+    return object_rows
+
+
+def task_matches_filters(task, q, kind, project, queue):
+    if kind and task.get("source_kind") != kind:
+        return False
+    if project and task.get("source_project") != project:
+        return False
+    if queue in REVIEW_TASK_TYPES and task.get("task_type") != queue:
+        return False
+    if queue == "needs_review" and task.get("task_type") not in HIGH_REVIEW_TASKS and task.get("task_priority") not in ("high", "blocking"):
+        return False
+    if queue == "x_sources" and task.get("source_kind") not in ("x_post", "x_account", "x_page", "media"):
+        return False
+    if queue == "web_sources" and task.get("source_kind") not in ("web_page", "search_result", "google_search_page"):
+        return False
+    if queue == "manual_docs" and task.get("source_kind") != "user_input":
+        return False
+    if q:
+        haystack = " ".join(str(task.get(key) or "") for key in (
+            "task_label", "task_reason", "object_text", "title", "snippet",
+            "canonical_url", "author_handle", "domain", "evidence_id", "source_evidence_id",
+        ))
+        if q.lower() not in haystack.lower():
+            return False
+    return True
+
+
+def inbox(params):
+    limit = sql_int(params.get("limit", ["80"])[0], 80)
+    q = (params.get("q", [""])[0] or "").strip()
+    kind = (params.get("kind", [""])[0] or "").strip()
+    project = (params.get("project", [""])[0] or "").strip()
+    queue = (params.get("queue", ["all"])[0] or "all").strip()
+
+    clauses = ["1 = 1"]
+    if q:
+        like = sql_string(q)
+        clauses.append(
+            "("
+            f"positionCaseInsensitive(evidence_events.title, {like}) > 0 OR "
+            f"positionCaseInsensitive(evidence_events.text, {like}) > 0 OR "
+            f"positionCaseInsensitive(evidence_events.canonical_url, {like}) > 0 OR "
+            f"positionCaseInsensitive(evidence_events.author_handle, {like}) > 0 OR "
+            f"positionCaseInsensitive(evidence_events.domain, {like}) > 0 OR "
+            f"positionCaseInsensitive(evidence_events.evidence_id, {like}) > 0"
+            ")"
+        )
+    if kind:
+        clauses.append(f"evidence_events.source_kind = {sql_string(kind)}")
+    if project:
+        clauses.append(f"evidence_events.source_project = {sql_string(project)}")
+    if queue in SOURCE_QUEUE_FILTERS:
+        clauses.append(SOURCE_QUEUE_FILTERS[queue])
+
+    where = " AND ".join(clauses)
+    rows = [decorate_source_row(row) for row in latest_source_rows(where, max(limit * 4, limit))]
+
+    tasks = []
+    for row in rows:
+        tasks.extend(source_tasks_for_row(row))
+
+    object_rows = review_object_rows()
+    source_map = hydrate_source_rows([row.get("source_evidence_id") for row in object_rows])
+    for object_row in object_rows:
+        source_id = object_row.get("source_evidence_id") or ""
+        source_row = source_map.get(source_id)
+        if not source_row:
+            continue
+        object_kind = object_row.get("object_kind") or object_row.get("object_type") or ""
+        label = object_row.get("label") or TASK_TYPE_LABELS.get(object_row.get("task_type"), "Review task")
+        if object_kind:
+            label = f"{label}: {object_kind}"
+        tasks.append(make_task(
+            source_row,
+            object_row["task_type"],
+            label,
+            object_row.get("reason") or "Review this derived object before relying on it.",
+            object_type=object_row.get("object_type") or "review_object",
+            object_id=object_row.get("object_id") or "",
+            object_text=object_row.get("object_text") or "",
+            status=object_row.get("status") or "open",
+            updated_at=object_row.get("updated_at") or source_row.get("last_ingested_at"),
+        ))
+
+    filtered = [task for task in tasks if task_matches_filters(task, q, kind, project, queue)]
+    filtered.sort(key=lambda task: (task_priority_rank(task.get("task_priority")), str(task.get("task_updated_at") or task.get("last_ingested_at") or "")), reverse=True)
+    return {"rows": filtered[:limit], "limit": limit, "queue": queue, "row_kind": "review_task"}
 
 
 def review_hint(row):
@@ -458,17 +771,44 @@ def facets():
           countIf(source_kind = 'x_account') AS x_accounts,
           countIf(source_kind = 'web_page') AS web_pages,
           countIf(source_kind = 'media') AS media_rows,
+          countIf(source_kind = 'user_input') AS manual_docs,
           max(ingested_at) AS last_ingested_at
         FROM evidence_events
         """
     )[0]
-    queues = [
-        {"id": "all", "label": "All inbox"},
-        {"id": "needs_review", "label": "Needs review"},
-        {"id": "x_sources", "label": "X sources"},
-        {"id": "web_sources", "label": "Web/blog"},
-        {"id": "manual_docs", "label": "Manual docs"},
-    ]
+    version_candidates = ch_data(
+        """
+        SELECT count() AS rows
+        FROM
+        (
+          SELECT evidence_id, count() AS observations
+          FROM evidence_events
+          GROUP BY evidence_id
+          HAVING observations > 1
+        )
+        """,
+        fallback=[{"rows": 0}],
+    )[0]
+    review = hydratable_review_counts()
+    queue_counts = {
+        "all": int(totals.get("unique_evidence") or 0) + sum(int(review.get(key) or 0) for key in ("selections", "annotations", "proposed_facts", "normalized_corrections", "entity_links", "claim_records")),
+        "source_triage": int(totals.get("unique_evidence") or 0),
+        "extraction_review": int(totals.get("media_rows") or 0),
+        "media_review": int(totals.get("media_rows") or 0),
+        "evidence_selection": int(totals.get("x_posts") or 0) + int(totals.get("web_pages") or 0),
+        "version_review": int(version_candidates.get("rows") or 0),
+        "entity_resolution": int(review.get("entity_links") or 0),
+        "claim_review": int(review.get("claim_records") or 0),
+        "fact_review": int(review.get("proposed_facts") or 0),
+        "correction_review": int(review.get("normalized_corrections") or 0),
+        "selection_review": int(review.get("selections") or 0),
+        "annotation_followup": int(review.get("annotations") or 0),
+        "needs_review": int(totals.get("media_rows") or 0) + sum(int(review.get(key) or 0) for key in ("proposed_facts", "normalized_corrections", "entity_links", "claim_records")),
+        "x_sources": int(totals.get("x_posts") or 0) + int(totals.get("x_accounts") or 0),
+        "web_sources": int(totals.get("web_pages") or 0),
+        "manual_docs": int(totals.get("manual_docs") or 0),
+    }
+    queues = [{"id": queue_id, "label": label, "count": queue_counts.get(queue_id, 0)} for queue_id, label in TASK_QUEUE_LABELS]
     return {"totals": totals, "source_kinds": source_kinds, "projects": projects, "domains": domains, "queues": queues}
 
 
@@ -483,6 +823,21 @@ def review_counts():
           (SELECT count() FROM entity_links FINAL) AS entity_links,
           (SELECT count() FROM claim_records FINAL) AS claim_records,
           (SELECT count() FROM research_review_events) AS review_events
+        """,
+        fallback=[{}],
+    )[0]
+
+
+def hydratable_review_counts():
+    return ch_data(
+        """
+        SELECT
+          (SELECT count() FROM evidence_selections FINAL WHERE source_evidence_id IN (SELECT DISTINCT evidence_id FROM evidence_events)) AS selections,
+          (SELECT count() FROM review_annotations FINAL WHERE source_evidence_id IN (SELECT DISTINCT evidence_id FROM evidence_events)) AS annotations,
+          (SELECT count() FROM proposed_facts FINAL WHERE source_evidence_id IN (SELECT DISTINCT evidence_id FROM evidence_events)) AS proposed_facts,
+          (SELECT count() FROM normalized_corrections FINAL WHERE source_evidence_id IN (SELECT DISTINCT evidence_id FROM evidence_events)) AS normalized_corrections,
+          (SELECT count() FROM entity_links FINAL WHERE source_evidence_id IN (SELECT DISTINCT evidence_id FROM evidence_events)) AS entity_links,
+          (SELECT count() FROM claim_records FINAL WHERE source_evidence_id IN (SELECT DISTINCT evidence_id FROM evidence_events)) AS claim_records
         """,
         fallback=[{}],
     )[0]

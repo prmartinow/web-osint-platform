@@ -331,14 +331,14 @@ Implemented:
 - Research UI review APIs
 - EvidenceDocument block selection
 - durable annotation, evidence selection, and proposed fact creation
-- first-cut entity links, claim stubs, normalized correction overlays, and generic review-state transitions
+- first-cut entity links, claim stubs, normalized correction overlays, generic review-state transitions, and derived review-task Inbox rows
 - JSONL mirror under `/mnt/data/x-research/review/events/`
 - Datalab smoke validation
 
 Remaining:
 
 - move direct ClickHouse/JSONL writes behind `research.review.events.v1` and a review materializer when UX stabilizes
-- add richer source/artifact navigation, review-task Inbox rows, comparison rows, and publication draft objects
+- add richer source/artifact navigation, persisted task lifecycle/assignment, comparison rows, and publication draft objects
 
 ### P0B - Source Workbench Product Shape
 
@@ -350,7 +350,7 @@ Build the real workbench layout:
 - right-panel review state for selections, annotations, proposed facts, entities, claims, observations, and provenance
 - X-first viewer for post/thread/account/media
 - web/blog viewer for EvidenceDocument pages
-- review-task Inbox rows rather than only source rows
+- persisted review-task lifecycle/assignment beyond the current derived Inbox rows
 
 ### P0C - Capture And EvidenceDocument Hardening
 
@@ -463,7 +463,7 @@ Implement frozen output workflows:
 
 The next implementation checkpoint should not start with another model. It should complete the human-led workbench landing zone:
 
-1. Convert Inbox rows toward review tasks.
+1. Convert Inbox rows toward review tasks. First-cut derived task rows are implemented; persist task lifecycle/assignment later if needed.
 2. Add source/artifact navigator and side-by-side original/normalized source workbench.
 3. Add capture bundle manifest and EvidenceDocument v2 fields.
 4. Add deterministic entity/ID extractors that write reviewable suggestions.

@@ -36,6 +36,10 @@ function titleFor(row) {
   return row.title || row.canonical_url || row.evidence_id || '(untitled source)';
 }
 
+function taskTitleFor(row) {
+  return row.task_label || row.review_hint || titleFor(row);
+}
+
 function sourceGlyph(kind) {
   if (kind === 'x_post' || kind === 'x_account' || kind === 'x_page') return 'X';
   if (kind === 'web_page' || kind === 'search_result' || kind === 'google_search_page') return 'W';
@@ -100,6 +104,7 @@ function renderFacets(data) {
   $('queueList').innerHTML = (data.queues || []).map((queue) => `
     <button class="queue ${state.queue === queue.id ? 'active' : ''}" data-queue="${escapeHtml(queue.id)}">
       <span>${escapeHtml(queue.label)}</span>
+      ${queue.count || queue.count === 0 ? `<span class="count">${escapeHtml(queue.count)}</span>` : ''}
     </button>
   `).join('');
   $('kindList').innerHTML = [
@@ -605,26 +610,38 @@ function setRoute(route, push = true) {
 function renderInbox(rows) {
   state.rows = rows;
   if (!rows.length) {
-    $('inboxRows').innerHTML = `<div class="empty-state"><h2>No sources</h2><p>Try a different queue or search.</p></div>`;
+    $('inboxRows').innerHTML = `<div class="empty-state"><h2>No review tasks</h2><p>Try a different queue or search.</p></div>`;
     return;
   }
   $('inboxRows').innerHTML = rows.map((row) => `
-    <article class="row ${state.selectedId === row.evidence_id ? 'active' : ''}" data-id="${escapeHtml(row.evidence_id)}">
-      <div class="row-title">${escapeHtml(titleFor(row))}</div>
+    <article class="row ${state.selectedId === (row.source_evidence_id || row.evidence_id) ? 'active' : ''}"
+      data-id="${escapeHtml(row.source_evidence_id || row.evidence_id)}"
+      data-task-type="${escapeHtml(row.task_type || '')}"
+      data-object-type="${escapeHtml(row.object_type || '')}">
+      <div class="task-title">${escapeHtml(taskTitleFor(row))}</div>
+      <div class="task-source">${escapeHtml(titleFor(row))}</div>
       <div class="row-meta">
+        ${row.task_type ? `<span class="pill">${escapeHtml(row.task_type.replaceAll('_', ' '))}</span>` : ''}
+        ${row.object_type && row.object_type !== 'source' ? `<span class="pill">${escapeHtml(row.object_type.replaceAll('_', ' '))}</span>` : ''}
+        ${row.task_priority ? `<span class="pill task-priority ${escapeHtml(row.task_priority)}">${escapeHtml(row.task_priority)}</span>` : ''}
+        ${row.task_state ? `<span class="pill">${escapeHtml(row.task_state)}</span>` : ''}
         <span class="pill">${escapeHtml(row.source_label || row.source_kind)}</span>
         ${row.author_handle ? `<span class="pill">@${escapeHtml(row.author_handle)}</span>` : ''}
         ${row.domain ? `<span class="pill">${escapeHtml(row.domain)}</span>` : ''}
         ${row.has_media ? `<span class="pill ok">media</span>` : ''}
         ${row.has_ocr ? `<span class="pill ok">OCR</span>` : ''}
-        <span class="pill warn">${escapeHtml(row.review_hint || 'triage')}</span>
+        ${row.review_hint ? `<span class="pill warn">${escapeHtml(row.review_hint)}</span>` : ''}
       </div>
-      <div class="row-snippet">${escapeHtml(row.snippet || row.canonical_url || row.evidence_id)}</div>
-      <div class="muted">${fmtDate(row.last_ingested_at)} · ${row.text_chars || 0} chars · ${row.observations || 0} observation(s)</div>
+      <div class="row-snippet">${escapeHtml(row.task_reason || row.snippet || row.canonical_url || row.evidence_id)}</div>
+      ${row.object_text ? `<div class="task-object">${escapeHtml(row.object_text)}</div>` : ''}
+      <div class="muted">${fmtDate(row.task_updated_at || row.last_ingested_at)} · ${row.text_chars || 0} chars · ${row.observations || 0} observation(s)</div>
     </article>
   `).join('');
   document.querySelectorAll('.row[data-id]').forEach((row) => {
-    row.addEventListener('click', () => selectSource(row.dataset.id));
+    row.addEventListener('click', async () => {
+      await selectSource(row.dataset.id);
+      if (row.dataset.taskType && row.dataset.taskType !== 'source_triage') activateTab('review');
+    });
   });
 }
 

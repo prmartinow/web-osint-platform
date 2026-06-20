@@ -507,6 +507,50 @@ def source_tasks_for_row(row):
     return tasks
 
 
+TERMINAL_REVIEW_TASK_DECISIONS = {"accepted", "rejected", "archived", "completed", "cancelled"}
+
+
+def latest_review_task_decisions():
+    rows = ch_data(
+        """
+        SELECT
+          subject_id,
+          argMax(JSONExtractString(payload_json, 'decision'), created_at) AS decision,
+          argMax(JSONExtractString(payload_json, 'note'), created_at) AS note,
+          max(created_at) AS decided_at
+        FROM research_review_events
+        WHERE event_type = 'review_task.decision.recorded'
+          AND subject_type = 'review_task'
+          AND subject_id != ''
+        GROUP BY subject_id
+        """,
+        fallback=[],
+    )
+    return {row.get("subject_id"): row for row in rows if row.get("subject_id")}
+
+
+def apply_review_task_decisions(tasks):
+    decisions = latest_review_task_decisions()
+    if not decisions:
+        return tasks
+    visible = []
+    for task in tasks:
+        decision_row = decisions.get(task.get("task_id"))
+        if not decision_row:
+            visible.append(task)
+            continue
+        decision = (decision_row.get("decision") or "").lower()
+        if decision in TERMINAL_REVIEW_TASK_DECISIONS:
+            continue
+        if decision:
+            task = {**task}
+            task["task_state"] = decision
+            task["task_updated_at"] = decision_row.get("decided_at") or task.get("task_updated_at")
+            task["review_decision_note"] = decision_row.get("note") or ""
+        visible.append(task)
+    return visible
+
+
 def review_object_rows():
     configs = [
         {
@@ -717,6 +761,7 @@ def inbox(params):
             updated_at=object_row.get("updated_at") or source_row.get("last_ingested_at"),
         ))
 
+    tasks = apply_review_task_decisions(tasks)
     filtered = [task for task in tasks if task_matches_filters(task, q, kind, project, queue)]
     filtered.sort(key=lambda task: (task_priority_rank(task.get("task_priority")), str(task.get("task_updated_at") or task.get("last_ingested_at") or "")), reverse=True)
     return {"rows": filtered[:limit], "limit": limit, "queue": queue, "row_kind": "review_task"}

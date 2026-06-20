@@ -1171,6 +1171,17 @@ body.has-source .research-shell {
   gap: 2px;
   overflow-wrap: anywhere;
 }
+.preview-note {
+  display: grid;
+  gap: 6px;
+  margin-top: 12px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 800;
+}
+.preview-note input {
+  width: 100%;
+}
 .preview-actions {
   position: sticky;
   bottom: -16px;

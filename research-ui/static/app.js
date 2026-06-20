@@ -873,8 +873,12 @@ function renderInboxPreview(row) {
       </div>
     </section>
 
+    <label class="preview-note">Decision note
+      <input id="previewDecisionNote" placeholder="Optional reason, correction note, or handoff context">
+    </label>
     <div id="previewActionStatus" class="review-status muted"></div>
     <div class="preview-actions">
+      <button class="secondary" data-preview-action="defer">Defer</button>
       <button class="secondary" data-preview-action="reject">Reject</button>
       <button class="secondary" data-preview-action="edit">Edit proposal</button>
       <button data-preview-action="open">Open workbench</button>
@@ -891,16 +895,93 @@ function renderInboxPreview(row) {
         status.textContent = '';
         return;
       }
-      if (action === 'accept') {
-        const index = state.rows.findIndex((item) => taskKeyFor(item) === state.previewTaskKey);
-        const next = state.rows[index + 1] || state.rows[0];
-        state.previewTaskKey = next ? taskKeyFor(next) : '';
-        renderInbox(state.rows);
+      if (action === 'edit') {
+        status.textContent = 'Opening source workbench for editing...';
+        await openPreviewSource(sourceId, row.task_type);
+        status.textContent = '';
         return;
       }
-      status.textContent = `${titleCase(action)} will write a durable review event once this action is connected to the review API.`;
+      try {
+        await applyPreviewDecision(row, action);
+      } catch (error) {
+        status.textContent = error.message;
+      }
     });
   });
+}
+
+function previewDecisionForAction(action) {
+  if (action === 'accept') return 'accepted';
+  if (action === 'reject') return 'rejected';
+  if (action === 'defer') return 'deferred';
+  return action || 'updated';
+}
+
+function reviewStatusForPreviewAction(row, action) {
+  const objectType = row.object_type || '';
+  if (action === 'accept') return acceptStatusByObject[objectType] || 'accepted';
+  if (action === 'reject') return rejectStatusByObject[objectType] || 'rejected';
+  if (action === 'defer') return deferStatusByObject[objectType] || 'open';
+  return '';
+}
+
+function isReviewObjectTask(row) {
+  return Boolean(row.object_type && row.object_id && reviewStatusOptions[row.object_type]);
+}
+
+function sourceAnchorForTask(row) {
+  return {
+    kind: 'review_task',
+    source_evidence_id: sourceIdFor(row),
+    task_id: row.task_id || taskKeyFor(row),
+    task_type: row.task_type || '',
+    object_type: row.object_type || '',
+    object_id: row.object_id || '',
+  };
+}
+
+async function applyPreviewDecision(row, action) {
+  const status = $('previewActionStatus');
+  const note = $('previewDecisionNote')?.value || '';
+  const sourceId = sourceIdFor(row);
+  const decision = previewDecisionForAction(action);
+  status.textContent = `${titleCase(decision)}...`;
+  if (isReviewObjectTask(row)) {
+    await postJson('/api/review-state', {
+      source_evidence_id: sourceId,
+      source_project: row.source_project || '',
+      project: row.source_project || '',
+      subject_type: row.object_type,
+      subject_id: row.object_id,
+      status: reviewStatusForPreviewAction(row, action),
+      note,
+      source_anchor: sourceAnchorForTask(row),
+      idempotency_key: `${row.task_id || taskKeyFor(row)}:${decision}:${Date.now()}`,
+    });
+  } else {
+    await postJson('/api/review/events', {
+      event_type: 'review_task.decision.recorded',
+      source_evidence_id: sourceId,
+      source_project: row.source_project || '',
+      project: row.source_project || '',
+      subject_type: 'review_task',
+      subject_id: row.task_id || taskKeyFor(row),
+      task_type: row.task_type || '',
+      object_type: row.object_type || 'source',
+      object_id: row.object_id || sourceId,
+      decision,
+      status: decision,
+      note,
+      source_anchor: sourceAnchorForTask(row),
+      idempotency_key: `${row.task_id || taskKeyFor(row)}:${decision}:${Date.now()}`,
+    });
+  }
+  status.textContent = `${titleCase(decision)} decision saved. Refreshing queue...`;
+  const currentIndex = state.rows.findIndex((item) => taskKeyFor(item) === taskKeyFor(row));
+  const next = state.rows[currentIndex + 1] || state.rows[currentIndex - 1] || null;
+  state.previewTaskKey = next ? taskKeyFor(next) : '';
+  await loadFacets();
+  await loadInbox();
 }
 
 async function openPreviewSource(sourceId, taskType) {
@@ -1284,6 +1365,33 @@ const reviewStatusOptions = {
   normalized_correction: ['proposed', 'accepted', 'rejected', 'needs_more_evidence', 'superseded'],
   entity_link: ['proposed', 'matched', 'created', 'rejected', 'merged', 'superseded'],
   claim_stub: ['draft', 'under_review', 'accepted', 'disputed', 'rejected', 'superseded'],
+};
+
+const acceptStatusByObject = {
+  evidence_selection: 'accepted',
+  annotation: 'resolved',
+  proposed_fact: 'accepted',
+  normalized_correction: 'accepted',
+  entity_link: 'matched',
+  claim_stub: 'accepted',
+};
+
+const rejectStatusByObject = {
+  evidence_selection: 'rejected',
+  annotation: 'rejected',
+  proposed_fact: 'rejected',
+  normalized_correction: 'rejected',
+  entity_link: 'rejected',
+  claim_stub: 'rejected',
+};
+
+const deferStatusByObject = {
+  evidence_selection: 'needs_more_evidence',
+  annotation: 'open',
+  proposed_fact: 'needs_more_evidence',
+  normalized_correction: 'needs_more_evidence',
+  entity_link: 'proposed',
+  claim_stub: 'under_review',
 };
 
 function reviewStateControls(subjectType, subjectId, currentStatus) {

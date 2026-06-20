@@ -138,27 +138,77 @@
 
       <section id="routePage" class="route-page hidden" aria-live="polite"></section>
 
-      <section id="inbox" class="inbox panel" data-home-section="inbox">
-        <div class="section-head">
+      <section id="inbox" class="inbox-page" data-home-section="inbox">
+        <header class="inbox-hero">
           <div>
-            <h2>Inbox</h2>
-            <div id="totals" class="muted">Loading...</div>
+            <div class="breadcrumb">Workspace / Review queue</div>
+            <h1>Research Inbox</h1>
+            <p>Review captured sources, extracted evidence, media outputs, entity links, claims, and publish-ready selections before they become durable research material.</p>
           </div>
-          <div class="filters">
-            <div id="queueList" class="queue-list inline"></div>
+          <div class="inbox-health">
+            <span id="totals" class="freshness-pill">Loading...</span>
+            <span id="inboxOpenTasks" class="status-badge info">0 open tasks</span>
+            <span id="inboxHighPriority" class="status-badge warn">0 high priority</span>
+            <span id="inboxLiveState" class="status-badge ok">live updates</span>
           </div>
-        </div>
-        <div class="source-filter-grid">
-          <section>
-            <h2>Source Types</h2>
-            <div id="kindList" class="facet-list horizontal"></div>
+        </header>
+
+        <div class="inbox-workbench">
+          <aside class="inbox-queue-panel panel">
+            <div class="panel-title-row">
+              <h2>Queues</h2>
+              <span id="inboxQueueCount" class="status-badge">0</span>
+            </div>
+            <div id="queueList" class="queue-list"></div>
+
+            <section class="inbox-filter-group">
+              <div class="panel-title-row">
+                <h2>Source Types</h2>
+              </div>
+              <div id="kindList" class="facet-list compact"></div>
+            </section>
+
+            <section class="inbox-filter-group">
+              <div class="panel-title-row">
+                <h2>Domains</h2>
+              </div>
+              <div id="domainList" class="facet-list compact"></div>
+            </section>
+          </aside>
+
+          <section class="inbox-task-panel panel">
+            <div class="task-panel-head">
+              <div>
+                <h2>Assigned to me</h2>
+                <p id="inboxActiveFilter">All queues</p>
+              </div>
+              <div class="task-panel-actions">
+                <button id="inboxClearFilters" class="secondary">Clear filters</button>
+                <button id="inboxRefreshInline">Refresh</button>
+              </div>
+            </div>
+            <label class="queue-search">
+              <span class="sr-only">Search current queue</span>
+              <input id="inboxLocalSearch" type="search" placeholder="Search current queue...">
+            </label>
+            <div class="bulk-toolbar">
+              <label><input id="inboxSelectAll" type="checkbox"> Select visible</label>
+              <span id="inboxVisibleCount" class="muted">0 tasks</span>
+              <button class="secondary" data-bulk-action="defer">Defer</button>
+              <button class="secondary" data-bulk-action="assign">Assign</button>
+            </div>
+            <div id="inboxRows" class="inbox-rows task-stream"></div>
           </section>
-          <section>
-            <h2>Domains</h2>
-            <div id="domainList" class="facet-list horizontal compact"></div>
-          </section>
+
+          <aside class="inbox-preview-panel panel">
+            <div id="inboxPreview" class="task-preview empty-preview">
+              <div class="empty-state">
+                <h2>Task Preview</h2>
+                <p>Select a task to inspect the original source, normalized candidate, artifacts, provenance, and review action path.</p>
+              </div>
+            </div>
+          </aside>
         </div>
-        <div id="inboxRows" class="inbox-rows"></div>
       </section>
     </section>
 

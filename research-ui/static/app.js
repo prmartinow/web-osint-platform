@@ -6,6 +6,7 @@ const state = {
   q: '',
   limit: '80',
   selectedId: '',
+  previewTaskKey: '',
   rows: [],
   facets: null,
   home: null,
@@ -46,6 +47,62 @@ function sourceGlyph(kind) {
   if (kind === 'media') return 'M';
   if (kind === 'user_input') return 'D';
   return 'S';
+}
+
+function titleCase(value) {
+  return String(value || '')
+    .replaceAll('_', ' ')
+    .replace(/\b\w/g, (char) => char.toUpperCase());
+}
+
+function sourceIdFor(row) {
+  return row.source_evidence_id || row.evidence_id || '';
+}
+
+function taskKeyFor(row) {
+  return row.task_id || [
+    sourceIdFor(row),
+    row.task_type || 'source',
+    row.object_type || '',
+    row.object_id || row.object_text || '',
+  ].filter(Boolean).join(':');
+}
+
+function queueLabelFor(id) {
+  const queue = (state.facets?.queues || []).find((item) => item.id === id);
+  if (queue) return queue.label;
+  if (id === 'all') return 'All queues';
+  return titleCase(id);
+}
+
+function taskTypeLabel(row) {
+  return row.task_type ? titleCase(row.task_type) : (row.review_hint ? titleCase(row.review_hint) : 'Source triage');
+}
+
+function sourceLabelFor(row) {
+  return row.source_label || titleCase(row.source_kind || 'source');
+}
+
+function taskIconFor(row) {
+  if (row.task_type?.includes('media')) return 'M';
+  if (row.task_type?.includes('entity')) return 'E';
+  if (row.task_type?.includes('claim') || row.task_type?.includes('fact')) return 'C';
+  if (row.task_type?.includes('evidence') || row.task_type?.includes('selection')) return 'S';
+  if (row.source_kind?.startsWith('x_')) return 'X';
+  if (row.source_kind?.includes('web') || row.domain) return 'W';
+  return sourceGlyph(row.source_kind);
+}
+
+function taskAccentFor(row) {
+  if (row.task_priority === 'blocking') return 'danger';
+  if (row.task_priority === 'high') return 'warn';
+  if (row.task_type?.includes('media')) return 'purple';
+  if (row.task_type?.includes('entity')) return 'teal';
+  return 'blue';
+}
+
+function selectedPreviewRow() {
+  return state.rows.find((row) => taskKeyFor(row) === state.previewTaskKey) || null;
 }
 
 function progressBar(percent) {
@@ -101,12 +158,48 @@ function renderFacets(data) {
   $('totals').textContent = `${totals.unique_evidence ?? 0} unique sources · ${totals.evidence_rows ?? 0} rows · last ingest ${fmtDate(totals.last_ingested_at)}`;
   $('navInboxCount').textContent = totals.unique_evidence ?? 0;
 
-  $('queueList').innerHTML = (data.queues || []).map((queue) => `
+  const queues = data.queues || [];
+  $('inboxQueueCount').textContent = queues.length;
+  $('inboxActiveFilter').textContent = queueLabelFor(state.queue);
+  const queueById = new Map(queues.map((queue) => [queue.id, queue]));
+  const queueGroups = [
+    { title: 'My work', ids: ['all', 'needs_review'] },
+    { title: 'Capture', ids: ['source_triage', 'version_review', 'x_sources', 'web_sources', 'manual_docs'] },
+    { title: 'Enrichment', ids: ['extraction_review', 'media_review', 'correction_review'] },
+    { title: 'Knowledge', ids: ['evidence_selection', 'entity_resolution', 'claim_review', 'fact_review'] },
+    { title: 'Publishing', ids: ['selection_review', 'annotation_followup'] },
+  ];
+  const rendered = new Set();
+  $('queueList').innerHTML = queueGroups.map((group) => {
+    const items = group.ids.map((id) => queueById.get(id)).filter(Boolean);
+    items.forEach((item) => rendered.add(item.id));
+    if (!items.length) return '';
+    return `
+      <section class="queue-group">
+        <h3>${escapeHtml(group.title)}</h3>
+        ${items.map((queue) => `
+          <button class="queue ${state.queue === queue.id ? 'active' : ''}" data-queue="${escapeHtml(queue.id)}">
+            <span class="queue-mark"></span>
+            <span class="queue-copy">
+              <strong>${escapeHtml(queue.label)}</strong>
+              <em>${escapeHtml(queueDescription(queue.id))}</em>
+            </span>
+            ${queue.count || queue.count === 0 ? `<span class="count">${escapeHtml(queue.count)}</span>` : ''}
+          </button>
+        `).join('')}
+      </section>
+    `;
+  }).join('') + queues.filter((queue) => !rendered.has(queue.id)).map((queue) => `
     <button class="queue ${state.queue === queue.id ? 'active' : ''}" data-queue="${escapeHtml(queue.id)}">
-      <span>${escapeHtml(queue.label)}</span>
+      <span class="queue-mark"></span>
+      <span class="queue-copy">
+        <strong>${escapeHtml(queue.label)}</strong>
+        <em>Saved queue</em>
+      </span>
       ${queue.count || queue.count === 0 ? `<span class="count">${escapeHtml(queue.count)}</span>` : ''}
     </button>
   `).join('');
+
   $('kindList').innerHTML = [
     `<button class="facet ${state.kind === '' ? 'active' : ''}" data-kind=""><span>All source types</span><span class="count">${totals.evidence_rows ?? ''}</span></button>`,
     ...(data.source_kinds || []).map((row) => `
@@ -130,6 +223,7 @@ function renderFacets(data) {
   document.querySelectorAll('[data-queue]').forEach((button) => {
     button.addEventListener('click', () => {
       state.queue = button.dataset.queue || 'all';
+      state.previewTaskKey = '';
       loadInbox();
       renderFacets(state.facets);
     });
@@ -137,17 +231,41 @@ function renderFacets(data) {
   document.querySelectorAll('[data-kind]').forEach((button) => {
     button.addEventListener('click', () => {
       state.kind = button.dataset.kind || '';
+      state.previewTaskKey = '';
       loadInbox();
       renderFacets(state.facets);
     });
   });
   document.querySelectorAll('[data-domain]').forEach((button) => {
     button.addEventListener('click', () => {
-      $('searchInput').value = button.dataset.domain || '';
-      state.q = $('searchInput').value;
+      state.q = button.dataset.domain || '';
+      syncInboxSearchInputs(state.q);
+      state.previewTaskKey = '';
       loadInbox();
     });
   });
+}
+
+function queueDescription(id) {
+  const descriptions = {
+    all: 'Everything that needs review',
+    needs_review: 'Open review work',
+    source_triage: 'New captures and raw sources',
+    extraction_review: 'Normalized content checks',
+    media_review: 'OCR, screenshots, video, and VL outputs',
+    evidence_selection: 'Source passages worth keeping',
+    version_review: 'Potentially superseded captures',
+    entity_resolution: 'People, labs, models, repos, and accounts',
+    claim_review: 'Claims that need support or contradiction checks',
+    fact_review: 'Structured facts before promotion',
+    correction_review: 'Text and metadata fixes',
+    selection_review: 'Publication candidates',
+    annotation_followup: 'Machine annotations to inspect',
+    x_sources: 'Captured X evidence',
+    web_sources: 'Web pages and blog posts',
+    manual_docs: 'User-added research documents',
+  };
+  return descriptions[id] || 'Review queue';
 }
 
 function renderHome(data) {
@@ -609,40 +727,191 @@ function setRoute(route, push = true) {
 
 function renderInbox(rows) {
   state.rows = rows;
+  const highPriority = rows.filter((row) => row.task_priority === 'high' || row.task_priority === 'blocking').length;
+  $('inboxOpenTasks').textContent = `${rows.length} open task${rows.length === 1 ? '' : 's'}`;
+  $('inboxHighPriority').textContent = `${highPriority} high priority`;
+  $('inboxVisibleCount').textContent = `${rows.length} visible task${rows.length === 1 ? '' : 's'}`;
+  $('inboxLiveState').textContent = `updated ${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
   if (!rows.length) {
     $('inboxRows').innerHTML = `<div class="empty-state"><h2>No review tasks</h2><p>Try a different queue or search.</p></div>`;
+    renderInboxPreview(null);
     return;
   }
-  $('inboxRows').innerHTML = rows.map((row) => `
-    <article class="row ${state.selectedId === (row.source_evidence_id || row.evidence_id) ? 'active' : ''}"
-      data-id="${escapeHtml(row.source_evidence_id || row.evidence_id)}"
+  if (!state.previewTaskKey || !rows.some((row) => taskKeyFor(row) === state.previewTaskKey)) {
+    state.previewTaskKey = taskKeyFor(rows[0]);
+  }
+  $('inboxRows').innerHTML = rows.map((row) => {
+    const sourceId = sourceIdFor(row);
+    const taskKey = taskKeyFor(row);
+    const selected = state.previewTaskKey === taskKey;
+    const accent = taskAccentFor(row);
+    return `
+    <article class="task-card row ${selected ? 'active' : ''}"
+      data-id="${escapeHtml(sourceId)}"
+      data-task-key="${escapeHtml(taskKey)}"
       data-task-type="${escapeHtml(row.task_type || '')}"
       data-object-type="${escapeHtml(row.object_type || '')}">
-      <div class="task-title">${escapeHtml(taskTitleFor(row))}</div>
-      <div class="task-source">${escapeHtml(titleFor(row))}</div>
-      <div class="row-meta">
-        ${row.task_type ? `<span class="pill">${escapeHtml(row.task_type.replaceAll('_', ' '))}</span>` : ''}
-        ${row.object_type && row.object_type !== 'source' ? `<span class="pill">${escapeHtml(row.object_type.replaceAll('_', ' '))}</span>` : ''}
-        ${row.task_priority ? `<span class="pill task-priority ${escapeHtml(row.task_priority)}">${escapeHtml(row.task_priority)}</span>` : ''}
-        ${row.task_state ? `<span class="pill">${escapeHtml(row.task_state)}</span>` : ''}
-        <span class="pill">${escapeHtml(row.source_label || row.source_kind)}</span>
-        ${row.author_handle ? `<span class="pill">@${escapeHtml(row.author_handle)}</span>` : ''}
-        ${row.domain ? `<span class="pill">${escapeHtml(row.domain)}</span>` : ''}
-        ${row.has_media ? `<span class="pill ok">media</span>` : ''}
-        ${row.has_ocr ? `<span class="pill ok">OCR</span>` : ''}
-        ${row.review_hint ? `<span class="pill warn">${escapeHtml(row.review_hint)}</span>` : ''}
+      <input class="task-check" type="checkbox" aria-label="Select task">
+      <span class="task-kind-icon ${escapeHtml(accent)}">${escapeHtml(taskIconFor(row))}</span>
+      <div class="task-main">
+        <div class="task-title-line">
+          <span class="task-title">${escapeHtml(taskTitleFor(row))}</span>
+          ${row.task_priority ? `<span class="pill task-priority ${escapeHtml(row.task_priority)}">${escapeHtml(row.task_priority)}</span>` : ''}
+        </div>
+        <div class="task-source">${escapeHtml(titleFor(row))}</div>
+        <div class="row-snippet">${escapeHtml(row.task_reason || row.snippet || row.canonical_url || row.evidence_id)}</div>
+        ${row.object_text ? `<div class="task-object">${escapeHtml(row.object_text)}</div>` : ''}
+        <div class="row-meta">
+          <span class="pill">${escapeHtml(taskTypeLabel(row))}</span>
+          ${row.object_type && row.object_type !== 'source' ? `<span class="pill">${escapeHtml(titleCase(row.object_type))}</span>` : ''}
+          ${row.task_state ? `<span class="pill">${escapeHtml(titleCase(row.task_state))}</span>` : ''}
+          <span class="pill">${escapeHtml(sourceLabelFor(row))}</span>
+          ${row.author_handle ? `<span class="pill">@${escapeHtml(row.author_handle)}</span>` : ''}
+          ${row.domain ? `<span class="pill">${escapeHtml(row.domain)}</span>` : ''}
+          ${row.has_media ? `<span class="pill ok">media</span>` : ''}
+          ${row.has_ocr ? `<span class="pill ok">OCR</span>` : ''}
+          ${row.review_hint ? `<span class="pill warn">${escapeHtml(row.review_hint)}</span>` : ''}
+        </div>
       </div>
-      <div class="row-snippet">${escapeHtml(row.task_reason || row.snippet || row.canonical_url || row.evidence_id)}</div>
-      ${row.object_text ? `<div class="task-object">${escapeHtml(row.object_text)}</div>` : ''}
-      <div class="muted">${fmtDate(row.task_updated_at || row.last_ingested_at)} · ${row.text_chars || 0} chars · ${row.observations || 0} observation(s)</div>
+      <div class="task-side">
+        <span class="task-state">${escapeHtml(titleCase(row.task_state || 'open'))}</span>
+        <span>${escapeHtml(fmtDate(row.task_updated_at || row.last_ingested_at) || 'no timestamp')}</span>
+        <em>${row.text_chars || 0} chars · ${row.observations || 0} obs</em>
+      </div>
     </article>
-  `).join('');
+  `;
+  }).join('');
   document.querySelectorAll('.row[data-id]').forEach((row) => {
-    row.addEventListener('click', async () => {
-      await selectSource(row.dataset.id);
-      if (row.dataset.taskType && row.dataset.taskType !== 'source_triage') activateTab('review');
+    row.addEventListener('click', () => {
+      state.previewTaskKey = row.dataset.taskKey || '';
+      renderInbox(state.rows);
+    });
+    row.addEventListener('dblclick', async () => {
+      await openPreviewSource(row.dataset.id, row.dataset.taskType);
+    });
+    row.querySelector('.task-check')?.addEventListener('click', (event) => {
+      event.stopPropagation();
     });
   });
+  renderInboxPreview(selectedPreviewRow());
+}
+
+function renderInboxPreview(row) {
+  if (!row) {
+    $('inboxPreview').className = 'task-preview empty-preview';
+    $('inboxPreview').innerHTML = `
+      <div class="empty-state">
+        <h2>Task Preview</h2>
+        <p>Select a task to inspect the original source, normalized candidate, artifacts, provenance, and review action path.</p>
+      </div>
+    `;
+    return;
+  }
+  const sourceId = sourceIdFor(row);
+  const sourceTitle = titleFor(row);
+  const originalText = row.snippet || row.canonical_url || row.evidence_id || '';
+  const candidateText = row.object_text || row.task_reason || row.snippet || '';
+  $('inboxPreview').className = 'task-preview';
+  $('inboxPreview').innerHTML = `
+    <div class="preview-topline">
+      <span class="task-kind-icon ${escapeHtml(taskAccentFor(row))}">${escapeHtml(taskIconFor(row))}</span>
+      <div>
+        <h2>${escapeHtml(taskTypeLabel(row))}</h2>
+        <h3>${escapeHtml(taskTitleFor(row))}</h3>
+      </div>
+      ${row.task_priority ? `<span class="pill task-priority ${escapeHtml(row.task_priority)}">${escapeHtml(row.task_priority)}</span>` : ''}
+    </div>
+
+    <div class="preview-meta-grid">
+      <div><span>Project</span><strong>${escapeHtml(row.source_project || 'Inbox')}</strong></div>
+      <div><span>Owner</span><strong>You</strong></div>
+      <div><span>Captured</span><strong>${escapeHtml(fmtDate(row.captured_at || row.last_ingested_at) || 'Unknown')}</strong></div>
+    </div>
+
+    <section class="preview-card reason-card">
+      <h4>Why this is here</h4>
+      <p>${escapeHtml(row.task_reason || row.review_hint || 'This source or derived object needs human inspection before promotion.')}</p>
+    </section>
+
+    <nav class="preview-tabs" aria-label="Task preview sections">
+      <button class="active" type="button">Original source</button>
+      <button type="button">Normalized</button>
+      <button type="button">Artifacts</button>
+      <button type="button">Provenance</button>
+    </nav>
+
+    <section class="preview-card source-card">
+      <div class="source-card-head">
+        <span class="source-glyph">${escapeHtml(sourceGlyph(row.source_kind))}</span>
+        <div>
+          <h4>${escapeHtml(sourceTitle)}</h4>
+          <p>${escapeHtml([sourceLabelFor(row), row.author_handle ? '@' + row.author_handle : row.domain, fmtDate(row.posted_at || row.captured_at)].filter(Boolean).join(' · '))}</p>
+        </div>
+      </div>
+      ${row.canonical_url ? `<a href="${escapeHtml(row.canonical_url)}" target="_blank" rel="noreferrer">${escapeHtml(row.canonical_url)}</a>` : ''}
+      <p>${escapeHtml(originalText || 'No source preview text available yet.')}</p>
+    </section>
+
+    <section class="preview-card normalized-card">
+      <h4>Proposed normalized work item</h4>
+      <p>${escapeHtml(candidateText || 'No derived candidate text is available for this task yet.')}</p>
+      <div class="tag-line">
+        ${row.object_type ? `<span class="pill">${escapeHtml(titleCase(row.object_type))}</span>` : ''}
+        ${row.object_id ? `<span class="pill">${escapeHtml(row.object_id)}</span>` : ''}
+        ${row.has_media ? `<span class="pill ok">media attached</span>` : ''}
+        ${row.has_ocr ? `<span class="pill ok">OCR available</span>` : ''}
+      </div>
+    </section>
+
+    <section class="preview-card">
+      <h4>Source trail</h4>
+      <div class="source-trail">
+        <span><strong>Source</strong>${escapeHtml(sourceId || 'unknown')}</span>
+        <span><strong>Task</strong>${escapeHtml(row.task_id || taskKeyFor(row))}</span>
+        <span><strong>State</strong>${escapeHtml(titleCase(row.task_state || 'open'))}</span>
+        <span><strong>Updated</strong>${escapeHtml(fmtDate(row.task_updated_at || row.last_ingested_at) || 'unknown')}</span>
+      </div>
+    </section>
+
+    <div id="previewActionStatus" class="review-status muted"></div>
+    <div class="preview-actions">
+      <button class="secondary" data-preview-action="reject">Reject</button>
+      <button class="secondary" data-preview-action="edit">Edit proposal</button>
+      <button data-preview-action="open">Open workbench</button>
+      <button data-preview-action="accept">Accept & next</button>
+    </div>
+  `;
+  document.querySelectorAll('[data-preview-action]').forEach((button) => {
+    button.addEventListener('click', async () => {
+      const action = button.dataset.previewAction;
+      const status = $('previewActionStatus');
+      if (action === 'open') {
+        status.textContent = 'Opening source workbench...';
+        await openPreviewSource(sourceId, row.task_type);
+        status.textContent = '';
+        return;
+      }
+      if (action === 'accept') {
+        const index = state.rows.findIndex((item) => taskKeyFor(item) === state.previewTaskKey);
+        const next = state.rows[index + 1] || state.rows[0];
+        state.previewTaskKey = next ? taskKeyFor(next) : '';
+        renderInbox(state.rows);
+        return;
+      }
+      status.textContent = `${titleCase(action)} will write a durable review event once this action is connected to the review API.`;
+    });
+  });
+}
+
+async function openPreviewSource(sourceId, taskType) {
+  if (!sourceId) return;
+  await selectSource(sourceId);
+  if (taskType && taskType !== 'source_triage') activateTab('review');
+}
+
+function syncInboxSearchInputs(value) {
+  if ($('searchInput')) $('searchInput').value = value;
+  if ($('inboxLocalSearch')) $('inboxLocalSearch').value = value;
 }
 
 async function loadFacets() {
@@ -658,11 +927,14 @@ async function loadInbox() {
   if (state.project) params.set('project', state.project);
   if (state.q) params.set('q', state.q);
   $('inboxRows').innerHTML = `<div class="empty-state"><h2>Loading</h2><p>Reading the evidence inbox.</p></div>`;
+  $('inboxLiveState').textContent = 'refreshing...';
   try {
     const data = await fetchJson(`/api/inbox?${params.toString()}`);
     renderInbox(data.rows || []);
   } catch (error) {
     $('inboxRows').innerHTML = `<div class="empty-state"><h2>Inbox error</h2><p>${escapeHtml(error.message)}</p></div>`;
+    $('inboxLiveState').textContent = 'error';
+    renderInboxPreview(null);
   }
 }
 
@@ -1534,7 +1806,9 @@ async function selectSource(id) {
     renderRaw(source);
     renderReview(source);
     renderProvenance(source);
-    document.querySelectorAll('.row').forEach((row) => row.classList.toggle('active', row.dataset.id === id));
+    document.querySelectorAll('.row').forEach((row) => {
+      row.classList.toggle('source-open', row.dataset.id === id);
+    });
   } catch (error) {
     $('sourceTitle').textContent = 'Source error';
     $('tab-normalized').innerHTML = `<div class="empty-state"><h2>Failed to load source</h2><p>${escapeHtml(error.message)}</p></div>`;
@@ -1559,7 +1833,7 @@ function wireEvents() {
     state.kind = '';
     state.project = '';
     state.q = 'datalab chandra';
-    $('searchInput').value = state.q;
+    syncInboxSearchInputs(state.q);
     $('projectSelect').value = '';
     loadFacets();
     loadInbox();
@@ -1576,7 +1850,7 @@ function wireEvents() {
     state.queue = 'all';
     state.kind = '';
     state.q = '';
-    $('searchInput').value = '';
+    syncInboxSearchInputs('');
     loadFacets();
     loadInbox();
     setRoute('library');
@@ -1588,14 +1862,49 @@ function wireEvents() {
   });
   $('searchInput').addEventListener('input', () => {
     state.q = $('searchInput').value.trim();
+    if ($('inboxLocalSearch') && $('inboxLocalSearch').value !== state.q) $('inboxLocalSearch').value = state.q;
     clearTimeout(window.__inboxTimer);
     window.__inboxTimer = setTimeout(() => {
       if (state.route === 'home' || state.route === 'inbox') loadInbox();
       else loadRoutePage();
     }, 250);
   });
+  $('inboxLocalSearch').addEventListener('input', () => {
+    state.q = $('inboxLocalSearch').value.trim();
+    if ($('searchInput').value !== state.q) $('searchInput').value = state.q;
+    clearTimeout(window.__inboxTimer);
+    window.__inboxTimer = setTimeout(() => loadInbox(), 250);
+  });
+  $('inboxClearFilters').addEventListener('click', () => {
+    state.queue = 'all';
+    state.kind = '';
+    state.project = '';
+    state.q = '';
+    state.previewTaskKey = '';
+    syncInboxSearchInputs('');
+    $('projectSelect').value = '';
+    loadFacets();
+    loadInbox();
+  });
+  $('inboxRefreshInline').addEventListener('click', () => {
+    loadFacets();
+    loadInbox();
+  });
+  $('inboxSelectAll').addEventListener('change', () => {
+    document.querySelectorAll('#inboxRows .task-check').forEach((checkbox) => {
+      checkbox.checked = $('inboxSelectAll').checked;
+    });
+  });
+  document.querySelectorAll('[data-bulk-action]').forEach((button) => {
+    button.addEventListener('click', () => {
+      const selected = document.querySelectorAll('#inboxRows .task-check:checked').length;
+      const preview = $('previewActionStatus');
+      if (preview) preview.textContent = `${titleCase(button.dataset.bulkAction)} is staged for ${selected} selected task${selected === 1 ? '' : 's'} once bulk review events are wired.`;
+    });
+  });
   $('projectSelect').addEventListener('change', () => {
     state.project = $('projectSelect').value;
+    state.previewTaskKey = '';
     loadInbox();
     if (state.route !== 'home' && state.route !== 'inbox') loadRoutePage();
   });

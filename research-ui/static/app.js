@@ -13,6 +13,8 @@ const state = {
   currentSource: null,
   currentDoc: null,
   selectedBlock: null,
+  projectPhase: '',
+  projectOwner: '',
 };
 
 const $ = (id) => document.getElementById(id);
@@ -418,39 +420,392 @@ function bindObjectRows() {
   });
 }
 
+function numeric(row, key) {
+  return Number(row?.[key] || 0);
+}
+
+function percentLike(completed, total) {
+  const safeTotal = Number(total || 0);
+  if (!safeTotal) return 0;
+  return Math.round((Number(completed || 0) / safeTotal) * 100);
+}
+
+function projectCoverageRows(row) {
+  return [
+    { label: 'Release claims', x: numeric(row, 'x_sources'), web: numeric(row, 'web_sources'), media: numeric(row, 'media_sources'), docs: numeric(row, 'manual_sources') },
+    { label: 'Benchmarks', x: numeric(row, 'x_sources'), web: numeric(row, 'web_sources'), media: numeric(row, 'ocr_rows'), docs: numeric(row, 'manual_sources') },
+    { label: 'Licensing', x: numeric(row, 'x_sources'), web: numeric(row, 'web_sources'), media: 0, docs: numeric(row, 'manual_sources') },
+    { label: 'Hardware & cost', x: numeric(row, 'x_sources'), web: numeric(row, 'web_sources'), media: numeric(row, 'media_sources'), docs: numeric(row, 'manual_sources') },
+  ];
+}
+
+function coverageDot(value, label) {
+  const count = Number(value || 0);
+  const bucket = count === 0 ? 0 : count === 1 ? 1 : count === 2 ? 2 : 3;
+  return `<span class="project-coverage-cell" aria-label="${escapeHtml(label)}: ${count} source${count === 1 ? '' : 's'}"><span class="dot-scale count-${bucket}"></span><strong>${escapeHtml(count)}</strong></span>`;
+}
+
+function sourceTargetPercent(target) {
+  return percentLike(target.current, Math.max(1, target.target || 1));
+}
+
+function projectRouteButton(row, label, route) {
+  return `<button type="button" class="text-button project-nav-action" data-project="${escapeHtml(row.project_id || '')}" data-route-target="${escapeHtml(route)}">${escapeHtml(label)}</button>`;
+}
+
+function briefLines(items, key = 'text') {
+  return (items || []).map((item) => item?.[key] || '').filter(Boolean).join('\n');
+}
+
+function definitionsText(items) {
+  return (items || []).map((item) => `${item.term || ''}: ${item.definition || ''}`.trim()).filter(Boolean).join('\n');
+}
+
+function splitLines(value) {
+  return String(value || '').split(/\n+/).map((line) => line.trim()).filter(Boolean);
+}
+
+function parseDefinitionLines(value) {
+  return splitLines(value).map((line) => {
+    const match = line.match(/^([^:—-]+)\s*(?::|—|-)\s*(.*)$/);
+    if (!match) return { term: line, definition: '' };
+    return { term: match[1].trim(), definition: match[2].trim() };
+  });
+}
+
+function activeProjectRow(rows) {
+  if (!rows.length) return null;
+  if (state.project) {
+    return rows.find((row) => String(row.project_id || '') === String(state.project)) || rows[0];
+  }
+  return rows[0];
+}
+
+function renderProjectLocalNav(row) {
+  return `
+    <nav class="project-local-nav" aria-label="${escapeHtml(row.name)} local navigation">
+      ${projectRouteButton(row, 'Home', 'home')}
+      <button type="button" class="text-button active" disabled>Brief</button>
+      ${projectRouteButton(row, 'Sources', 'library')}
+      ${projectRouteButton(row, 'Evidence', 'evidence')}
+      ${projectRouteButton(row, 'Claims', 'claims')}
+      ${projectRouteButton(row, 'Entities', 'entities')}
+      <button type="button" class="text-button" disabled>Timeline</button>
+      <button type="button" class="text-button" disabled>Compare</button>
+      <button type="button" class="text-button" disabled>Drafts</button>
+      ${projectRouteButton(row, 'Publishing', 'publishing')}
+      ${projectRouteButton(row, 'Inbox', 'inbox')}
+    </nav>
+  `;
+}
+
+function renderSourceTarget(target) {
+  const pct = sourceTargetPercent(target);
+  return `
+    <div class="source-target-row">
+      <span>${escapeHtml(target.label)}</span>
+      ${progressBar(Math.min(100, pct))}
+      <strong>${escapeHtml(target.current)} / ${escapeHtml(target.target)}</strong>
+    </div>
+  `;
+}
+
+function renderCoverageRule(rule) {
+  return `
+    <div class="coverage-rule ${rule.status === 'pass' ? 'ok' : 'warn'}">
+      <span class="status-badge ${rule.status === 'pass' ? 'ok' : 'warn'}">${escapeHtml(rule.status === 'pass' ? 'pass' : 'needs work')}</span>
+      <strong>${escapeHtml(rule.label)}</strong>
+      <p>${escapeHtml(rule.rule)}</p>
+      <em>${escapeHtml(rule.current)} / ${escapeHtml(rule.target)}</em>
+    </div>
+  `;
+}
+
+function renderProjectBlocker(row, blocker) {
+  return `
+    <button type="button" class="project-blocker-item" data-project="${escapeHtml(row.project_id || '')}" data-route-target="${escapeHtml(blocker.route || 'inbox')}">
+      <span class="status-badge ${escapeHtml(blocker.severity || 'warn')}">${escapeHtml(blocker.count || 0)}</span>
+      <strong>${escapeHtml(blocker.label)}</strong>
+      <p>${escapeHtml(blocker.detail || '')}</p>
+    </button>
+  `;
+}
+
+function renderSavedView(row, view) {
+  return `
+    <button type="button" class="saved-view-row" data-project="${escapeHtml(row.project_id || '')}" data-route-target="${escapeHtml(view.route || 'library')}">
+      <strong>${escapeHtml(view.label)}</strong>
+      <span>${escapeHtml(view.description || '')}</span>
+    </button>
+  `;
+}
+
+function renderAuditEvent(event) {
+  return `
+    <div class="audit-event-row">
+      <span>${escapeHtml(fmtDate(event.created_at))}</span>
+      <strong>${escapeHtml(titleCase(event.event_type || 'project event'))}</strong>
+      <em>${escapeHtml(event.actor || '')}</em>
+    </div>
+  `;
+}
+
+function projectBriefPayload(row) {
+  const scopeTags = splitLines(document.querySelector('[data-brief-scope="tags"]')?.value || '').flatMap((line) => line.split(',')).map((item) => item.trim()).filter(Boolean);
+  return {
+    project_id: row.project_id || '',
+    project_name: row.name || row.project_id || '(unassigned)',
+    expected_version: state.activeProjectBriefVersion || row.brief?.version || '',
+    idempotency_key: `project-brief-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+    research_question: document.querySelector('[data-brief-field="research_question"]')?.value || '',
+    decision_supported: document.querySelector('[data-brief-field="decision_supported"]')?.value || '',
+    scope: {
+      time_window: document.querySelector('[data-brief-scope="time_window"]')?.value || '',
+      geography: document.querySelector('[data-brief-scope="geography"]')?.value || '',
+      population: document.querySelector('[data-brief-scope="population"]')?.value || '',
+      evidence_policy: document.querySelector('[data-brief-scope="evidence_policy"]')?.value || '',
+      tags: scopeTags,
+    },
+    inclusion_criteria: splitLines(document.querySelector('[data-brief-list="inclusion_criteria"]')?.value || '').map((text) => ({ text, status: 'active' })),
+    exclusion_criteria: splitLines(document.querySelector('[data-brief-list="exclusion_criteria"]')?.value || '').map((text) => ({ text, status: 'active' })),
+    open_questions: splitLines(document.querySelector('[data-brief-list="open_questions"]')?.value || '').map((text) => ({ text, status: 'open', owner: 'web-osint-user' })),
+    working_definitions: parseDefinitionLines(document.querySelector('[data-brief-list="working_definitions"]')?.value || ''),
+    limitations: splitLines(document.querySelector('[data-brief-list="limitations"]')?.value || '').map((text) => ({ text, status: 'active' })),
+  };
+}
+
+function setProjectBriefStatus(text, mode = '') {
+  const node = $('projectBriefSaveStatus');
+  if (!node) return;
+  node.textContent = text;
+  node.className = `status-badge ${mode}`.trim();
+}
+
+function scheduleProjectBriefSave(row) {
+  setProjectBriefStatus('Saving...', 'warn');
+  clearTimeout(window.__projectBriefSaveTimer);
+  window.__projectBriefSaveTimer = setTimeout(() => saveProjectBrief(row), 850);
+}
+
+async function saveProjectBrief(row) {
+  try {
+    const result = await postJson('/api/project-brief', projectBriefPayload(row));
+    row.brief = result.brief;
+    state.activeProjectBriefVersion = result.brief.version;
+    $('projectBriefVersion').textContent = `v${result.brief.version}`;
+    $('projectBriefMaterialChanges').textContent = result.brief.material_changes_since_review ?? 0;
+    $('projectBriefReviewState').textContent = titleCase(result.brief.review_state || 'draft');
+    setProjectBriefStatus('Saved just now', 'ok');
+  } catch (error) {
+    setProjectBriefStatus(error.message, 'danger');
+  }
+}
+
+async function sendProjectBriefToReview(row) {
+  setProjectBriefStatus('Sending to review...', 'warn');
+  clearTimeout(window.__projectBriefSaveTimer);
+  try {
+    const result = await postJson('/api/project-brief/review', projectBriefPayload(row));
+    row.brief = result.brief;
+    state.activeProjectBriefVersion = result.brief.version;
+    loadRoutePage();
+  } catch (error) {
+    setProjectBriefStatus(error.message, 'danger');
+  }
+}
+
 function renderProjectsPage(data) {
   const rows = data.rows || [];
+  const ownerOptions = [...new Set(rows.map((row) => row.owner).filter(Boolean))];
+  const phaseOptions = [...new Set(rows.map((row) => row.phase).filter(Boolean))];
+  const visibleRows = rows.filter((row) => {
+    if (state.projectPhase && row.phase !== state.projectPhase) return false;
+    if (state.projectOwner && row.owner !== state.projectOwner) return false;
+    return true;
+  });
+  const sourceTotal = visibleRows.reduce((sum, row) => sum + numeric(row, 'sources'), 0);
+  const acceptedEvidence = visibleRows.reduce((sum, row) => sum + numeric(row, 'accepted_evidence'), 0);
+  const blockers = visibleRows.reduce((sum, row) => sum + numeric(row, 'publication_blockers'), 0);
+  const activeRow = activeProjectRow(visibleRows);
+  const brief = activeRow?.brief || {};
+  state.activeProjectBriefVersion = brief.version || '';
   $('routePage').innerHTML = `
-    ${pageHeader('Projects', 'Project-scoped research boundaries, source counts, coverage phase, and activity.')}
+    ${pageHeader('Projects', 'Project Brief workspace for research scope, coverage rules, open questions, and review handoff.')}
+    <section class="panel projects-toolbar" aria-label="Project filters">
+      <label>
+        <span>Search</span>
+        <input id="projectRouteSearch" type="search" value="${escapeHtml(state.q)}" placeholder="Search project, source, domain, or question">
+      </label>
+      <label>
+        <span>Project</span>
+        <select id="projectWorkspaceSelect">
+          ${visibleRows.map((row) => `<option value="${escapeHtml(row.project_id || '')}" ${activeRow && (row.project_id || '') === (activeRow.project_id || '') ? 'selected' : ''}>${escapeHtml(row.name)}</option>`).join('')}
+        </select>
+      </label>
+      <label>
+        <span>Phase</span>
+        <select id="projectPhaseFilter">
+          <option value="">All phases</option>
+          ${phaseOptions.map((phase) => `<option value="${escapeHtml(phase)}" ${state.projectPhase === phase ? 'selected' : ''}>${escapeHtml(titleCase(phase))}</option>`).join('')}
+        </select>
+      </label>
+      <label>
+        <span>Owner</span>
+        <select id="projectOwnerFilter">
+          <option value="">All owners</option>
+          ${ownerOptions.map((owner) => `<option value="${escapeHtml(owner)}" ${state.projectOwner === owner ? 'selected' : ''}>${escapeHtml(owner)}</option>`).join('')}
+        </select>
+      </label>
+    </section>
     ${metricCards([
-      { label: 'Projects', value: rows.length },
-      { label: 'Sources', value: rows.reduce((sum, row) => sum + Number(row.sources || 0), 0) },
-      { label: 'Evidence rows', value: rows.reduce((sum, row) => sum + Number(row.evidence_rows || 0), 0) },
+      { label: 'Projects', value: visibleRows.length, hint: rows.length !== visibleRows.length ? `${rows.length} total` : 'visible' },
+      { label: 'Sources', value: sourceTotal },
+      { label: 'Accepted evidence', value: acceptedEvidence, hint: 'review layer' },
+      { label: 'Publication blockers', value: blockers, hint: blockers ? 'needs work' : 'clear' },
     ])}
-    <section class="panel page-panel">
-      <div class="panel-title-row"><h2>Project List</h2><span class="status-badge">source-backed</span></div>
-      <div class="dense-list">${rows.map((row) => `
-        <article class="project-row">
+    ${activeRow ? `
+      <article class="project-brief-workspace">
+        <header class="panel project-brief-header">
           <div>
-            <h3>${escapeHtml(row.name)}</h3>
-            <p>${escapeHtml(row.question)}</p>
+            <div class="breadcrumb">Projects / ${escapeHtml(activeRow.visibility || 'internal')} / Brief</div>
+            <h2>${escapeHtml(activeRow.name)}</h2>
+            <p>${escapeHtml(activeRow.scope || 'Project-scoped evidence review and curation workspace.')}</p>
             <div class="tag-line">
-              <span class="pill">${escapeHtml(row.phase)}</span>
-              <span class="pill">${escapeHtml(row.sources)} sources</span>
-              <span class="pill">${escapeHtml(row.x_sources)} X</span>
-              <span class="pill">${escapeHtml(row.web_sources)} web</span>
-              <span class="pill">${escapeHtml(row.manual_sources)} manual</span>
+              <span id="projectBriefReviewState" class="pill">${escapeHtml(titleCase(brief.review_state || 'draft'))}</span>
+              <span id="projectBriefVersion" class="pill">v${escapeHtml(brief.version || '1')}</span>
+              <span class="pill">${escapeHtml(activeRow.sources)} captured sources</span>
+              <span class="pill">${escapeHtml(activeRow.accepted_evidence)} accepted evidence</span>
             </div>
           </div>
-          <div class="row-progress">
-            ${progressBar(row.completion_percent)}
-            <strong>${escapeHtml(row.completion_percent)}%</strong>
-            <em>${escapeHtml(fmtDate(row.last_activity))}</em>
+          <div class="project-brief-actions">
+            <span id="projectBriefSaveStatus" class="status-badge ok">Saved</span>
+            <button id="projectBriefPreviewButton" type="button" class="secondary">Preview changes</button>
+            <button id="projectBriefReviewButton" type="button">Send to review</button>
           </div>
-        </article>
-      `).join('') || '<p class="muted padded">No projects found.</p>'}</div>
-    </section>
+        </header>
+        ${renderProjectLocalNav(activeRow)}
+        <div class="project-brief-layout">
+          <section class="project-brief-editor panel">
+            <div class="brief-editor-section">
+              <div class="panel-title-row"><h2>Research Question And Scope</h2><span class="status-badge">autosave</span></div>
+              <label><span>Research question</span><textarea data-brief-field="research_question">${escapeHtml(brief.research_question || '')}</textarea></label>
+              <label><span>Decision supported</span><textarea data-brief-field="decision_supported">${escapeHtml(brief.decision_supported || '')}</textarea></label>
+              <div class="scope-field-grid">
+                <label><span>Time window</span><input data-brief-scope="time_window" value="${escapeHtml(brief.scope?.time_window || '')}"></label>
+                <label><span>Geography</span><input data-brief-scope="geography" value="${escapeHtml(brief.scope?.geography || '')}"></label>
+                <label class="wide"><span>Population / domain</span><input data-brief-scope="population" value="${escapeHtml(brief.scope?.population || '')}"></label>
+                <label class="wide"><span>Evidence policy</span><textarea data-brief-scope="evidence_policy">${escapeHtml(brief.scope?.evidence_policy || '')}</textarea></label>
+                <label class="wide"><span>Tags</span><input data-brief-scope="tags" value="${escapeHtml((brief.scope?.tags || []).join(', '))}"></label>
+              </div>
+            </div>
+            <div class="criteria-grid">
+              <label><span>Inclusion criteria</span><textarea data-brief-list="inclusion_criteria">${escapeHtml(briefLines(brief.inclusion_criteria))}</textarea></label>
+              <label><span>Exclusion criteria</span><textarea data-brief-list="exclusion_criteria">${escapeHtml(briefLines(brief.exclusion_criteria))}</textarea></label>
+            </div>
+            <div class="brief-editor-section">
+              <div class="panel-title-row"><h2>Open Questions</h2><span class="status-badge warn">${escapeHtml((brief.open_questions || []).length)} active</span></div>
+              <textarea data-brief-list="open_questions">${escapeHtml(briefLines(brief.open_questions))}</textarea>
+            </div>
+            <div class="brief-editor-section">
+              <div class="panel-title-row"><h2>Working Definitions</h2><span class="status-badge">project terms</span></div>
+              <textarea data-brief-list="working_definitions">${escapeHtml(definitionsText(brief.working_definitions))}</textarea>
+            </div>
+            <div class="brief-editor-section">
+              <div class="panel-title-row"><h2>Key Accepted Findings</h2><span class="status-badge ${activeRow.accepted_claims ? 'ok' : 'warn'}">claim projections</span></div>
+              <div class="accepted-finding-box">
+                ${activeRow.accepted_claims ? `<strong>${escapeHtml(activeRow.accepted_claims)} accepted claim${activeRow.accepted_claims === 1 ? '' : 's'}</strong><p>Findings are projected from accepted claim assertions and reviewed evidence. Edit them in the Claims Ledger.</p>` : '<strong>No accepted claims yet</strong><p>Promote evidence into reviewed claims before this section can produce publication-ready findings.</p>'}
+                <button type="button" class="secondary" data-project="${escapeHtml(activeRow.project_id || '')}" data-route-target="claims">Open Claims Ledger</button>
+              </div>
+            </div>
+            <div class="brief-editor-section">
+              <div class="panel-title-row"><h2>Known Limitations</h2><span class="status-badge">publication boundary</span></div>
+              <textarea data-brief-list="limitations">${escapeHtml(briefLines(brief.limitations))}</textarea>
+            </div>
+          </section>
+          <aside class="project-brief-rail">
+            <section class="panel rail-card">
+              <div class="panel-title-row"><h2>Review Handoff</h2><span class="status-badge ${brief.review_state === 'ready_for_review' ? 'ok' : 'warn'}">${escapeHtml(titleCase(brief.review_state || 'draft'))}</span></div>
+              <div class="handoff-stat"><span>Material changes since review</span><strong id="projectBriefMaterialChanges">${escapeHtml(brief.material_changes_since_review ?? 0)}</strong></div>
+              <div class="handoff-stat"><span>Last review request</span><strong>${escapeHtml(fmtDate(brief.last_review_requested_at) || 'not sent')}</strong></div>
+              <p>Ordinary edits create audit records. Send to review creates a formal review event tied to this brief version.</p>
+            </section>
+            <section class="panel rail-card">
+              <div class="panel-title-row"><h2>Project Controls</h2><span class="status-badge">${escapeHtml(activeRow.visibility || 'internal')}</span></div>
+              <div class="project-mini-list">
+                <div><span>Owner</span><strong>${escapeHtml(activeRow.owner || 'unassigned')}</strong></div>
+                <div><span>Phase</span><strong>${escapeHtml(titleCase(activeRow.phase))}</strong></div>
+                <div><span>First capture</span><strong>${escapeHtml(fmtDate(activeRow.first_capture) || 'none')}</strong></div>
+                <div><span>Last activity</span><strong>${escapeHtml(fmtDate(activeRow.last_activity) || 'none')}</strong></div>
+              </div>
+            </section>
+            <section class="panel rail-card">
+              <div class="panel-title-row"><h2>Source Targets</h2><span class="status-badge">coverage</span></div>
+              <div class="source-target-list">${(activeRow.source_targets || []).map(renderSourceTarget).join('')}</div>
+            </section>
+            <section class="panel rail-card">
+              <div class="panel-title-row"><h2>Coverage Rules</h2><span class="status-badge">publication checks</span></div>
+              <div class="coverage-rule-list">${(activeRow.coverage_targets || []).map(renderCoverageRule).join('')}</div>
+            </section>
+            <section class="panel rail-card">
+              <div class="panel-title-row"><h2>Current Blockers</h2><span class="status-badge ${activeRow.blockers?.length ? 'danger' : 'ok'}">${escapeHtml(activeRow.blockers?.length || 0)}</span></div>
+              <div class="project-blocker-list">${(activeRow.blockers || []).map((blocker) => renderProjectBlocker(activeRow, blocker)).join('') || '<p>No current project blockers.</p>'}</div>
+            </section>
+            <section class="panel rail-card">
+              <div class="panel-title-row"><h2>Saved Views</h2><span class="status-badge">deep links</span></div>
+              <div class="saved-view-list">${(activeRow.saved_views || []).map((view) => renderSavedView(activeRow, view)).join('')}</div>
+            </section>
+            <section class="panel rail-card">
+              <div class="panel-title-row"><h2>Audit And Review Activity</h2><span class="status-badge">append-only</span></div>
+              <div class="audit-list">${(activeRow.activity || []).map(renderAuditEvent).join('') || '<p>No project brief activity yet.</p>'}</div>
+            </section>
+          </aside>
+        </div>
+      </article>
+    ` : `<div class="empty-state panel"><h2>No projects found</h2><p>${state.q || state.projectPhase || state.projectOwner ? 'No project matches the active filters.' : 'Capture a source to initialize a project brief.'}</p></div>`}
   `;
+  $('projectRouteSearch')?.addEventListener('input', () => {
+    state.q = $('projectRouteSearch').value.trim();
+    if ($('searchInput').value !== state.q) $('searchInput').value = state.q;
+    clearTimeout(window.__projectTimer);
+    window.__projectTimer = setTimeout(loadRoutePage, 250);
+  });
+  $('projectWorkspaceSelect')?.addEventListener('change', () => {
+    state.project = $('projectWorkspaceSelect').value;
+    if ($('projectSelect')) $('projectSelect').value = state.project;
+    renderProjectsPage(data);
+  });
+  $('projectPhaseFilter')?.addEventListener('change', () => {
+    state.projectPhase = $('projectPhaseFilter').value;
+    renderProjectsPage(data);
+  });
+  $('projectOwnerFilter')?.addEventListener('change', () => {
+    state.projectOwner = $('projectOwnerFilter').value;
+    renderProjectsPage(data);
+  });
+  document.querySelectorAll('[data-brief-field], [data-brief-scope], [data-brief-list]').forEach((field) => {
+    field.addEventListener('input', () => activeRow && scheduleProjectBriefSave(activeRow));
+  });
+  $('projectBriefPreviewButton')?.addEventListener('click', () => {
+    if (!activeRow) return;
+    const payload = projectBriefPayload(activeRow);
+    const preview = [
+      `Research question: ${payload.research_question}`,
+      `Decision supported: ${payload.decision_supported}`,
+      `Inclusion criteria: ${payload.inclusion_criteria.length}`,
+      `Open questions: ${payload.open_questions.length}`,
+      `Definitions: ${payload.working_definitions.length}`,
+      `Limitations: ${payload.limitations.length}`,
+    ].join('\n');
+    window.alert(preview);
+  });
+  $('projectBriefReviewButton')?.addEventListener('click', () => activeRow && sendProjectBriefToReview(activeRow));
+  document.querySelectorAll('[data-route-target]').forEach((button) => {
+    button.addEventListener('click', () => {
+      state.project = button.dataset.project || '';
+      if ($('projectSelect')) $('projectSelect').value = state.project;
+      setRoute(button.dataset.routeTarget || 'projects');
+    });
+  });
 }
 
 function renderLibraryPage(data) {

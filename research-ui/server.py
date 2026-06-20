@@ -26,6 +26,7 @@ OCR_ROOT = Path(os.environ.get("OCR_ROOT", str(DATA_ROOT / "ocr"))).resolve()
 WEB_ROOT = Path(os.environ.get("WEB_ROOT", str(DATA_ROOT / "web"))).resolve()
 DERIVED_ROOT = Path(os.environ.get("DERIVED_ROOT", str(DATA_ROOT / "derived"))).resolve()
 REVIEW_ROOT = Path(os.environ.get("REVIEW_ROOT", str(DATA_ROOT / "review"))).resolve()
+PROJECT_BRIEF_ROOT = REVIEW_ROOT / "project_briefs"
 REVIEW_ACTOR = os.environ.get("REVIEW_ACTOR", "web-osint-user")
 
 MAX_LIMIT = 200
@@ -165,6 +166,271 @@ def json_text(value):
 def compact_text(value, limit=20000):
     text = str(value or "").strip()
     return text[:limit]
+
+
+def brief_storage_key(project_id):
+    raw = project_id if project_id else "__unassigned__"
+    return base64.urlsafe_b64encode(str(raw).encode("utf-8")).decode("ascii").rstrip("=")
+
+
+def project_source_evidence_id(project_id):
+    return f"project:{project_id or '__unassigned__'}"
+
+
+def project_brief_path(project_id):
+    return PROJECT_BRIEF_ROOT / f"{brief_storage_key(project_id)}.json"
+
+
+def normalize_brief_list(items, key="text", limit=5000):
+    if isinstance(items, str):
+        items = [{"id": make_id("brief_item"), key: line.strip(), "status": "active"} for line in items.splitlines() if line.strip()]
+    normalized = []
+    for item in items if isinstance(items, list) else []:
+        if isinstance(item, str):
+            text = compact_text(item, limit)
+            if text:
+                normalized.append({"id": make_id("brief_item"), key: text, "status": "active"})
+            continue
+        if isinstance(item, dict):
+            text = compact_text(item.get(key) or item.get("text") or item.get("question") or item.get("definition"), limit)
+            if not text:
+                continue
+            normalized.append({
+                **item,
+                "id": compact_text(item.get("id"), 200) or make_id("brief_item"),
+                key: text,
+                "status": compact_text(item.get("status") or item.get("state") or "active", 80),
+            })
+    return normalized
+
+
+def normalize_working_definitions(items):
+    normalized = []
+    for item in items if isinstance(items, list) else []:
+        if isinstance(item, str):
+            if ":" in item:
+                term, definition = item.split(":", 1)
+            elif " - " in item:
+                term, definition = item.split(" - ", 1)
+            else:
+                term, definition = item, ""
+            item = {"term": term, "definition": definition}
+        if not isinstance(item, dict):
+            continue
+        term = compact_text(item.get("term"), 240)
+        definition = compact_text(item.get("definition"), 10000)
+        if not term and not definition:
+            continue
+        normalized.append({
+            "id": compact_text(item.get("id"), 200) or make_id("brief_definition"),
+            "term": term or "Untitled term",
+            "definition": definition,
+            "status": compact_text(item.get("status") or "active", 80),
+        })
+    return normalized
+
+
+def default_project_brief(project_id, project_name, row=None):
+    row = row or {}
+    now = now_iso()
+    return {
+        "id": f"project_brief/{brief_storage_key(project_id)}",
+        "project_id": project_id,
+        "project_name": project_name or project_id or "(unassigned)",
+        "version": "1",
+        "version_counter": 1,
+        "review_state": "draft",
+        "research_question": row.get("question") or "Collect and validate source-linked evidence",
+        "decision_supported": "Decide what is evidence-backed enough to compare, cite, curate, or publish.",
+        "scope": {
+            "time_window": "Current captured corpus",
+            "geography": "Global",
+            "population": "AI research, models, tooling, benchmarks, and infrastructure sources",
+            "evidence_policy": "Prefer primary sources. Keep machine output as observations until reviewed.",
+            "tags": ["web-osint", "source-linked", "human-led"],
+        },
+        "inclusion_criteria": [
+            {"id": "include-primary-sources", "text": "Primary source posts, lab pages, docs, papers, repos, benchmark pages, and captured media.", "status": "active"},
+            {"id": "include-manual-research", "text": "User-supplied research documents when they contain useful source trails or synthesized context.", "status": "active"},
+            {"id": "include-discovery-provenance", "text": "Google SERPs and X discovery paths as provenance; opened pages become substantive evidence.", "status": "active"},
+        ],
+        "exclusion_criteria": [
+            {"id": "exclude-uncited-claims", "text": "Uncited commentary that cannot be linked back to a captured source.", "status": "active"},
+            {"id": "exclude-live-only", "text": "Live web state that has not been captured into the platform.", "status": "active"},
+        ],
+        "open_questions": [
+            {"id": "question-evidence-quality", "text": "Which proposed evidence should be accepted, corrected, rejected, or linked to claims?", "status": "open", "owner": REVIEW_ACTOR},
+            {"id": "question-source-diversity", "text": "Where does the project need independent corroboration or better source diversity?", "status": "open", "owner": REVIEW_ACTOR},
+            {"id": "question-publication", "text": "Which claims are publication-ready, and which remain exploratory?", "status": "open", "owner": REVIEW_ACTOR},
+        ],
+        "working_definitions": [
+            {"id": "def-capture", "term": "Capture", "definition": "An immutable observation of a source at a specific time.", "status": "active"},
+            {"id": "def-observation", "term": "Observation", "definition": "Machine or parser output such as OCR, entity candidates, or proposed facts.", "status": "active"},
+            {"id": "def-claim", "term": "Claim", "definition": "A human-reviewable assertion backed by one or more evidence anchors.", "status": "active"},
+        ],
+        "accepted_finding_ids": [],
+        "limitations": [
+            {"id": "limit-review-layer", "text": "Accepted findings are projections from reviewed claims, not freeform text on this brief.", "status": "active"},
+            {"id": "limit-source-coverage", "text": "Coverage reflects currently captured data and may miss uncaptured source updates.", "status": "active"},
+        ],
+        "material_changes_since_review": 0,
+        "created_at": now,
+        "updated_at": now,
+        "last_review_requested_at": "",
+    }
+
+
+def read_project_brief(project_id, project_name="", row=None):
+    default = default_project_brief(project_id, project_name, row)
+    path = project_brief_path(project_id)
+    if not path.exists():
+        return default
+    try:
+        with path.open("r", encoding="utf-8") as handle:
+            stored = json.load(handle)
+    except Exception:
+        return {**default, "load_warning": "stored brief could not be parsed"}
+    brief = {**default, **stored}
+    scope = default["scope"]
+    if isinstance(stored.get("scope"), dict):
+        scope = {**scope, **stored["scope"]}
+    brief["scope"] = scope
+    brief["inclusion_criteria"] = normalize_brief_list(brief.get("inclusion_criteria"))
+    brief["exclusion_criteria"] = normalize_brief_list(brief.get("exclusion_criteria"))
+    brief["open_questions"] = normalize_brief_list(brief.get("open_questions"))
+    brief["working_definitions"] = normalize_working_definitions(brief.get("working_definitions"))
+    brief["limitations"] = normalize_brief_list(brief.get("limitations"))
+    return brief
+
+
+def write_project_brief(brief):
+    PROJECT_BRIEF_ROOT.mkdir(parents=True, exist_ok=True)
+    path = project_brief_path(brief.get("project_id") or "")
+    tmp_path = path.with_suffix(".json.tmp")
+    with tmp_path.open("w", encoding="utf-8") as handle:
+        json.dump(brief, handle, ensure_ascii=False, indent=2, sort_keys=True, default=str)
+        handle.write("\n")
+    tmp_path.replace(path)
+    return path
+
+
+def append_project_brief_audit(event):
+    directory = PROJECT_BRIEF_ROOT / "audit"
+    directory.mkdir(parents=True, exist_ok=True)
+    path = directory / f"{event['created_at'][:10].replace('-', '')}.jsonl"
+    with path.open("a", encoding="utf-8") as handle:
+        handle.write(json.dumps(event, ensure_ascii=False, sort_keys=True, default=str) + "\n")
+    return str(path)
+
+
+def project_brief_activity(project_id, limit=8):
+    events = []
+    audit_dir = PROJECT_BRIEF_ROOT / "audit"
+    if audit_dir.exists():
+        for path in sorted(audit_dir.glob("*.jsonl"), reverse=True)[:10]:
+            try:
+                with path.open("r", encoding="utf-8") as handle:
+                    for line in handle:
+                        item = json.loads(line)
+                        if item.get("project_id") == project_id:
+                            events.append(item)
+            except Exception:
+                continue
+    review_rows = ch_data(
+        f"""
+        SELECT event_id, event_type, actor, created_at, subject_type, subject_id
+        FROM research_review_events
+        WHERE source_evidence_id = {sql_string(project_source_evidence_id(project_id))}
+        ORDER BY created_at DESC
+        LIMIT {sql_int(limit, 8)}
+        """,
+        fallback=[],
+    )
+    for row in review_rows:
+        events.append({
+            "event_id": row.get("event_id"),
+            "event_type": row.get("event_type"),
+            "actor": row.get("actor"),
+            "created_at": row.get("created_at"),
+            "subject_type": row.get("subject_type"),
+            "review_event": True,
+        })
+    events.sort(key=lambda item: item.get("created_at") or "", reverse=True)
+    return events[:limit]
+
+
+def normalize_brief_payload(payload, current):
+    scope_payload = payload.get("scope") if isinstance(payload.get("scope"), dict) else {}
+    scope = {
+        **current.get("scope", {}),
+        "time_window": compact_text(scope_payload.get("time_window"), 2000),
+        "geography": compact_text(scope_payload.get("geography"), 2000),
+        "population": compact_text(scope_payload.get("population"), 3000),
+        "evidence_policy": compact_text(scope_payload.get("evidence_policy"), 5000),
+        "tags": [compact_text(tag, 120) for tag in scope_payload.get("tags", []) if compact_text(tag, 120)],
+    }
+    return {
+        **current,
+        "research_question": compact_text(payload.get("research_question") or current.get("research_question"), 10000),
+        "decision_supported": compact_text(payload.get("decision_supported") or current.get("decision_supported"), 10000),
+        "scope": scope,
+        "inclusion_criteria": normalize_brief_list(payload.get("inclusion_criteria", current.get("inclusion_criteria", []))),
+        "exclusion_criteria": normalize_brief_list(payload.get("exclusion_criteria", current.get("exclusion_criteria", []))),
+        "open_questions": normalize_brief_list(payload.get("open_questions", current.get("open_questions", []))),
+        "working_definitions": normalize_working_definitions(payload.get("working_definitions", current.get("working_definitions", []))),
+        "limitations": normalize_brief_list(payload.get("limitations", current.get("limitations", []))),
+    }
+
+
+def update_project_brief(payload, review_request=False):
+    project_id = compact_text(payload.get("project_id"), 300)
+    project_name = compact_text(payload.get("project_name"), 500) or project_id or "(unassigned)"
+    current = read_project_brief(project_id, project_name)
+    expected = compact_text(payload.get("expected_version"), 120)
+    if expected and expected != current.get("version"):
+        raise ResearchUiError(409, "Project brief changed since it was loaded")
+    brief = normalize_brief_payload(payload, current)
+    counter = int(brief.get("version_counter") or 1) + 1
+    brief["version_counter"] = counter
+    brief["version"] = str(counter)
+    brief["updated_at"] = now_iso()
+    brief["project_id"] = project_id
+    brief["project_name"] = project_name
+    if review_request:
+        brief["review_state"] = "ready_for_review"
+        brief["material_changes_since_review"] = 0
+        brief["last_review_requested_at"] = brief["updated_at"]
+    else:
+        if brief.get("review_state") in ("ready_for_review", "approved"):
+            brief["review_state"] = "changes_requested"
+        brief["material_changes_since_review"] = int(brief.get("material_changes_since_review") or 0) + 1
+    write_project_brief(brief)
+    audit_event = {
+        "event_id": make_id("project_brief_audit"),
+        "event_type": "project_brief.review_requested" if review_request else "project_brief.updated",
+        "project_id": project_id,
+        "project_name": project_name,
+        "brief_id": brief["id"],
+        "brief_version": brief["version"],
+        "actor": compact_text(payload.get("actor") or REVIEW_ACTOR, 200),
+        "idempotency_key": compact_text(payload.get("idempotency_key"), 500),
+        "created_at": brief["updated_at"],
+    }
+    audit_event["jsonl_path"] = append_project_brief_audit(audit_event)
+    review_event = None
+    if review_request:
+        review_event = persist_review_event(build_review_event("project_brief.review_requested", {
+            "source_evidence_id": project_source_evidence_id(project_id),
+            "project": project_id,
+            "project_name": project_name,
+            "subject_type": "project_brief",
+            "subject_id": brief["id"],
+            "brief_version": brief["version"],
+            "actor": audit_event["actor"],
+            "idempotency_key": audit_event["idempotency_key"],
+            "source_anchor": {"kind": "project_brief", "project_id": project_id, "version": brief["version"]},
+        }))
+    return {"brief": brief, "audit_event": audit_event, "review_event": review_event}
 
 
 def artifact_url(path):
@@ -888,9 +1154,128 @@ def hydratable_review_counts():
     )[0]
 
 
-def project_rows():
+def project_source_targets(row):
+    x_sources = int(row.get("x_sources") or 0)
+    web_sources = int(row.get("web_sources") or 0)
+    media_sources = int(row.get("media_sources") or 0)
+    manual_sources = int(row.get("manual_sources") or 0)
+    return [
+        {"label": "X / social", "current": x_sources, "target": max(2, min(8, x_sources + 1)), "route": "library"},
+        {"label": "Web / blog", "current": web_sources, "target": max(2, min(8, web_sources + 1)), "route": "library"},
+        {"label": "Media / OCR", "current": int(row.get("ocr_rows") or 0), "target": max(1, media_sources), "route": "evidence"},
+        {"label": "Manual docs", "current": manual_sources, "target": max(1, manual_sources), "route": "library"},
+    ]
+
+
+def project_coverage_targets(row):
+    accepted_evidence = int(row.get("accepted_evidence") or 0)
+    accepted_claims = int(row.get("accepted_claims") or 0)
+    source_classes = int(row.get("source_classes") or 0)
+    extracted_rows = int(row.get("extracted_rows") or 0)
+    sources = int(row.get("sources") or 0)
+    return [
+        {
+            "label": "Independent source classes",
+            "current": source_classes,
+            "target": 3,
+            "status": "pass" if source_classes >= 3 else "needs_work",
+            "rule": "At least three source classes before publication review.",
+        },
+        {
+            "label": "Normalized source text",
+            "current": extracted_rows,
+            "target": max(1, sources),
+            "status": "pass" if extracted_rows >= sources else "needs_work",
+            "rule": "Captured sources should have inspectable normalized text or an explicit extraction failure.",
+        },
+        {
+            "label": "Accepted evidence",
+            "current": accepted_evidence,
+            "target": max(1, min(5, sources)),
+            "status": "pass" if accepted_evidence >= max(1, min(5, sources)) else "needs_work",
+            "rule": "Key findings must cite accepted evidence anchors.",
+        },
+        {
+            "label": "Accepted claims",
+            "current": accepted_claims,
+            "target": max(1, min(3, accepted_evidence or sources)),
+            "status": "pass" if accepted_claims >= max(1, min(3, accepted_evidence or sources)) else "needs_work",
+            "rule": "Publication drafts should be driven by reviewed claims.",
+        },
+    ]
+
+
+def project_blockers(row):
+    blockers = []
+    sparse_rows = int(row.get("sparse_rows") or 0)
+    media_without_ocr = max(0, int(row.get("media_sources") or 0) - int(row.get("ocr_rows") or 0))
+    if sparse_rows:
+        blockers.append({
+            "label": "Sparse normalized extraction",
+            "count": sparse_rows,
+            "severity": "warn",
+            "route": "inbox",
+            "detail": "Rows have little extracted text and need source workbench inspection.",
+        })
+    if media_without_ocr:
+        blockers.append({
+            "label": "Media without OCR/VL review",
+            "count": media_without_ocr,
+            "severity": "warn",
+            "route": "evidence",
+            "detail": "Media captures should expose OCR, transcript, or visual observations before claims rely on them.",
+        })
+    if int(row.get("source_classes") or 0) < 3:
+        blockers.append({
+            "label": "Source diversity below target",
+            "count": max(1, 3 - int(row.get("source_classes") or 0)),
+            "severity": "danger",
+            "route": "library",
+            "detail": "Add or review more source classes before treating this project as publication-ready.",
+        })
+    if int(row.get("open_claims") or 0):
+        blockers.append({
+            "label": "Open claim review",
+            "count": int(row.get("open_claims") or 0),
+            "severity": "warn",
+            "route": "claims",
+            "detail": "Claim assertions need review before they can appear as accepted findings.",
+        })
+    return blockers
+
+
+def project_saved_views(row):
+    project_id = row.get("project_id") or ""
+    return [
+        {"label": "Project inbox", "route": "inbox", "query": {"project": project_id}, "description": "Open review tasks scoped to this project."},
+        {"label": "Source library", "route": "library", "query": {"project": project_id}, "description": "Captured source records and normalized snippets."},
+        {"label": "Evidence ledger", "route": "evidence", "query": {"project": project_id}, "description": "Selections, corrections, proposed facts, and high-value sources."},
+        {"label": "Claims ledger", "route": "claims", "query": {"project": project_id}, "description": "Claim records and status by source anchor."},
+        {"label": "Publishing checks", "route": "publishing", "query": {"project": project_id}, "description": "Snapshot readiness and unresolved blockers."},
+    ]
+
+
+def project_rows(params=None):
+    params = params or {}
+    q = (params.get("q", [""])[0] or "").strip()
+    project = (params.get("project", [""])[0] or "").strip()
+    clauses = ["1 = 1"]
+    if project:
+        clauses.append(f"source_project = {sql_string(project)}")
+    if q:
+        like = sql_string(q)
+        clauses.append(
+            "("
+            f"positionCaseInsensitive(source_project, {like}) > 0 OR "
+            f"positionCaseInsensitive(title, {like}) > 0 OR "
+            f"positionCaseInsensitive(canonical_url, {like}) > 0 OR "
+            f"positionCaseInsensitive(domain, {like}) > 0 OR "
+            f"positionCaseInsensitive(text, {like}) > 0"
+            ")"
+        )
+    where = " AND ".join(clauses)
     rows = ch_data(
-        """
+        f"""
         SELECT
           source_project AS project_id,
           if(source_project = '', '(unassigned)', source_project) AS name,
@@ -902,19 +1287,88 @@ def project_rows():
           countIf(source_kind = 'user_input') AS manual_sources,
           countIf(has_ocr = 1) AS ocr_rows,
           countIf(length(text) >= 120) AS extracted_rows,
+          countIf(length(text) < 120) AS sparse_rows,
           min(captured_at) AS first_capture,
           max(ingested_at) AS last_activity
         FROM evidence_events
+        WHERE {where}
         GROUP BY source_project
         ORDER BY last_activity DESC, sources DESC
         LIMIT 100
         """,
         fallback=[],
     )
+    evidence_reviews = ch_data(
+        """
+        SELECT
+          source_project AS project_id,
+          countIf(status = 'accepted') AS accepted_evidence,
+          count() AS proposed_evidence
+        FROM evidence_selections FINAL
+        INNER JOIN
+        (
+          SELECT evidence_id, argMax(source_project, ingested_at) AS source_project
+          FROM evidence_events
+          GROUP BY evidence_id
+        ) latest_sources
+        ON evidence_selections.source_evidence_id = latest_sources.evidence_id
+        GROUP BY source_project
+        """,
+        fallback=[],
+    )
+    claims = ch_data(
+        """
+        SELECT
+          source_project AS project_id,
+          countIf(status IN ('under_review', 'proposed')) AS open_claims,
+          countIf(status = 'accepted') AS accepted_claims
+        FROM claim_records FINAL
+        INNER JOIN
+        (
+          SELECT evidence_id, argMax(source_project, ingested_at) AS source_project
+          FROM evidence_events
+          GROUP BY evidence_id
+        ) latest_sources
+        ON claim_records.source_evidence_id = latest_sources.evidence_id
+        GROUP BY source_project
+        """,
+        fallback=[],
+    )
+    evidence_by_project = {row.get("project_id", ""): row for row in evidence_reviews}
+    claims_by_project = {row.get("project_id", ""): row for row in claims}
     for row in rows:
-        row["phase"] = "evidence review"
+        source_classes = sum(1 for key in ("x_sources", "web_sources", "media_sources", "manual_sources") if int(row.get(key) or 0) > 0)
+        sparse_rows = int(row.get("sparse_rows") or 0)
+        media_without_ocr = max(0, int(row.get("media_sources") or 0) - int(row.get("ocr_rows") or 0))
+        diversity_gaps = max(0, 3 - source_classes)
+        review_blockers = sparse_rows + media_without_ocr
+        evidence_review = evidence_by_project.get(row.get("project_id", ""), {})
+        claim_review = claims_by_project.get(row.get("project_id", ""), {})
+        completion_percent = percent(row.get("extracted_rows"), row.get("evidence_rows"))
+        row["phase"] = "evidence review" if int(row.get("sources") or 0) else "setup"
+        if completion_percent >= 75:
+            row["phase"] = "publication prep"
+        elif int(row.get("extracted_rows") or 0) < max(1, int(row.get("evidence_rows") or 0) // 3):
+            row["phase"] = "capture triage"
+        row["owner"] = REVIEW_ACTOR
+        row["visibility"] = "internal"
         row["question"] = "Collect and validate source-linked evidence"
-        row["completion_percent"] = percent(row.get("extracted_rows"), row.get("evidence_rows"))
+        row["scope"] = "Captured sources, normalized artifacts, evidence selections, claims, review queues, and publication readiness."
+        row["accepted_evidence"] = int(evidence_review.get("accepted_evidence") or 0)
+        row["proposed_evidence"] = int(evidence_review.get("proposed_evidence") or 0)
+        row["accepted_claims"] = int(claim_review.get("accepted_claims") or 0)
+        row["open_claims"] = int(claim_review.get("open_claims") or 0)
+        row["unresolved_conflicts"] = 0
+        row["review_blockers"] = review_blockers
+        row["publication_blockers"] = diversity_gaps + review_blockers
+        row["source_classes"] = source_classes
+        row["completion_percent"] = completion_percent
+        row["brief"] = read_project_brief(row.get("project_id") or "", row.get("name") or "", row)
+        row["source_targets"] = project_source_targets(row)
+        row["coverage_targets"] = project_coverage_targets(row)
+        row["blockers"] = project_blockers(row)
+        row["saved_views"] = project_saved_views(row)
+        row["activity"] = project_brief_activity(row.get("project_id") or "")
     return {
         "rows": rows,
         "object_states": {
@@ -2095,7 +2549,7 @@ class ResearchUiHandler(BaseHTTPRequestHandler):
             if parsed.path == "/api/inbox":
                 return self.send_json(inbox(params))
             if parsed.path == "/api/projects":
-                return self.send_json(project_rows())
+                return self.send_json(project_rows(params))
             if parsed.path == "/api/library":
                 return self.send_json(library_search(params))
             if parsed.path == "/api/evidence":
@@ -2136,6 +2590,10 @@ class ResearchUiHandler(BaseHTTPRequestHandler):
             payload = self.read_json_body()
             if parsed.path == "/api/review/events":
                 return self.send_json(create_generic_review_event(payload), status=201)
+            if parsed.path == "/api/project-brief":
+                return self.send_json(update_project_brief(payload), status=201)
+            if parsed.path == "/api/project-brief/review":
+                return self.send_json(update_project_brief(payload, review_request=True), status=201)
             if parsed.path == "/api/evidence/selections":
                 return self.send_json(create_evidence_selection(payload), status=201)
             if parsed.path == "/api/annotations":

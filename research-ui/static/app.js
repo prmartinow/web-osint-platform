@@ -44,6 +44,15 @@ const state = {
   entitySelectedIds: new Set(),
   entityPreviewTab: 'identity',
   entityRows: [],
+  claimQueue: 'all',
+  claimType: '',
+  claimReviewState: '',
+  claimContradictionState: '',
+  claimSourceKind: '',
+  claimSelectedId: '',
+  claimSelectedIds: new Set(),
+  claimPreviewTab: 'review',
+  claimRows: [],
 };
 
 const $ = (id) => document.getElementById(id);
@@ -199,6 +208,17 @@ function applyHashParams() {
     const inspect = params.get('inspect') || '';
     state.entitySelectedId = inspect.startsWith('entity:') ? inspect.slice(7) : inspect;
   }
+  if (route === 'claims') {
+    state.q = params.get('q') || state.q || '';
+    state.project = params.get('project') || state.project || '';
+    state.claimQueue = params.get('queue') || 'all';
+    state.claimType = params.get('claim_type') || '';
+    state.claimReviewState = params.get('review_state') || '';
+    state.claimContradictionState = params.get('contradiction_state') || '';
+    state.claimSourceKind = params.get('source_kind') || '';
+    const inspect = params.get('inspect') || '';
+    state.claimSelectedId = inspect.startsWith('claim:') ? inspect.slice(6) : inspect;
+  }
 }
 
 function routeHash() {
@@ -227,6 +247,19 @@ function routeHash() {
     if (state.entitySelectedId) params.set('inspect', `entity:${state.entitySelectedId}`);
     const query = params.toString();
     return `#entities${query ? '?' + query : ''}`;
+  }
+  if (state.route === 'claims') {
+    const params = new URLSearchParams();
+    if (state.q) params.set('q', state.q);
+    if (state.project) params.set('project', state.project);
+    if (state.claimQueue && state.claimQueue !== 'all') params.set('queue', state.claimQueue);
+    if (state.claimType) params.set('claim_type', state.claimType);
+    if (state.claimReviewState) params.set('review_state', state.claimReviewState);
+    if (state.claimContradictionState) params.set('contradiction_state', state.claimContradictionState);
+    if (state.claimSourceKind) params.set('source_kind', state.claimSourceKind);
+    if (state.claimSelectedId) params.set('inspect', `claim:${state.claimSelectedId}`);
+    const query = params.toString();
+    return `#claims${query ? '?' + query : ''}`;
   }
   if (state.route !== 'library') return `#${state.route}`;
   const params = new URLSearchParams();
@@ -2503,28 +2536,522 @@ function bindEntityPage(data) {
   bindEntityKeyboard();
 }
 
-function renderClaimsPage(data) {
-  const claims = data.claims || [];
-  $('routePage').innerHTML = `
-    ${pageHeader('Claims Ledger', 'Draft and proposed assertions remain contestable until reviewed against evidence.')}
-    ${metricCards([
-      { label: 'Claim stubs', value: claims.length },
-      { label: 'Claim groups', value: (data.type_counts || []).length },
-      { label: 'Possible conflicts', value: (data.possible_conflicts || []).length },
-    ])}
-    <section class="panel page-panel">
-      <div class="panel-title-row"><h2>Claims</h2><span class="status-badge warn">not published</span></div>
-      ${claims.map((row) => `
-        <article class="review-item">
-          <div class="tag-line"><span class="pill">${escapeHtml(row.status)}</span><span class="pill">${escapeHtml(row.claim_type)}</span><span class="pill">${escapeHtml(row.evidence_relation)}</span></div>
-          <p><strong>${escapeHtml(row.claim_text)}</strong></p>
-          ${row.note ? `<p class="muted">${escapeHtml(row.note)}</p>` : ''}
-          <button class="secondary object-link" data-id="${escapeHtml(row.source_evidence_id)}">Open evidence source</button>
-        </article>
-      `).join('') || '<p class="muted padded">No claim stubs yet.</p>'}
+function claimRowKey(row) {
+  return row.claim_row_id || [row.row_kind, row.object_id || row.claim_text].filter(Boolean).join(':');
+}
+
+function claimGlyph(row) {
+  const kind = row.row_kind || '';
+  const contradiction = row.contradiction_state || '';
+  const review = row.review_state || '';
+  if (kind === 'conflict_cluster') return '!';
+  if (kind === 'duplicate_cluster') return 'D';
+  if (contradiction === 'disputed' || contradiction === 'conflict') return 'U';
+  if (review === 'accepted' || review === 'published') return 'A';
+  if (review === 'rejected' || review === 'superseded') return 'R';
+  return 'C';
+}
+
+function claimQueueGroup(items) {
+  const queues = items || [];
+  return `
+    <section class="claim-facet-group">
+      <h3>Review queues</h3>
+      <div class="facet-list compact">
+        ${queues.map((item) => `
+          <button class="facet ${state.claimQueue === item.id ? 'active' : ''}" type="button" data-claim-queue="${escapeHtml(item.id)}">
+            <span>${escapeHtml(item.label || item.id)}</span><strong>${escapeHtml(item.count || 0)}</strong>
+          </button>
+        `).join('')}
+      </div>
     </section>
   `;
-  document.querySelectorAll('.object-link[data-id]').forEach((button) => button.addEventListener('click', () => selectSource(button.dataset.id)));
+}
+
+function claimFacetGroup(title, items, activeValue, filterName) {
+  const options = items || [];
+  return `
+    <section class="claim-facet-group">
+      <h3>${escapeHtml(title)}</h3>
+      <button class="facet ${activeValue ? '' : 'active'}" type="button" data-claim-filter="${escapeHtml(filterName)}" data-filter-value="">
+        <span>All ${escapeHtml(title.toLowerCase())}</span><strong>${escapeHtml(options.reduce((sum, item) => sum + Number(item.count || 0), 0))}</strong>
+      </button>
+      <div class="facet-list compact">
+        ${options.map((item) => `
+          <button class="facet ${activeValue === item.id ? 'active' : ''}" type="button" data-claim-filter="${escapeHtml(filterName)}" data-filter-value="${escapeHtml(item.id)}">
+            <span>${escapeHtml(item.label || item.id)}</span><strong>${escapeHtml(item.count || 0)}</strong>
+          </button>
+        `).join('')}
+      </div>
+    </section>
+  `;
+}
+
+function renderClaimPreview(data) {
+  const preview = data.preview || {};
+  const row = preview.row || null;
+  if (!row) {
+    return `
+      <div class="empty-state">
+        <h2>Claim Review</h2>
+        <p>Select a claim to inspect assertions, evidence stance, entity links, provenance, and review history.</p>
+      </div>
+    `;
+  }
+  const activeTab = ['review', 'assertions', 'evidence', 'entities', 'provenance', 'history'].includes(state.claimPreviewTab) ? state.claimPreviewTab : 'review';
+  const tab = (id, label) => `<button class="${activeTab === id ? 'active' : ''}" type="button" data-claim-preview-tab="${id}">${label}</button>`;
+  const sectionClass = (id) => `claim-preview-section ${activeTab === id ? 'active' : ''}`;
+  const assertions = preview.assertions || [];
+  const evidence = preview.evidence || [];
+  const facts = preview.facts || [];
+  const entities = preview.entities || [];
+  const events = preview.events || [];
+  const qualifier = row.qualifier && typeof row.qualifier === 'object' ? JSON.stringify(row.qualifier) : (row.qualifier || '');
+  return `
+    <div class="claim-preview-head">
+      <span class="source-glyph">${escapeHtml(claimGlyph(row))}</span>
+      <div>
+        <h2>${escapeHtml(row.subject || 'Claim')}</h2>
+        <p>${escapeHtml([row.property, row.review_state, row.contradiction_state].filter(Boolean).join(' · '))}</p>
+      </div>
+    </div>
+    <nav class="claim-preview-tabs" aria-label="Claim preview sections">
+      ${tab('review', 'Review')}
+      ${tab('assertions', 'Assertions')}
+      ${tab('evidence', 'Evidence')}
+      ${tab('entities', 'Entities')}
+      ${tab('provenance', 'Provenance')}
+      ${tab('history', 'History')}
+    </nav>
+    <section class="${sectionClass('review')}" data-claim-preview-section="review">
+      <div class="claim-layer-stack">
+        <div><span>Claim language</span><strong>${escapeHtml(row.claim_text || row.value || '')}</strong></div>
+        <div><span>Structured proposition</span><strong>${escapeHtml(row.subject || '')} -> ${escapeHtml(row.property || '')} -> ${escapeHtml(row.value || '')}</strong></div>
+        <div><span>Qualifiers</span><strong>${escapeHtml(qualifier || 'No qualifiers recorded')}</strong></div>
+        <div><span>Scope boundary</span><strong>Accepting this claim selects a reviewed assertion for the current scope. It does not mutate source evidence or delete conflicting assertions.</strong></div>
+      </div>
+      <div class="tag-line">
+        <span class="pill">${escapeHtml(row.review_state || 'draft')}</span>
+        <span class="pill">${escapeHtml(row.contradiction_state || 'contextual')}</span>
+        <span class="pill">${escapeHtml(row.source_diversity || 0)} source${Number(row.source_diversity || 0) === 1 ? '' : 's'}</span>
+        ${row.publication_blockers ? `<span class="pill warn">${escapeHtml(row.publication_blockers)} publication blocker${Number(row.publication_blockers) === 1 ? '' : 's'}</span>` : '<span class="pill ok">draft eligible</span>'}
+      </div>
+      <label class="preview-note">Decision note
+        <input id="claimDecisionNote" placeholder="Optional rationale, qualifier change, conflict note, or publication blocker">
+      </label>
+    </section>
+    <section class="${sectionClass('assertions')}" data-claim-preview-section="assertions">
+      <article class="claim-preview-card">
+        <h4>Grouped assertions (${assertions.length})</h4>
+        ${assertions.map((item) => `
+          <p><strong>${escapeHtml(item.claim_text || '')}</strong><br>${escapeHtml([item.claim_type, item.evidence_relation, item.status].filter(Boolean).join(' · '))}</p>
+        `).join('') || '<p class="muted">No grouped assertions found.</p>'}
+      </article>
+      <div class="claim-warning">Review state and contradiction state are independent. A reviewed claim can still be disputed if contrary evidence exists.</div>
+    </section>
+    <section class="${sectionClass('evidence')}" data-claim-preview-section="evidence">
+      <article class="claim-preview-card">
+        <h4>Evidence stance</h4>
+        <p><strong>${escapeHtml(row.support_count || 0)} supporting</strong> · ${escapeHtml(row.refute_count || 0)} refuting · ${escapeHtml(row.context_count || 0)} contextual</p>
+        ${evidence.map((item) => `<p><strong>${escapeHtml(item.selection_kind || 'selection')}</strong> · ${escapeHtml(item.status || '')}<br>${escapeHtml(item.quote || item.selection_id || '')}</p>`).join('') || '<p class="muted">No explicit evidence selections linked to this source.</p>'}
+      </article>
+      <article class="claim-preview-card">
+        <h4>Proposed facts (${facts.length})</h4>
+        ${facts.map((item) => `<p><strong>${escapeHtml(item.fact_type || item.field_path || '')}</strong> · ${escapeHtml(item.status || '')}<br>${escapeHtml(item.normalized_value || item.raw_value || '')}</p>`).join('') || '<p class="muted">No proposed facts linked to this source.</p>'}
+      </article>
+    </section>
+    <section class="${sectionClass('entities')}" data-claim-preview-section="entities">
+      <article class="claim-preview-card">
+        <h4>Linked entities (${entities.length})</h4>
+        ${entities.map((item) => `<p><strong>${escapeHtml(item.canonical_name || item.mention_text || '')}</strong> · ${escapeHtml(item.entity_type || '')} · ${escapeHtml(item.status || '')}</p>`).join('') || '<p class="muted">No entity links attached to this claim source.</p>'}
+      </article>
+    </section>
+    <section class="${sectionClass('provenance')}" data-claim-preview-section="provenance">
+      <div class="claim-provenance-stack">
+        ${(preview.provenance || []).map((step, index) => `
+          <article>
+            <span>${String(index + 1).padStart(2, '0')}</span>
+            <div><strong>${escapeHtml(step.label)}</strong><p>${escapeHtml(step.value)}</p>${step.meta ? `<em>${escapeHtml(step.meta)}</em>` : ''}</div>
+          </article>
+        `).join('')}
+      </div>
+      ${preview.source?.canonical_url ? `<p><a href="${escapeHtml(preview.source.canonical_url)}" target="_blank" rel="noreferrer">${escapeHtml(preview.source.canonical_url)}</a></p>` : ''}
+    </section>
+    <section class="${sectionClass('history')}" data-claim-preview-section="history">
+      <article class="claim-preview-card">
+        <h4>Review history (${events.length})</h4>
+        ${events.map((item) => `<p><strong>${escapeHtml(item.event_type || '')}</strong><br>${escapeHtml(fmtDate(item.created_at))} · ${escapeHtml(item.actor || '')}</p>`).join('') || '<p class="muted">No review events recorded for this claim yet.</p>'}
+      </article>
+    </section>
+    <div id="claimActionStatus" class="review-status muted"></div>
+    <div class="claim-preview-actions">
+      <button class="secondary" data-claim-action="defer">Defer</button>
+      <button class="secondary" data-claim-action="reject">Reject</button>
+      <button class="secondary" data-claim-action="dispute">Dispute</button>
+      <button class="secondary" data-claim-action="revise">Revise</button>
+      <button class="secondary" data-claim-action="link_evidence">Link evidence</button>
+      <button class="secondary" data-claim-action="change_stance">Change stance</button>
+      <button class="secondary" data-claim-action="merge">Merge</button>
+      <button class="secondary" data-claim-action="split">Split</button>
+      <button class="secondary" data-claim-action="assign_review">Assign</button>
+      <button class="secondary" data-claim-action="taxonomy">Label</button>
+      <button class="secondary" data-claim-action="link_related">Related</button>
+      <button class="secondary" data-claim-action="add_to_draft">Add to draft</button>
+      <button class="secondary" data-claim-action="open_source">Open source</button>
+      <button data-claim-action="accept">Accept & next</button>
+    </div>
+  `;
+}
+
+function renderClaimsPage(data) {
+  const rows = data.rows || data.results?.rows || [];
+  state.claimRows = rows;
+  if (!state.claimSelectedId || !rows.some((row) => claimRowKey(row) === state.claimSelectedId)) {
+    state.claimSelectedId = data.selection?.selected_id || (rows[0] ? claimRowKey(rows[0]) : '');
+  }
+  const summary = data.summary || {};
+  const facets = data.facets || {};
+  const selectedId = state.claimSelectedId;
+  $('routePage').innerHTML = `
+    ${pageHeader('Claims Ledger', 'Review structured propositions, competing assertions, support/refute evidence, and publication blockers without mutating captured evidence.')}
+    ${metricCards([
+      { label: 'Visible claims', value: summary.visible ?? rows.length },
+      { label: 'Accepted', value: summary.accepted ?? 0 },
+      { label: 'Disputed', value: summary.disputed ?? 0 },
+      { label: 'Conflict clusters', value: summary.conflicts ?? 0 },
+      { label: 'Publication blockers', value: summary.publication_blockers ?? 0 },
+    ])}
+    <section class="claim-shell">
+      <aside class="panel claim-filter-panel">
+        ${claimQueueGroup(facets.queues)}
+        ${claimFacetGroup('Claim type', facets.claim_types, state.claimType, 'claim_type')}
+        ${claimFacetGroup('Review state', facets.review_states, state.claimReviewState, 'review_state')}
+        ${claimFacetGroup('Contradiction state', facets.contradiction_states, state.claimContradictionState, 'contradiction_state')}
+        ${claimFacetGroup('Source kind', facets.source_kinds, state.claimSourceKind, 'source_kind')}
+      </aside>
+      <section class="panel claim-ledger-panel">
+        <div class="claim-search-strip">
+          <label><span>Claim search</span><input id="claimSearchInput" value="${escapeHtml(state.q)}" placeholder="Search claim language, subject, value, source, account, or URL"></label>
+          <button class="secondary" id="claimClearFilters">Clear</button>
+        </div>
+        <div class="claim-explanation">
+          <span class="status-badge info">${escapeHtml(titleCase(state.claimQueue || 'all'))}</span>
+          <p>Rows represent reviewed claims, proposed assertions, conflict clusters, duplicates, and superseded claims.</p>
+        </div>
+        <div class="claim-bulk-toolbar">
+          <label><input type="checkbox" id="claimSelectAll"> Select visible</label>
+          ${['accept', 'dispute', 'reject', 'defer', 'revise', 'merge', 'split', 'add_to_draft'].map((action) => `<button class="secondary" data-claim-bulk-action="${action}">${escapeHtml(titleCase(action))}</button>`).join('')}
+          <span id="claimBulkStatus" class="muted"></span>
+        </div>
+        <div class="claim-results-list">
+          ${rows.length ? rows.map((row) => {
+            const rowKey = claimRowKey(row);
+            const selected = rowKey === selectedId;
+            return `
+              <article class="claim-row ${selected ? 'active' : ''}" data-claim-row-id="${escapeHtml(rowKey)}" data-source-id="${escapeHtml(row.source_evidence_id || row.evidence_id || '')}" data-object-type="${escapeHtml(row.object_type || '')}">
+                <input class="claim-check" type="checkbox" aria-label="Select claim row" ${state.claimSelectedIds.has(rowKey) ? 'checked' : ''}>
+                <span class="source-glyph">${escapeHtml(claimGlyph(row))}</span>
+                <div class="claim-row-main">
+                  <div class="claim-title-line">
+                    <strong>${escapeHtml(row.claim_text || row.value || 'Untitled claim')}</strong>
+                    ${row.row_kind === 'conflict_cluster' ? '<span class="pill warn">conflict</span>' : ''}
+                    ${row.row_kind === 'duplicate_cluster' ? '<span class="pill warn">duplicate</span>' : ''}
+                  </div>
+                  <p>${escapeHtml(`${row.subject || 'Subject'} -> ${row.property || 'property'} -> ${row.value || ''}`)}</p>
+                  <div class="row-meta">
+                    <span class="pill">${escapeHtml(titleCase(row.row_kind || 'claim'))}</span>
+                    <span class="pill">${escapeHtml(row.claim_type || 'general')}</span>
+                    <span class="pill">${escapeHtml(row.review_state || 'draft')}</span>
+                    <span class="pill">${escapeHtml(row.contradiction_state || 'contextual')}</span>
+                    ${row.source_label ? `<span class="pill">${escapeHtml(row.source_label)}</span>` : ''}
+                    ${row.author_handle ? `<span class="pill">@${escapeHtml(row.author_handle)}</span>` : ''}
+                    ${row.domain ? `<span class="pill">${escapeHtml(row.domain)}</span>` : ''}
+                  </div>
+                </div>
+                <div class="claim-row-counts">
+                  <strong>${escapeHtml(row.support_count || 0)}</strong><em>support</em>
+                  <strong>${escapeHtml(row.refute_count || 0)}</strong><em>refute</em>
+                  <strong>${escapeHtml(row.source_diversity || 0)}</strong><em>sources</em>
+                  <strong>${escapeHtml(row.publication_blockers || 0)}</strong><em>blockers</em>
+                </div>
+              </article>
+            `;
+          }).join('') : '<div class="empty-state"><h2>No claim rows</h2><p>Try another queue or filter.</p></div>'}
+        </div>
+      </section>
+      <aside class="panel claim-preview-panel">
+        ${renderClaimPreview(data)}
+      </aside>
+    </section>
+  `;
+  bindClaimPage(data);
+}
+
+function claimStatusForAction(row, action) {
+  if (action === 'accept') return 'accepted';
+  if (action === 'dispute') return 'disputed';
+  if (action === 'reject') return 'rejected';
+  if (action === 'defer') return 'under_review';
+  if (action === 'revise') return 'under_review';
+  if (action === 'merge') return 'superseded';
+  return row.review_state || 'under_review';
+}
+
+function claimEventTypeForAction(action) {
+  return {
+    accept: 'claim.accepted',
+    dispute: 'claim.disputed',
+    reject: 'claim.rejected',
+    defer: 'claim.deferred',
+    revise: 'claim.revision.requested',
+    link_evidence: 'claim.evidence_link.requested',
+    change_stance: 'claim.evidence_stance_change.requested',
+    merge: 'claim.merge.requested',
+    split: 'claim.split.requested',
+    assign_review: 'claim.assignment.recorded',
+    taxonomy: 'claim.taxonomy_label.requested',
+    link_related: 'claim.related_link.requested',
+    add_to_draft: 'claim.publication_draft_add.requested',
+    open_source: 'claim.source_opened',
+  }[action] || 'claim.action.recorded';
+}
+
+function claimAnchorForRow(row, action) {
+  return {
+    kind: 'claims_ledger_row',
+    claim_row_id: claimRowKey(row),
+    source_evidence_id: row.source_evidence_id || row.evidence_id || '',
+    object_type: row.object_type || '',
+    object_id: row.object_id || '',
+    claim_type: row.claim_type || '',
+    subject: row.subject || '',
+    property: row.property || '',
+    value: row.value || '',
+    action,
+  };
+}
+
+async function persistClaimAction(row, action, note = '') {
+  if (!row) return;
+  if (action === 'open_source') {
+    const sourceId = row.source_evidence_id || row.evidence_id || '';
+    if (sourceId) await selectSource(sourceId);
+    return;
+  }
+  if (row.object_type === 'claim_stub' && row.object_id && ['accept', 'dispute', 'reject', 'defer', 'revise'].includes(action)) {
+    await postJson('/api/review-state', {
+      source_evidence_id: row.source_evidence_id || row.evidence_id || '',
+      source_project: row.source_project || '',
+      project: row.source_project || state.project || '',
+      subject_type: 'claim_stub',
+      subject_id: row.object_id,
+      status: claimStatusForAction(row, action),
+      note,
+      source_anchor: claimAnchorForRow(row, action),
+      idempotency_key: `${claimRowKey(row)}:${action}:${Date.now()}`,
+    });
+    return;
+  }
+  await postJson('/api/review/events', {
+    event_type: claimEventTypeForAction(action),
+    source_evidence_id: row.source_evidence_id || row.evidence_id || '',
+    source_project: row.source_project || '',
+    project: row.source_project || state.project || '',
+    subject_type: row.object_type || row.row_kind || 'claim',
+    subject_id: row.object_id || claimRowKey(row),
+    action,
+    status: claimStatusForAction(row, action),
+    note,
+    source_anchor: claimAnchorForRow(row, action),
+    idempotency_key: `${claimRowKey(row)}:${action}:${Date.now()}`,
+  });
+}
+
+function nextClaimSelectionAfter(row) {
+  const rows = state.claimRows || [];
+  const index = rows.findIndex((item) => claimRowKey(item) === claimRowKey(row));
+  const next = rows[index + 1] || rows[index - 1] || null;
+  return next ? claimRowKey(next) : '';
+}
+
+async function applyClaimAction(row, action) {
+  const status = $('claimActionStatus') || $('claimBulkStatus');
+  const note = $('claimDecisionNote')?.value || '';
+  if (!row) {
+    if (status) status.textContent = 'Select a claim row first.';
+    return;
+  }
+  if (status) status.textContent = `${titleCase(action)}...`;
+  await persistClaimAction(row, action, note);
+  if (['accept', 'dispute', 'reject', 'defer'].includes(action)) {
+    state.claimSelectedId = nextClaimSelectionAfter(row);
+  }
+  state.claimSelectedIds.clear();
+  if (status) status.textContent = `${titleCase(action)} recorded.`;
+  replaceRouteHash();
+  await loadRoutePage();
+}
+
+async function applyBulkClaimAction(action) {
+  const status = $('claimBulkStatus');
+  const selectedIds = Array.from(document.querySelectorAll('.claim-row .claim-check:checked'))
+    .map((checkbox) => checkbox.closest('.claim-row')?.dataset.claimRowId)
+    .filter(Boolean);
+  const selectedRows = state.claimRows.filter((row) => selectedIds.includes(claimRowKey(row)));
+  if (!selectedRows.length) {
+    if (status) status.textContent = 'Select at least one claim row.';
+    return;
+  }
+  if (status) status.textContent = `${titleCase(action)} ${selectedRows.length} claim row${selectedRows.length === 1 ? '' : 's'}...`;
+  for (const row of selectedRows) {
+    await persistClaimAction(row, action, `Bulk ${titleCase(action)} from Claims Ledger`);
+  }
+  state.claimSelectedIds.clear();
+  if (status) status.textContent = `${titleCase(action)} recorded for ${selectedRows.length}.`;
+  await loadRoutePage();
+}
+
+function moveClaimSelection(delta) {
+  if (state.route !== 'claims') return;
+  const rows = state.claimRows || [];
+  if (!rows.length) return;
+  const current = rows.findIndex((row) => claimRowKey(row) === state.claimSelectedId);
+  const nextIndex = Math.max(0, Math.min(rows.length - 1, (current >= 0 ? current : 0) + delta));
+  state.claimSelectedId = claimRowKey(rows[nextIndex]);
+  replaceRouteHash();
+  loadRoutePage();
+}
+
+function bindClaimKeyboard() {
+  if (window.__webOsintClaimKeyboardBound) return;
+  window.__webOsintClaimKeyboardBound = true;
+  window.addEventListener('keydown', async (event) => {
+    if (state.route !== 'claims') return;
+    const active = document.activeElement;
+    if (active && ['INPUT', 'TEXTAREA', 'SELECT', 'BUTTON'].includes(active.tagName)) return;
+    const key = event.key.toLowerCase();
+    if (key === 'j') {
+      event.preventDefault();
+      moveClaimSelection(1);
+    } else if (key === 'k') {
+      event.preventDefault();
+      moveClaimSelection(-1);
+    } else if (['a', 'u', 'r', 'd', 'e', 'o'].includes(key)) {
+      event.preventDefault();
+      const row = state.claimRows.find((item) => claimRowKey(item) === state.claimSelectedId);
+      const action = key === 'a' ? 'accept' : key === 'u' ? 'dispute' : key === 'r' ? 'reject' : key === 'd' ? 'defer' : key === 'e' ? 'revise' : 'open_source';
+      try {
+        await applyClaimAction(row, action);
+      } catch (error) {
+        const status = $('claimActionStatus') || $('claimBulkStatus');
+        if (status) status.textContent = error.message;
+      }
+    }
+  });
+}
+
+function bindClaimPage(data) {
+  document.querySelectorAll('[data-claim-queue]').forEach((button) => {
+    button.addEventListener('click', () => {
+      state.claimQueue = button.dataset.claimQueue || 'all';
+      state.claimSelectedId = '';
+      replaceRouteHash();
+      loadRoutePage();
+    });
+  });
+  document.querySelectorAll('[data-claim-filter]').forEach((button) => {
+    button.addEventListener('click', () => {
+      const filter = button.dataset.claimFilter;
+      const value = button.dataset.filterValue || '';
+      if (filter === 'claim_type') state.claimType = value;
+      if (filter === 'review_state') state.claimReviewState = value;
+      if (filter === 'contradiction_state') state.claimContradictionState = value;
+      if (filter === 'source_kind') state.claimSourceKind = value;
+      state.claimSelectedId = '';
+      replaceRouteHash();
+      loadRoutePage();
+    });
+  });
+  $('claimSearchInput')?.addEventListener('input', () => {
+    state.q = $('claimSearchInput').value.trim();
+    clearTimeout(window.__claimSearchTimer);
+    window.__claimSearchTimer = setTimeout(() => {
+      state.claimSelectedId = '';
+      replaceRouteHash();
+      loadRoutePage();
+    }, 250);
+  });
+  $('claimClearFilters')?.addEventListener('click', () => {
+    state.q = '';
+    state.project = '';
+    state.claimQueue = 'all';
+    state.claimType = '';
+    state.claimReviewState = '';
+    state.claimContradictionState = '';
+    state.claimSourceKind = '';
+    state.claimSelectedId = '';
+    state.claimSelectedIds.clear();
+    replaceRouteHash();
+    loadRoutePage();
+  });
+  $('claimSelectAll')?.addEventListener('change', () => {
+    const checked = $('claimSelectAll').checked;
+    state.claimSelectedIds.clear();
+    document.querySelectorAll('.claim-row').forEach((row) => {
+      const id = row.dataset.claimRowId || '';
+      const checkbox = row.querySelector('.claim-check');
+      if (checkbox) checkbox.checked = checked;
+      if (checked && id) state.claimSelectedIds.add(id);
+    });
+  });
+  document.querySelectorAll('.claim-row').forEach((row) => {
+    row.addEventListener('click', () => {
+      state.claimSelectedId = row.dataset.claimRowId || '';
+      replaceRouteHash();
+      loadRoutePage();
+    });
+    row.addEventListener('dblclick', async () => {
+      if (row.dataset.sourceId) await selectSource(row.dataset.sourceId);
+    });
+    row.querySelector('.claim-check')?.addEventListener('click', (event) => {
+      event.stopPropagation();
+      const id = row.dataset.claimRowId || '';
+      if (!id) return;
+      if (event.currentTarget.checked) state.claimSelectedIds.add(id);
+      else state.claimSelectedIds.delete(id);
+    });
+  });
+  document.querySelectorAll('[data-claim-preview-tab]').forEach((button) => {
+    button.addEventListener('click', () => {
+      state.claimPreviewTab = button.dataset.claimPreviewTab || 'review';
+      document.querySelectorAll('[data-claim-preview-tab]').forEach((tab) => tab.classList.toggle('active', tab === button));
+      document.querySelectorAll('[data-claim-preview-section]').forEach((section) => {
+        section.classList.toggle('active', section.dataset.claimPreviewSection === state.claimPreviewTab);
+      });
+    });
+  });
+  document.querySelectorAll('[data-claim-action]').forEach((button) => {
+    button.addEventListener('click', async () => {
+      const row = (data.rows || []).find((item) => claimRowKey(item) === state.claimSelectedId) || data.preview?.row;
+      try {
+        await applyClaimAction(row, button.dataset.claimAction || 'defer');
+      } catch (error) {
+        const status = $('claimActionStatus');
+        if (status) status.textContent = error.message;
+      }
+    });
+  });
+  document.querySelectorAll('[data-claim-bulk-action]').forEach((button) => {
+    button.addEventListener('click', async () => {
+      try {
+        await applyBulkClaimAction(button.dataset.claimBulkAction || 'defer');
+      } catch (error) {
+        const status = $('claimBulkStatus');
+        if (status) status.textContent = error.message;
+      }
+    });
+  });
+  bindClaimKeyboard();
 }
 
 function renderReviewsPage(data) {
@@ -2648,6 +3175,14 @@ function routeQuery() {
     if (state.entityReviewState) params.set('review_state', state.entityReviewState);
     if (state.entitySourceKind) params.set('source_kind', state.entitySourceKind);
     if (state.entitySelectedId) params.set('inspect', `entity:${state.entitySelectedId}`);
+  }
+  if (state.route === 'claims') {
+    if (state.claimQueue && state.claimQueue !== 'all') params.set('queue', state.claimQueue);
+    if (state.claimType) params.set('claim_type', state.claimType);
+    if (state.claimReviewState) params.set('review_state', state.claimReviewState);
+    if (state.claimContradictionState) params.set('contradiction_state', state.claimContradictionState);
+    if (state.claimSourceKind) params.set('source_kind', state.claimSourceKind);
+    if (state.claimSelectedId) params.set('inspect', `claim:${state.claimSelectedId}`);
   }
   return params.toString();
 }
@@ -4018,7 +4553,7 @@ function wireEvents() {
     if ($('inboxLocalSearch') && $('inboxLocalSearch').value !== state.q) $('inboxLocalSearch').value = state.q;
     clearTimeout(window.__inboxTimer);
     window.__inboxTimer = setTimeout(() => {
-      if (state.route === 'library' || state.route === 'evidence') replaceRouteHash();
+      if (state.route === 'library' || state.route === 'evidence' || state.route === 'entities' || state.route === 'claims') replaceRouteHash();
       if (state.route === 'home' || state.route === 'inbox') loadInbox();
       else loadRoutePage();
     }, 250);
@@ -4064,7 +4599,7 @@ function wireEvents() {
     state.previewTaskKey = '';
     loadInbox();
     if (state.route !== 'home' && state.route !== 'inbox') {
-      if (state.route === 'library' || state.route === 'evidence') replaceRouteHash();
+      if (state.route === 'library' || state.route === 'evidence' || state.route === 'entities' || state.route === 'claims') replaceRouteHash();
       loadRoutePage();
     }
   });

@@ -2775,6 +2775,248 @@ pre {
   padding-top: 12px;
   background: var(--panel);
 }
+.claim-shell {
+  display: grid;
+  grid-template-columns: 258px minmax(430px, 1fr) 420px;
+  gap: 14px;
+  align-items: start;
+}
+.claim-filter-panel,
+.claim-ledger-panel,
+.claim-preview-panel {
+  min-height: 640px;
+  height: min(780px, calc(100vh - 190px));
+  overflow: hidden;
+}
+.claim-filter-panel,
+.claim-preview-panel {
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.claim-filter-panel {
+  overflow: auto;
+}
+.claim-ledger-panel {
+  display: flex;
+  flex-direction: column;
+}
+.claim-facet-group {
+  min-height: 0;
+  flex: 0 0 auto;
+}
+.claim-facet-group h3 {
+  margin: 0 0 6px;
+  color: var(--muted);
+  font-size: 11px;
+  text-transform: uppercase;
+}
+.claim-search-strip {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  padding: 16px;
+  border-bottom: 1px solid var(--soft-line);
+}
+.claim-search-strip label {
+  display: grid;
+  gap: 6px;
+}
+.claim-search-strip label span {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+.claim-explanation,
+.claim-bulk-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--soft-line);
+}
+.claim-explanation p {
+  margin: 0;
+}
+.claim-bulk-toolbar label {
+  display: inline-flex;
+  gap: 7px;
+  align-items: center;
+  color: var(--muted);
+}
+.claim-bulk-toolbar input {
+  width: 16px;
+  height: 16px;
+}
+.claim-results-list {
+  min-height: 0;
+  overflow: auto;
+  flex: 1;
+}
+.claim-row {
+  display: grid;
+  grid-template-columns: 20px 38px minmax(0, 1fr) minmax(92px, auto);
+  gap: 10px;
+  align-items: start;
+  padding: 12px;
+  border-bottom: 1px solid var(--soft-line);
+  border-left: 3px solid transparent;
+  cursor: pointer;
+}
+.claim-row:hover,
+.claim-row.active {
+  border-left-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 8%, var(--panel));
+}
+.claim-check {
+  width: 16px;
+  height: 16px;
+  margin: 3px 0 0;
+}
+.claim-row-main {
+  min-width: 0;
+}
+.claim-title-line {
+  display: flex;
+  gap: 7px;
+  align-items: start;
+  flex-wrap: wrap;
+}
+.claim-title-line strong {
+  overflow-wrap: anywhere;
+}
+.claim-row-main p {
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+}
+.claim-row-counts {
+  display: grid;
+  gap: 3px;
+  justify-items: end;
+  color: var(--muted);
+  font-size: 11px;
+  text-align: right;
+}
+.claim-row-counts strong {
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+.claim-row-counts em {
+  font-style: normal;
+}
+.claim-preview-panel {
+  overflow: auto;
+}
+.claim-preview-head {
+  display: grid;
+  grid-template-columns: 38px minmax(0, 1fr);
+  gap: 10px;
+  align-items: start;
+}
+.claim-preview-head h2 {
+  color: var(--text);
+  font-size: 20px;
+  line-height: 1.2;
+  text-transform: none;
+  letter-spacing: 0;
+  overflow-wrap: anywhere;
+}
+.claim-preview-tabs {
+  display: flex;
+  gap: 6px;
+  overflow-x: auto;
+  flex: 0 0 auto;
+}
+.claim-preview-tabs button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 32px;
+  padding: 7px 10px;
+  white-space: nowrap;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 800;
+}
+.claim-preview-section {
+  display: none;
+}
+.claim-preview-section.active {
+  display: grid;
+  gap: 10px;
+}
+.claim-layer-stack {
+  display: grid;
+  gap: 8px;
+}
+.claim-layer-stack div,
+.claim-preview-card,
+.claim-warning {
+  padding: 10px;
+  border: 1px solid var(--soft-line);
+  border-radius: 8px;
+  background: var(--panel-2);
+}
+.claim-layer-stack span,
+.claim-preview-card h4 {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+.claim-layer-stack strong,
+.claim-preview-card p {
+  display: block;
+  margin-top: 3px;
+  color: var(--text);
+  overflow-wrap: anywhere;
+}
+.claim-warning {
+  color: var(--warn);
+  line-height: 1.4;
+}
+.claim-provenance-stack {
+  display: grid;
+  gap: 8px;
+}
+.claim-provenance-stack article {
+  display: grid;
+  grid-template-columns: 32px minmax(0, 1fr);
+  gap: 8px;
+  padding: 9px;
+  border: 1px solid var(--soft-line);
+  border-radius: 8px;
+  background: var(--panel-2);
+}
+.claim-provenance-stack article > span {
+  color: var(--accent);
+  font-weight: 900;
+  font-variant-numeric: tabular-nums;
+}
+.claim-provenance-stack p,
+.claim-provenance-stack em {
+  overflow-wrap: anywhere;
+}
+.claim-provenance-stack em {
+  color: var(--muted);
+  font-style: normal;
+}
+.claim-preview-actions {
+  position: sticky;
+  bottom: 0;
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  padding-top: 12px;
+  background: var(--panel);
+}
 .empty-state {
   padding: 28px;
 }
@@ -2795,6 +3037,8 @@ pre {
   .evidence-detail-panel { grid-column: 1 / -1; height: auto; min-height: 420px; }
   .entity-shell { grid-template-columns: minmax(230px, .62fr) minmax(0, 1.38fr); }
   .entity-preview-panel { grid-column: 1 / -1; height: auto; min-height: 420px; }
+  .claim-shell { grid-template-columns: minmax(230px, .62fr) minmax(0, 1.38fr); }
+  .claim-preview-panel { grid-column: 1 / -1; height: auto; min-height: 420px; }
   .brief-grid,
   .home-grid,
   .brief-question,
@@ -2830,7 +3074,10 @@ pre {
   .evidence-detail-panel,
   .entity-filter-panel,
   .entity-results-panel,
-  .entity-preview-panel {
+  .entity-preview-panel,
+  .claim-filter-panel,
+  .claim-ledger-panel,
+  .claim-preview-panel {
     height: auto;
     min-height: 0;
   }
@@ -2850,9 +3097,11 @@ pre {
   .library-shell,
   .evidence-shell,
   .entity-shell,
+  .claim-shell,
   .library-search-strip,
   .evidence-search-strip,
   .entity-search-strip,
+  .claim-search-strip,
   .question-move-row {
     grid-template-columns: 1fr;
   }
@@ -2883,20 +3132,23 @@ pre {
   .project-row,
   .library-source-row,
   .evidence-row,
-  .entity-row {
+  .entity-row,
+  .claim-row {
     grid-template-columns: 1fr;
   }
   .object-side,
   .row-progress,
   .library-source-counts,
   .evidence-row-counts,
-  .entity-row-counts {
+  .entity-row-counts,
+  .claim-row-counts {
     justify-content: start;
     text-align: left;
   }
   .library-source-counts,
   .evidence-row-counts,
-  .entity-row-counts {
+  .entity-row-counts,
+  .claim-row-counts {
     justify-items: start;
   }
 }

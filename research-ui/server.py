@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import base64
 from datetime import datetime, timezone
+import hashlib
 import json
 import mimetypes
 import os
@@ -2537,44 +2538,377 @@ def entity_directory(params):
     }
 
 
+CLAIM_QUEUE_LABELS = [
+    ("all", "All claims"),
+    ("accepted", "Accepted"),
+    ("under_review", "Under review"),
+    ("proposed_unsupported", "Proposed / unsupported"),
+    ("disputed", "Disputed"),
+    ("conflict_clusters", "Conflict clusters"),
+    ("duplicates", "Duplicates / merge"),
+    ("rejected_superseded", "Rejected / superseded"),
+]
+
+
+def claim_subject_value(row):
+    text = compact_text(row.get("claim_text"), 2000)
+    claim_type = row.get("claim_type") or "general"
+    subject = ""
+    value = text
+    if ":" in text:
+        left, right = text.split(":", 1)
+        subject = left.strip()
+        value = right.strip()
+    elif " is " in text.lower():
+        parts = text.split(" is ", 1)
+        if len(parts) == 2:
+            subject = parts[0].strip()
+            value = parts[1].strip()
+    return {
+        "subject": subject or row.get("source_project") or "Unscoped subject",
+        "property": claim_type,
+        "value": value or text,
+    }
+
+
+def claim_contradiction_state(row, cluster_size=1):
+    status = str(row.get("status") or "").lower()
+    relation = str(row.get("evidence_relation") or "").lower()
+    if status in ("disputed", "rejected") or relation in ("refutes", "contradicts"):
+        return "disputed"
+    if cluster_size > 1:
+        return "conflict"
+    if status in ("accepted", "published") and relation in ("supports", "supporting", "supports_claim"):
+        return "supported"
+    if not relation or relation in ("context", "related"):
+        return "contextual"
+    return "under_review"
+
+
+def claim_queue_match(row, queue):
+    if not queue or queue == "all":
+        return True
+    status = str(row.get("review_state") or "").lower()
+    contradiction = str(row.get("contradiction_state") or "").lower()
+    if queue == "accepted":
+        return status in ("accepted", "published")
+    if queue == "under_review":
+        return status in ("under_review", "draft", "proposed") and contradiction not in ("disputed", "conflict")
+    if queue == "proposed_unsupported":
+        return status in ("draft", "proposed") and int(row.get("support_count") or 0) == 0
+    if queue == "disputed":
+        return status == "disputed" or contradiction == "disputed"
+    if queue == "conflict_clusters":
+        return row.get("row_kind") == "conflict_cluster" or contradiction == "conflict"
+    if queue == "duplicates":
+        return row.get("row_kind") == "duplicate_cluster" or int(row.get("duplicate_count") or 0) > 1
+    if queue == "rejected_superseded":
+        return status in ("rejected", "superseded")
+    return True
+
+
+def claim_queue_counts(rows):
+    return [
+        {"id": queue_id, "label": label, "count": sum(1 for row in rows if claim_queue_match(row, queue_id))}
+        for queue_id, label in CLAIM_QUEUE_LABELS
+    ]
+
+
+def make_claim_row(row, source_map, type_counts, text_counts, evidence_by_source, facts_by_source, entities_by_source):
+    source_id = row.get("source_evidence_id") or ""
+    source = source_for_ledger_row(source_map, source_id)
+    parts = claim_subject_value({**row, **source})
+    qualifier = parse_raw_json(row.get("qualifier_json", ""))
+    relation = row.get("evidence_relation") or ""
+    cluster_size = int(type_counts.get(row.get("claim_type") or "") or 1)
+    duplicate_count = int(text_counts.get((row.get("claim_text") or "").lower()) or 1)
+    contradiction = claim_contradiction_state(row, cluster_size)
+    support_count = 1 if relation.lower() in ("supports", "supporting", "supports_claim") else 0
+    refute_count = 1 if relation.lower() in ("refutes", "contradicts") or contradiction == "disputed" else 0
+    context_count = 1 if relation.lower() in ("context", "related") else 0
+    evidence_count = support_count + refute_count + context_count + len(evidence_by_source.get(source_id, []))
+    return {
+        **source,
+        "claim_row_id": f"claim:{row.get('claim_id')}",
+        "row_kind": "claim",
+        "object_type": "claim_stub",
+        "object_id": row.get("claim_id") or "",
+        "claim_text": row.get("claim_text") or "",
+        "subject": parts["subject"],
+        "property": parts["property"],
+        "value": parts["value"],
+        "qualifier": qualifier,
+        "claim_type": row.get("claim_type") or "general",
+        "evidence_relation": relation,
+        "review_state": row.get("status") or "draft",
+        "contradiction_state": contradiction,
+        "preferred_assertion": row.get("claim_text") or "",
+        "assertion_count": cluster_size,
+        "support_count": support_count,
+        "refute_count": refute_count,
+        "context_count": context_count,
+        "evidence_count": evidence_count,
+        "source_diversity": 1 if source_id else 0,
+        "conflict_state": contradiction,
+        "duplicate_count": duplicate_count,
+        "publication_blockers": sum(1 for value in (contradiction == "disputed", support_count == 0, status_is_terminal_rejected(row.get("status"))) if value),
+        "linked_entity_count": len(entities_by_source.get(source_id, [])),
+        "linked_fact_count": len(facts_by_source.get(source_id, [])),
+        "note": row.get("note") or "",
+        "actor": row.get("actor") or "",
+        "created_at": row.get("created_at") or source.get("captured_at"),
+        "updated_at": row.get("updated_at") or source.get("last_ingested_at"),
+        "can_update_review_state": True,
+    }
+
+
+def status_is_terminal_rejected(status):
+    return str(status or "").lower() in ("rejected", "superseded")
+
+
+def make_claim_cluster_rows(claim_rows):
+    by_proposition = {}
+    by_text = {}
+    for row in claim_rows:
+        proposition_key = "|".join([
+            str(row.get("subject") or "").lower(),
+            str(row.get("property") or row.get("claim_type") or "general").lower(),
+        ])
+        by_proposition.setdefault(proposition_key, []).append(row)
+        by_text.setdefault((row.get("claim_text") or "").lower(), []).append(row)
+    clusters = []
+    for proposition_key, rows in by_proposition.items():
+        distinct_values = {str(row.get("value") or row.get("claim_text") or "").lower() for row in rows}
+        if len(rows) <= 1 or len(distinct_values) <= 1:
+            continue
+        claim_type = rows[0].get("claim_type") or "general"
+        subject = rows[0].get("subject") or "Claim cluster"
+        safe_key = hashlib.sha1(proposition_key.encode("utf-8")).hexdigest()[:16]
+        clusters.append({
+            **rows[0],
+            "claim_row_id": f"conflict_cluster:{safe_key}",
+            "row_kind": "conflict_cluster",
+            "object_type": "claim_cluster",
+            "object_id": proposition_key,
+            "claim_text": f"{subject}: {len(rows)} competing assertions",
+            "subject": subject,
+            "property": claim_type,
+            "value": f"{len(rows)} assertions",
+            "review_state": "under_review",
+            "contradiction_state": "conflict",
+            "preferred_assertion": first_nonempty(*(row.get("claim_text") for row in rows)),
+            "assertion_count": len(rows),
+            "support_count": sum(int(row.get("support_count") or 0) for row in rows),
+            "refute_count": sum(int(row.get("refute_count") or 0) for row in rows),
+            "context_count": sum(int(row.get("context_count") or 0) for row in rows),
+            "evidence_count": sum(int(row.get("evidence_count") or 0) for row in rows),
+            "source_diversity": len({row.get("source_evidence_id") for row in rows if row.get("source_evidence_id")}),
+            "publication_blockers": len(rows),
+            "can_update_review_state": False,
+        })
+    for text, rows in by_text.items():
+        if text and len(rows) > 1:
+            clusters.append({
+                **rows[0],
+                "claim_row_id": f"duplicate_cluster:{text[:120]}",
+                "row_kind": "duplicate_cluster",
+                "object_type": "claim_cluster",
+                "object_id": text[:300],
+                "claim_text": rows[0].get("claim_text") or "Duplicate claim",
+                "review_state": "merge_review",
+                "contradiction_state": "duplicate",
+                "duplicate_count": len(rows),
+                "assertion_count": len(rows),
+                "publication_blockers": len(rows),
+                "can_update_review_state": False,
+            })
+    return clusters
+
+
+def claim_row_matches(row, q, queue, claim_type, review_state, contradiction_state, source_kind, project):
+    if not claim_queue_match(row, queue):
+        return False
+    if claim_type and claim_type != row.get("claim_type"):
+        return False
+    if review_state and review_state != row.get("review_state"):
+        return False
+    if contradiction_state and contradiction_state != row.get("contradiction_state"):
+        return False
+    if source_kind and source_kind != row.get("source_kind"):
+        return False
+    if project and project != row.get("source_project"):
+        return False
+    if q:
+        haystack = " ".join(str(row.get(key) or "") for key in (
+            "claim_row_id", "row_kind", "object_id", "claim_text", "subject",
+            "property", "value", "claim_type", "review_state",
+            "contradiction_state", "title", "canonical_url", "domain",
+            "author_handle",
+        ))
+        if q.lower() not in haystack.lower():
+            return False
+    return True
+
+
+def claim_preview(row, claim_records, evidence_by_source, facts_by_source, entities_by_source, events_by_subject, source_map):
+    if not row:
+        return {}
+    source_id = row.get("source_evidence_id") or ""
+    claim_type = row.get("claim_type") or ""
+    related_claims = [claim for claim in claim_records if claim.get("claim_type") == claim_type or claim.get("claim_id") == row.get("object_id")]
+    evidence = evidence_by_source.get(source_id, [])
+    facts = facts_by_source.get(source_id, [])
+    entities = entities_by_source.get(source_id, [])
+    events = events_by_subject.get(row.get("object_id"), []) + events_by_subject.get(source_id, [])
+    source = source_for_ledger_row(source_map, source_id)
+    return {
+        "row": row,
+        "source": source,
+        "assertions": related_claims[:30],
+        "evidence": evidence[:30],
+        "facts": facts[:30],
+        "entities": entities[:30],
+        "events": events[:30],
+        "provenance": [
+            {"label": "Observation", "value": source.get("title") or source_id, "meta": source.get("last_ingested_at") or ""},
+            {"label": "Evidence relation", "value": row.get("evidence_relation") or "not set", "meta": f"{row.get('support_count')} support / {row.get('refute_count')} refute"},
+            {"label": "Assertion", "value": row.get("preferred_assertion") or row.get("claim_text") or "", "meta": f"{row.get('assertion_count')} assertion(s)"},
+            {"label": "Claim review", "value": row.get("review_state") or "", "meta": row.get("actor") or ""},
+            {"label": "Publication", "value": "blocked" if int(row.get("publication_blockers") or 0) else "eligible for draft review", "meta": "snapshot is separate"},
+        ],
+    }
+
+
 def claims_ledger(params):
     limit = sql_int(params.get("limit", ["120"])[0], 120)
+    fetch_limit = max(limit * 4, 200)
+    q = (params.get("q", [""])[0] or "").strip()
+    queue = (params.get("queue", ["all"])[0] or "all").strip()
+    claim_type = (params.get("claim_type", [""])[0] or "").strip()
+    review_state = (params.get("review_state", [""])[0] or "").strip()
+    contradiction_state = (params.get("contradiction_state", [""])[0] or "").strip()
+    source_kind = (params.get("source_kind", [""])[0] or "").strip()
+    project = (params.get("project", [""])[0] or "").strip()
+    inspect = (params.get("inspect", [""])[0] or "").strip()
+    if inspect.startswith("claim:"):
+        inspect = inspect.removeprefix("claim:")
+
     claims = ch_data(
         f"""
         SELECT
           claim_id, source_evidence_id, evidence_selection_id, claim_text,
-          claim_type, evidence_relation, qualifier_json, status, note,
-          actor, created_at, updated_at
+          claim_type, evidence_relation, qualifier_json, source_anchor_json,
+          status, note, actor, created_at, updated_at
         FROM claim_records FINAL
         ORDER BY updated_at DESC
-        LIMIT {limit}
+        LIMIT {fetch_limit}
         """,
         fallback=[],
     )
-    type_counts = ch_data(
-        """
-        SELECT claim_type, evidence_relation, status, count() AS rows
-        FROM claim_records FINAL
-        GROUP BY claim_type, evidence_relation, status
-        ORDER BY rows DESC, claim_type ASC
+    selections = ch_data(
+        f"""
+        SELECT selection_id, source_evidence_id, selection_kind, quote, status, updated_at
+        FROM evidence_selections FINAL
+        ORDER BY updated_at DESC
+        LIMIT {fetch_limit}
         """,
         fallback=[],
     )
-    possible_conflicts = ch_data(
-        """
-        SELECT
-          claim_type,
-          count() AS rows,
-          uniqExact(source_evidence_id) AS sources
-        FROM claim_records FINAL
-        GROUP BY claim_type
-        HAVING rows > 1
-        ORDER BY rows DESC
-        LIMIT 20
+    facts = ch_data(
+        f"""
+        SELECT proposed_fact_id, source_evidence_id, fact_type, field_path, raw_value,
+          normalized_value, unit, evidence_quote, status, updated_at
+        FROM proposed_facts FINAL
+        ORDER BY updated_at DESC
+        LIMIT {fetch_limit}
         """,
         fallback=[],
     )
-    return {"claims": claims, "type_counts": type_counts, "possible_conflicts": possible_conflicts}
+    entities = ch_data(
+        f"""
+        SELECT entity_link_id, source_evidence_id, mention_text, entity_type,
+          canonical_entity_id, canonical_name, status, updated_at
+        FROM entity_links FINAL
+        ORDER BY updated_at DESC
+        LIMIT {fetch_limit}
+        """,
+        fallback=[],
+    )
+    events = ch_data(
+        f"""
+        SELECT event_id, event_type, source_evidence_id, subject_type, subject_id,
+          actor, created_at, payload_json
+        FROM research_review_events
+        WHERE subject_type IN ('claim_stub', 'claim_cluster', 'source_record', 'review_task')
+        ORDER BY created_at DESC
+        LIMIT {fetch_limit}
+        """,
+        fallback=[],
+    )
+    source_ids = []
+    for rows in (claims, selections, facts, entities, events):
+        source_ids.extend(row.get("source_evidence_id") for row in rows)
+    source_map = hydrate_source_rows(source_ids)
+    type_counts = {}
+    text_counts = {}
+    for claim in claims:
+        claim_type_key = claim.get("claim_type") or ""
+        text_key = (claim.get("claim_text") or "").lower()
+        type_counts[claim_type_key] = type_counts.get(claim_type_key, 0) + 1
+        text_counts[text_key] = text_counts.get(text_key, 0) + 1
+    evidence_by_source = group_rows(selections, "source_evidence_id")
+    facts_by_source = group_rows(facts, "source_evidence_id")
+    entities_by_source = group_rows(entities, "source_evidence_id")
+    events_by_subject = {}
+    for event in events:
+        if event.get("subject_id"):
+            events_by_subject.setdefault(event.get("subject_id"), []).append(event)
+        if event.get("source_evidence_id"):
+            events_by_subject.setdefault(event.get("source_evidence_id"), []).append(event)
+
+    claim_rows = [make_claim_row(row, source_map, type_counts, text_counts, evidence_by_source, facts_by_source, entities_by_source) for row in claims]
+    rows = make_claim_cluster_rows(claim_rows) + claim_rows
+    rows.sort(key=lambda row: str(row.get("updated_at") or ""), reverse=True)
+    filtered = [row for row in rows if claim_row_matches(row, q, queue, claim_type, review_state, contradiction_state, source_kind, project)]
+    visible = filtered[:limit]
+    selected = next((row for row in visible if row.get("claim_row_id") == inspect), None) or (visible[0] if visible else None)
+    return {
+        "project": {"id": project or "all", "label": project or "All projects"},
+        "query": {
+            "q": q,
+            "queue": queue,
+            "claim_type": claim_type,
+            "review_state": review_state,
+            "contradiction_state": contradiction_state,
+            "source_kind": source_kind,
+            "limit": limit,
+        },
+        "summary": {
+            "claims": len(rows),
+            "visible": len(filtered),
+            "accepted": sum(1 for row in rows if row.get("review_state") == "accepted"),
+            "disputed": sum(1 for row in rows if row.get("contradiction_state") == "disputed"),
+            "conflicts": sum(1 for row in rows if row.get("row_kind") == "conflict_cluster"),
+            "publication_blockers": sum(int(row.get("publication_blockers") or 0) for row in rows),
+        },
+        "saved_views": [],
+        "facets": {
+            "queues": claim_queue_counts(rows),
+            "claim_types": evidence_facet_counts(rows, "claim_type"),
+            "review_states": evidence_facet_counts(rows, "review_state"),
+            "contradiction_states": evidence_facet_counts(rows, "contradiction_state"),
+            "source_kinds": evidence_facet_counts(rows, "source_kind"),
+            "projects": evidence_facet_counts(rows, "source_project"),
+        },
+        "results": {"rows": visible, "count": len(filtered), "limit": limit},
+        "rows": visible,
+        "preview": claim_preview(selected, claims, evidence_by_source, facts_by_source, entities_by_source, events_by_subject, source_map),
+        "selection": {"selected_id": selected.get("claim_row_id") if selected else "", "selected_ids": []},
+        "permissions": ["review", "revise", "merge", "split", "publish_draft"],
+        "generated_at": now_iso(),
+        "stale": False,
+        "version": "claims-ledger.v2",
+    }
 
 
 def reviews_read_model(params):

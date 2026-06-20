@@ -515,6 +515,75 @@ function renderReview(source) {
           <button id="saveFact">Save proposed fact</button>
         </div>
       </section>
+
+      <section class="card review-form">
+        <h3>Entity Link</h3>
+        <label>Entity type
+          <select id="entityType">
+            <option value="lab">Lab / company</option>
+            <option value="person">Person</option>
+            <option value="model">Model</option>
+            <option value="benchmark">Benchmark</option>
+            <option value="dataset">Dataset</option>
+            <option value="repo">Repository</option>
+            <option value="paper">Paper</option>
+            <option value="hardware">Hardware</option>
+            <option value="tool">Tool</option>
+            <option value="topic">Topic</option>
+          </select>
+        </label>
+        <label>Mention text
+          <textarea id="entityMentionText" placeholder="Text span or object being linked">${escapeHtml(selected?.quote || '')}</textarea>
+        </label>
+        <label>Canonical name
+          <input id="entityCanonicalName" placeholder="Preferred entity name, if known">
+        </label>
+        <label>Canonical ID
+          <input id="entityCanonicalId" placeholder="Optional existing entity id">
+        </label>
+        <label>Note
+          <textarea id="entityNote" placeholder="Alias, ambiguity, merge thought, or why this entity matters"></textarea>
+        </label>
+        <div class="form-actions">
+          <button id="saveEntityLink">Save entity link</button>
+        </div>
+      </section>
+
+      <section class="card review-form">
+        <h3>Claim Stub</h3>
+        <label>Claim type
+          <select id="claimType">
+            <option value="model_capability">Model capability</option>
+            <option value="benchmark_result">Benchmark result</option>
+            <option value="release_claim">Release claim</option>
+            <option value="architecture_claim">Architecture claim</option>
+            <option value="hardware_claim">Hardware claim</option>
+            <option value="product_feature">Product feature</option>
+            <option value="general">General</option>
+          </select>
+        </label>
+        <label>Evidence relation
+          <select id="claimEvidenceRelation">
+            <option value="supports">Supports</option>
+            <option value="refutes">Refutes</option>
+            <option value="mentions">Mentions</option>
+            <option value="context">Context</option>
+            <option value="uncertain">Uncertain</option>
+          </select>
+        </label>
+        <label>Claim text
+          <textarea id="claimText" placeholder="Atomic claim that this source supports, refutes, or mentions">${escapeHtml(selected?.quote || '')}</textarea>
+        </label>
+        <label>Qualifier JSON
+          <textarea id="claimQualifier" placeholder='{"scope":"", "benchmark":"", "date":""}'></textarea>
+        </label>
+        <label>Note
+          <textarea id="claimNote" placeholder="Uncertainty, missing context, contradiction, or review concern"></textarea>
+        </label>
+        <div class="form-actions">
+          <button id="saveClaimRecord">Save claim stub</button>
+        </div>
+      </section>
     </div>
 
     <div id="reviewStatus" class="review-status muted"></div>
@@ -551,6 +620,32 @@ function renderReview(source) {
           </div>
           <p><strong>${escapeHtml(row.normalized_value || row.raw_value)}</strong>${row.unit ? ` ${escapeHtml(row.unit)}` : ''}</p>
           ${row.evidence_quote ? `<p class="muted">${escapeHtml(row.evidence_quote)}</p>` : ''}
+          ${row.note ? `<p class="muted">${escapeHtml(row.note)}</p>` : ''}
+          <div class="muted">${fmtDate(row.updated_at)} · ${escapeHtml(row.actor)}</div>
+        </article>
+      `)}
+      ${renderReviewList('Entity links', review.entity_links || [], (row) => `
+        <article class="review-item">
+          <div class="tag-line">
+            <span class="pill">${escapeHtml(row.status)}</span>
+            <span class="pill">${escapeHtml(row.entity_type)}</span>
+            ${row.evidence_selection_id ? `<span class="pill">${escapeHtml(row.evidence_selection_id)}</span>` : ''}
+          </div>
+          <p><strong>${escapeHtml(row.canonical_name || row.canonical_entity_id || row.mention_text)}</strong></p>
+          ${row.mention_text ? `<p class="muted">${escapeHtml(row.mention_text)}</p>` : ''}
+          ${row.note ? `<p class="muted">${escapeHtml(row.note)}</p>` : ''}
+          <div class="muted">${fmtDate(row.updated_at)} · ${escapeHtml(row.actor)}</div>
+        </article>
+      `)}
+      ${renderReviewList('Claim stubs', review.claim_records || [], (row) => `
+        <article class="review-item">
+          <div class="tag-line">
+            <span class="pill">${escapeHtml(row.status)}</span>
+            <span class="pill">${escapeHtml(row.claim_type)}</span>
+            <span class="pill">${escapeHtml(row.evidence_relation)}</span>
+            ${row.evidence_selection_id ? `<span class="pill">${escapeHtml(row.evidence_selection_id)}</span>` : ''}
+          </div>
+          <p><strong>${escapeHtml(row.claim_text)}</strong></p>
           ${row.note ? `<p class="muted">${escapeHtml(row.note)}</p>` : ''}
           <div class="muted">${fmtDate(row.updated_at)} · ${escapeHtml(row.actor)}</div>
         </article>
@@ -628,6 +723,54 @@ function wireReviewEvents(source, attachedSelection) {
         note: $('factNote').value,
         evidence_quote: state.selectedBlock?.quote || '',
         status: 'proposed',
+      });
+      await refreshReviewState();
+    } catch (error) {
+      status.textContent = error.message;
+    }
+  });
+  $('saveEntityLink').addEventListener('click', async () => {
+    try {
+      status.textContent = 'Saving entity link...';
+      const base = selectedReviewBase(source);
+      await postJson('/api/entity-links', {
+        ...base,
+        evidence_selection_id: attachedSelection?.selection_id || '',
+        entity_type: $('entityType').value,
+        mention_text: $('entityMentionText').value,
+        canonical_name: $('entityCanonicalName').value,
+        canonical_entity_id: $('entityCanonicalId').value,
+        note: $('entityNote').value,
+        status: 'proposed',
+      });
+      await refreshReviewState();
+    } catch (error) {
+      status.textContent = error.message;
+    }
+  });
+  $('saveClaimRecord').addEventListener('click', async () => {
+    try {
+      status.textContent = 'Saving claim stub...';
+      const qualifierText = $('claimQualifier').value.trim();
+      let qualifier = {};
+      if (qualifierText) {
+        try {
+          qualifier = JSON.parse(qualifierText);
+        } catch (error) {
+          status.textContent = `Qualifier JSON error: ${error.message}`;
+          return;
+        }
+      }
+      const base = selectedReviewBase(source);
+      await postJson('/api/claim-records', {
+        ...base,
+        evidence_selection_id: attachedSelection?.selection_id || '',
+        claim_type: $('claimType').value,
+        evidence_relation: $('claimEvidenceRelation').value,
+        claim_text: $('claimText').value,
+        qualifier,
+        note: $('claimNote').value,
+        status: 'draft',
       });
       await refreshReviewState();
     } catch (error) {

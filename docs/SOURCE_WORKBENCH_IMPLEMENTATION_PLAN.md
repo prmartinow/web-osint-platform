@@ -46,7 +46,7 @@ First-cut review foundation already implemented:
 
 Main remaining gap:
 
-- The Research UI has a first durable review landing zone, but it is not yet the full workbench. Entity links, claim records, normalized-content corrections, review-state transitions, source/artifact navigation, review-task Inbox rows, and publication draft objects still need first-class persistence and UI flows.
+- The Research UI has a first durable review landing zone, but it is not yet the full workbench. Entity links and claim records now have first-cut persistence/API/UI support. Normalized-content corrections, review-state transitions, source/artifact navigation, review-task Inbox rows, and publication draft objects still need first-class persistence and UI flows.
 
 ## Implementation Principle
 
@@ -199,6 +199,9 @@ Validation:
 
 Goal: allow human-led entity linking before adding model-based entity extraction.
 
+Status: first cut implemented with durable `entity_links`, `entity_link.created`
+review events, `POST /api/entity-links`, review hydration, and Review-tab UI.
+
 Deliverables:
 
 - Entity link object:
@@ -228,6 +231,9 @@ Validation:
 ### Slice 5 - Claim Stub Layer
 
 Goal: create claims only after evidence selections and proposed facts exist.
+
+Status: first cut implemented with durable `claim_records`, `claim_stub.created`
+review events, `POST /api/claim-records`, review hydration, and Review-tab UI.
 
 Deliverables:
 

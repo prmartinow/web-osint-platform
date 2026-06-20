@@ -632,3 +632,43 @@ CREATE TABLE IF NOT EXISTS web_osint.proposed_facts
 ENGINE = ReplacingMergeTree(updated_at)
 PARTITION BY toYYYYMM(created_at)
 ORDER BY (source_evidence_id, proposed_fact_id);
+
+CREATE TABLE IF NOT EXISTS web_osint.entity_links
+(
+    entity_link_id String,
+    source_evidence_id String,
+    evidence_selection_id String,
+    mention_text String,
+    entity_type LowCardinality(String),
+    canonical_entity_id String,
+    canonical_name String,
+    source_anchor_json String,
+    status LowCardinality(String),
+    note String,
+    actor String,
+    created_at DateTime64(3, 'UTC'),
+    updated_at DateTime64(3, 'UTC')
+)
+ENGINE = ReplacingMergeTree(updated_at)
+PARTITION BY toYYYYMM(created_at)
+ORDER BY (source_evidence_id, entity_link_id);
+
+CREATE TABLE IF NOT EXISTS web_osint.claim_records
+(
+    claim_id String,
+    source_evidence_id String,
+    evidence_selection_id String,
+    claim_text String,
+    claim_type LowCardinality(String),
+    evidence_relation LowCardinality(String),
+    qualifier_json String,
+    source_anchor_json String,
+    status LowCardinality(String),
+    note String,
+    actor String,
+    created_at DateTime64(3, 'UTC'),
+    updated_at DateTime64(3, 'UTC')
+)
+ENGINE = ReplacingMergeTree(updated_at)
+PARTITION BY toYYYYMM(created_at)
+ORDER BY (source_evidence_id, claim_id);

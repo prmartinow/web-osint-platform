@@ -258,6 +258,48 @@ def ensure_review_tables():
         PARTITION BY toYYYYMM(created_at)
         ORDER BY (source_evidence_id, proposed_fact_id)
         """,
+        """
+        CREATE TABLE IF NOT EXISTS entity_links
+        (
+            entity_link_id String,
+            source_evidence_id String,
+            evidence_selection_id String,
+            mention_text String,
+            entity_type LowCardinality(String),
+            canonical_entity_id String,
+            canonical_name String,
+            source_anchor_json String,
+            status LowCardinality(String),
+            note String,
+            actor String,
+            created_at DateTime64(3, 'UTC'),
+            updated_at DateTime64(3, 'UTC')
+        )
+        ENGINE = ReplacingMergeTree(updated_at)
+        PARTITION BY toYYYYMM(created_at)
+        ORDER BY (source_evidence_id, entity_link_id)
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS claim_records
+        (
+            claim_id String,
+            source_evidence_id String,
+            evidence_selection_id String,
+            claim_text String,
+            claim_type LowCardinality(String),
+            evidence_relation LowCardinality(String),
+            qualifier_json String,
+            source_anchor_json String,
+            status LowCardinality(String),
+            note String,
+            actor String,
+            created_at DateTime64(3, 'UTC'),
+            updated_at DateTime64(3, 'UTC')
+        )
+        ENGINE = ReplacingMergeTree(updated_at)
+        PARTITION BY toYYYYMM(created_at)
+        ORDER BY (source_evidence_id, claim_id)
+        """,
     ]
     for query in ddl:
         ch_execute(query)
@@ -449,6 +491,32 @@ def review_state_for_source(evidence_id):
         """,
         fallback=[],
     )
+    entity_links = ch_data(
+        f"""
+        SELECT
+          entity_link_id, source_evidence_id, evidence_selection_id, mention_text,
+          entity_type, canonical_entity_id, canonical_name, source_anchor_json,
+          status, note, actor, created_at, updated_at
+        FROM entity_links FINAL
+        WHERE source_evidence_id = {quoted}
+        ORDER BY updated_at DESC, created_at DESC
+        LIMIT 200
+        """,
+        fallback=[],
+    )
+    claim_records = ch_data(
+        f"""
+        SELECT
+          claim_id, source_evidence_id, evidence_selection_id, claim_text,
+          claim_type, evidence_relation, qualifier_json, source_anchor_json,
+          status, note, actor, created_at, updated_at
+        FROM claim_records FINAL
+        WHERE source_evidence_id = {quoted}
+        ORDER BY updated_at DESC, created_at DESC
+        LIMIT 200
+        """,
+        fallback=[],
+    )
     events = ch_data(
         f"""
         SELECT
@@ -465,11 +533,15 @@ def review_state_for_source(evidence_id):
         "selections": selections,
         "annotations": annotations,
         "proposed_facts": proposed_facts,
+        "entity_links": entity_links,
+        "claim_records": claim_records,
         "events": events,
         "counts": {
             "selections": len(selections),
             "annotations": len(annotations),
             "proposed_facts": len(proposed_facts),
+            "entity_links": len(entity_links),
+            "claim_records": len(claim_records),
             "events": len(events),
         },
     }
@@ -602,7 +674,15 @@ def build_review_event(event_type, payload):
         raise ResearchUiError(400, "source_evidence_id is required")
     created_at = now_iso()
     subject_type = compact_text(payload.get("subject_type") or event_type.split(".")[0], 80)
-    subject_id = compact_text(payload.get("subject_id") or payload.get("selection_id") or payload.get("annotation_id") or payload.get("proposed_fact_id"), 300)
+    subject_id = compact_text(
+        payload.get("subject_id")
+        or payload.get("selection_id")
+        or payload.get("annotation_id")
+        or payload.get("proposed_fact_id")
+        or payload.get("entity_link_id")
+        or payload.get("claim_id"),
+        300,
+    )
     source_anchor = payload.get("source_anchor") or {}
     event = {
         "event_id": make_id("review_event"),
@@ -758,6 +838,86 @@ def create_proposed_fact(payload):
     return {"event": event, "proposed_fact": normalized}
 
 
+def create_entity_link(payload):
+    entity_link_id = compact_text(payload.get("entity_link_id"), 300) or make_id("entity_link")
+    mention_text = compact_text(payload.get("mention_text") or payload.get("quote"), 20000)
+    canonical_name = compact_text(payload.get("canonical_name"), 500)
+    canonical_entity_id = compact_text(payload.get("canonical_entity_id"), 500)
+    if not mention_text and not canonical_name and not canonical_entity_id:
+        raise ResearchUiError(400, "mention_text, canonical_name, or canonical_entity_id is required")
+    now = now_iso()
+    normalized = {
+        **payload,
+        "entity_link_id": entity_link_id,
+        "subject_type": "entity_link",
+        "subject_id": entity_link_id,
+        "mention_text": mention_text,
+        "entity_type": compact_text(payload.get("entity_type") or "topic", 120),
+        "canonical_entity_id": canonical_entity_id,
+        "canonical_name": canonical_name,
+        "status": compact_text(payload.get("status") or "proposed", 80),
+        "note": compact_text(payload.get("note"), 20000),
+        "created_at": payload.get("created_at") or now,
+        "updated_at": now,
+    }
+    event = persist_review_event(build_review_event("entity_link.created", normalized))
+    ch_insert_json_each_row("entity_links", [{
+        "entity_link_id": entity_link_id,
+        "source_evidence_id": normalized["source_evidence_id"],
+        "evidence_selection_id": compact_text(normalized.get("evidence_selection_id"), 300),
+        "mention_text": normalized["mention_text"],
+        "entity_type": normalized["entity_type"],
+        "canonical_entity_id": normalized["canonical_entity_id"],
+        "canonical_name": normalized["canonical_name"],
+        "source_anchor_json": json_text(normalized.get("source_anchor")),
+        "status": normalized["status"],
+        "note": normalized["note"],
+        "actor": compact_text(normalized.get("actor") or REVIEW_ACTOR, 200),
+        "created_at": normalized["created_at"],
+        "updated_at": normalized["updated_at"],
+    }])
+    return {"event": event, "entity_link": normalized}
+
+
+def create_claim_record(payload):
+    claim_id = compact_text(payload.get("claim_id"), 300) or make_id("claim")
+    claim_text = compact_text(payload.get("claim_text") or payload.get("quote"), 50000)
+    if not claim_text:
+        raise ResearchUiError(400, "claim_text is required")
+    now = now_iso()
+    normalized = {
+        **payload,
+        "claim_id": claim_id,
+        "subject_type": "claim_stub",
+        "subject_id": claim_id,
+        "claim_text": claim_text,
+        "claim_type": compact_text(payload.get("claim_type") or "general", 120),
+        "evidence_relation": compact_text(payload.get("evidence_relation") or "supports", 80),
+        "qualifier": payload.get("qualifier") if isinstance(payload.get("qualifier"), dict) else {},
+        "status": compact_text(payload.get("status") or "draft", 80),
+        "note": compact_text(payload.get("note"), 20000),
+        "created_at": payload.get("created_at") or now,
+        "updated_at": now,
+    }
+    event = persist_review_event(build_review_event("claim_stub.created", normalized))
+    ch_insert_json_each_row("claim_records", [{
+        "claim_id": claim_id,
+        "source_evidence_id": normalized["source_evidence_id"],
+        "evidence_selection_id": compact_text(normalized.get("evidence_selection_id"), 300),
+        "claim_text": normalized["claim_text"],
+        "claim_type": normalized["claim_type"],
+        "evidence_relation": normalized["evidence_relation"],
+        "qualifier_json": json_text(normalized["qualifier"]),
+        "source_anchor_json": json_text(normalized.get("source_anchor")),
+        "status": normalized["status"],
+        "note": normalized["note"],
+        "actor": compact_text(normalized.get("actor") or REVIEW_ACTOR, 200),
+        "created_at": normalized["created_at"],
+        "updated_at": normalized["updated_at"],
+    }])
+    return {"event": event, "claim_record": normalized}
+
+
 def create_generic_review_event(payload):
     event_type = compact_text(payload.get("event_type"), 160)
     if not event_type:
@@ -909,6 +1069,10 @@ class ResearchUiHandler(BaseHTTPRequestHandler):
                 return self.send_json(create_review_annotation(payload), status=201)
             if parsed.path == "/api/proposed-facts":
                 return self.send_json(create_proposed_fact(payload), status=201)
+            if parsed.path == "/api/entity-links":
+                return self.send_json(create_entity_link(payload), status=201)
+            if parsed.path == "/api/claim-records":
+                return self.send_json(create_claim_record(payload), status=201)
             raise ResearchUiError(404, "Not found")
         except ResearchUiError as exc:
             self.send_json({"error": exc.message}, status=exc.status)

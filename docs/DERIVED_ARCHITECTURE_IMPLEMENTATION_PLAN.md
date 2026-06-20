@@ -280,6 +280,43 @@ Hard-case/review lanes:
 
 Never publish chart/table-derived benchmark facts without visible region provenance and human review.
 
+## Parallel Execution Plan
+
+The implementation can now run as six coordinated tracks. Each track should
+keep its own tests and artifacts, but all tracks must preserve the core
+evidence rule:
+
+```text
+captures are immutable
+observations are suggestions
+review events curate state
+projections are rebuildable
+publication snapshots are frozen
+```
+
+| Track | Owner Boundary | Can Run In Parallel With | Main Shared Contract |
+|---|---|---|---|
+| Source Workbench | Research UI screens, review APIs, entity links, claims, review-task Inbox | capture, extractor, metrics, eval | `research_review_event.v1` and review tables |
+| Capture/EvidenceDocument | capture bundles, EvidenceDocument v2, source-native adapters, omitted-content records | UI, extractors, metrics | capture envelope, artifact manifest, block/anchor schema |
+| Deterministic Extraction | URL/handle/repo/HF/arXiv/version/hardware/metric extractors | UI, capture, eval | observation/proposed-fact output into review layer |
+| Model Preparation | async model downloads, isolated venvs, service wrappers, smoke tests | docs, UI, metrics, eval | no canonical writes until review/eval gates exist |
+| Private Evaluation | retrieval, structured extraction, entity, OCR/chart/table, visual eval sets | all tracks | promotion gates for neural/model lanes |
+| Metrics Maturity | Redpanda/Pebble/Typesense/Qdrant/ClickHouse/model panels | all tracks | ops dashboard only; no research UI coupling |
+
+Recommended order of execution:
+
+1. Keep the Source Workbench track as the critical path.
+2. Run Capture/EvidenceDocument hardening beside it so UI blocks have stronger
+   anchors and artifact provenance.
+3. Start deterministic extractors early because they are low-risk and feed the
+   same review layer.
+4. Download and smoke-test candidate models asynchronously under `/mnt/data`,
+   but wire them into production only after private evals and review targets
+   exist.
+5. Build private eval corpora before neural sparse, late-interaction, visual
+   reranking, or schema-extraction model adoption.
+6. Improve metrics independently in the operations dashboard.
+
 ## Implementation Roadmap
 
 ### P0A - Durable Review Foundation
@@ -300,7 +337,6 @@ Implemented:
 Remaining:
 
 - move direct ClickHouse/JSONL writes behind `research.review.events.v1` and a review materializer when UX stabilizes
-- add `entity_links` and `claim_records`
 - add normalized-content correction events and review-state transitions
 
 ### P0B - Source Workbench Product Shape
@@ -339,6 +375,14 @@ Implement the first intelligence workers into the review layer:
 - claim stub UI
 - claim-to-evidence support/refute/mention links
 - NLI/factuality assessment worker after claim IDs are stable
+
+DataLab `lift` should be tracked here as a structured extraction candidate for
+PDFs/images/page artifacts. It is a schema-driven vision model that emits JSON
+matching a provided JSON Schema. In this architecture, `lift` output must land
+as `proposed_fact` rows or extraction observations with source/page/region
+provenance, not as canonical facts. Pair it with PaddleOCR/layout artifacts or
+other visible anchors so fields can be reviewed before promotion. Treat it as
+complementary to OCR/layout and not as an OCR replacement.
 
 ### P2 - Visual And Document Evidence
 
@@ -393,7 +437,7 @@ Implement frozen output workflows:
 | Job | Area | Current coverage | Gap now in roadmap |
 |---|---|---|---|
 | 01 | HTML/web extraction | webpage extraction and Rebrowser rendered capture exist | source-native adapters, extraction ensemble, capture bundles, omitted-content records, WARC/WACZ promotion policy |
-| 02 | Research UI design | separate Research UI, Inbox, Source page, Review tab exist | review-task Inbox, source workbench layout, entity/claim/compare/publishing flows |
+| 02 | Research UI design | separate Research UI, Inbox, Source page, Review tab, entity links, and claim stubs exist | review-task Inbox, full source workbench layout, compare, and publishing flows |
 | 03 | Neural sparse retrieval | not implemented | private eval, neural sparse lane as candidate branch only |
 | 04 | Late-interaction retrieval | not implemented | high-value rerank lane after fusion and private eval |
 | 05 | Visual document retrieval | Qwen3-VL path structurally exists | visual retrieval branch, artifact/page/frame indexing, visual eval |
@@ -418,10 +462,8 @@ Implement frozen output workflows:
 
 The next implementation checkpoint should not start with another model. It should complete the human-led workbench landing zone:
 
-1. Add `entity_links` and `claim_records` persistence plus UI.
-2. Convert Inbox rows toward review tasks.
-3. Add source/artifact navigator and side-by-side original/normalized source workbench.
-4. Add capture bundle manifest and EvidenceDocument v2 fields.
-5. Add deterministic entity/ID extractors that write reviewable suggestions.
-6. Add private eval scaffolding before retrieval/model lane expansion.
-
+1. Convert Inbox rows toward review tasks.
+2. Add source/artifact navigator and side-by-side original/normalized source workbench.
+3. Add capture bundle manifest and EvidenceDocument v2 fields.
+4. Add deterministic entity/ID extractors that write reviewable suggestions.
+5. Add private eval scaffolding before retrieval/model lane expansion.

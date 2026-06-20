@@ -2205,26 +2205,260 @@ def evidence_ledger(params):
     }
 
 
+ENTITY_QUEUE_LABELS = [
+    ("all", "All entities"),
+    ("unresolved", "Unresolved candidates"),
+    ("canonical", "Canonical identities"),
+    ("merge_clusters", "Merge clusters"),
+    ("pending_relations", "Pending relations"),
+    ("extracted", "Extracted only"),
+]
+
+
+def entity_identity_key(row):
+    return first_nonempty(row.get("canonical_entity_id"), row.get("canonical_name"), row.get("mention_text"), row.get("entity")).lower()
+
+
+def entity_source_ids(row):
+    ids = row.get("sample_source_ids")
+    if isinstance(ids, list):
+        return [item for item in ids if item]
+    source_id = row.get("source_evidence_id") or row.get("evidence_id") or ""
+    return [source_id] if source_id else []
+
+
+def entity_queue_match(row, queue):
+    if not queue or queue == "all":
+        return True
+    if queue == "unresolved":
+        return row.get("row_kind") == "entity_candidate" and row.get("review_state") not in ("matched", "created", "merged", "rejected")
+    if queue == "canonical":
+        return row.get("row_kind") == "canonical_entity"
+    if queue == "merge_clusters":
+        return row.get("row_kind") == "merge_cluster" or int(row.get("alias_count") or 0) > 1
+    if queue == "pending_relations":
+        return int(row.get("pending_relation_count") or 0) > 0
+    if queue == "extracted":
+        return row.get("row_kind") == "extracted_entity"
+    return True
+
+
+def entity_queue_counts(rows):
+    return [
+        {"id": queue_id, "label": label, "count": sum(1 for row in rows if entity_queue_match(row, queue_id))}
+        for queue_id, label in ENTITY_QUEUE_LABELS
+    ]
+
+
+def make_entity_link_row(row, source_map, claim_counts):
+    source_id = row.get("source_evidence_id") or ""
+    source = source_for_ledger_row(source_map, source_id)
+    canonical = first_nonempty(row.get("canonical_name"), row.get("canonical_entity_id"))
+    review_state = row.get("status") or "proposed"
+    return {
+        **source,
+        "entity_row_id": f"entity_link:{row.get('entity_link_id')}",
+        "row_kind": "entity_candidate",
+        "object_type": "entity_link",
+        "object_id": row.get("entity_link_id") or "",
+        "entity_name": first_nonempty(canonical, row.get("mention_text"), "(unnamed entity)"),
+        "mention_text": row.get("mention_text") or "",
+        "entity_type": row.get("entity_type") or "unknown",
+        "canonical_entity_id": row.get("canonical_entity_id") or "",
+        "canonical_name": row.get("canonical_name") or "",
+        "review_state": review_state,
+        "match_reason": "Human/model candidate from source-anchored mention; identity resolution only.",
+        "match_confidence": "review",
+        "mention_count": 1,
+        "source_count": 1 if source_id else 0,
+        "alias_count": 1 if canonical and canonical.lower() != (row.get("mention_text") or "").lower() else 0,
+        "pending_relation_count": int(claim_counts.get(source_id) or 0),
+        "updated_at": row.get("updated_at") or source.get("last_ingested_at"),
+        "created_at": row.get("created_at") or source.get("captured_at"),
+        "note": row.get("note") or "",
+        "actor": row.get("actor") or "",
+        "can_update_review_state": True,
+    }
+
+
+def make_extracted_entity_row(row, source_map, claim_counts):
+    source_ids = entity_source_ids(row)
+    sample_source = source_for_ledger_row(source_map, source_ids[0] if source_ids else "")
+    pending = sum(int(claim_counts.get(source_id) or 0) for source_id in source_ids)
+    return {
+        **sample_source,
+        "entity_row_id": f"extracted_entity:{row.get('entity')}",
+        "row_kind": "extracted_entity",
+        "object_type": "extracted_entity",
+        "object_id": row.get("entity") or "",
+        "entity_name": row.get("entity") or "(unnamed entity)",
+        "mention_text": row.get("entity") or "",
+        "entity_type": "unknown",
+        "canonical_entity_id": "",
+        "canonical_name": "",
+        "review_state": "candidate",
+        "match_reason": "Extracted entity string from normalized source metadata; needs canonical identity review.",
+        "match_confidence": "unreviewed",
+        "mention_count": int(row.get("mentions") or 0),
+        "source_count": int(row.get("sources") or 0),
+        "alias_count": 0,
+        "pending_relation_count": pending,
+        "sample_source_ids": source_ids,
+        "updated_at": row.get("last_seen") or sample_source.get("last_ingested_at"),
+        "created_at": row.get("last_seen") or sample_source.get("captured_at"),
+        "note": "",
+        "actor": "",
+        "can_update_review_state": False,
+    }
+
+
+def make_canonical_entity_rows(entity_links, source_map, claim_counts):
+    groups = {}
+    for row in entity_links:
+        key = entity_identity_key(row)
+        if not key or not first_nonempty(row.get("canonical_name"), row.get("canonical_entity_id")):
+            continue
+        groups.setdefault(key, []).append(row)
+    rows = []
+    for key, group in groups.items():
+        source_ids = sorted({row.get("source_evidence_id") for row in group if row.get("source_evidence_id")})
+        names = sorted({name for row in group for name in (row.get("mention_text"), row.get("canonical_name")) if name})
+        sample = group[0]
+        source = source_for_ledger_row(source_map, source_ids[0] if source_ids else "")
+        canonical_name = first_nonempty(sample.get("canonical_name"), sample.get("canonical_entity_id"), names[0] if names else key)
+        row_kind = "merge_cluster" if len(names) > 1 or len(group) > 1 else "canonical_entity"
+        rows.append({
+            **source,
+            "entity_row_id": f"{row_kind}:{key}",
+            "row_kind": row_kind,
+            "object_type": row_kind,
+            "object_id": key,
+            "entity_name": canonical_name,
+            "mention_text": ", ".join(names[:6]),
+            "entity_type": sample.get("entity_type") or "unknown",
+            "canonical_entity_id": sample.get("canonical_entity_id") or key,
+            "canonical_name": canonical_name,
+            "review_state": "canonical" if row_kind == "canonical_entity" else "merge_review",
+            "match_reason": "Canonical group built from reviewed entity links and aliases.",
+            "match_confidence": "curated",
+            "mention_count": len(group),
+            "source_count": len(source_ids),
+            "alias_count": len(names),
+            "pending_relation_count": sum(int(claim_counts.get(source_id) or 0) for source_id in source_ids),
+            "sample_source_ids": source_ids,
+            "updated_at": max(str(row.get("updated_at") or "") for row in group),
+            "created_at": min(str(row.get("created_at") or "") for row in group),
+            "note": "Identity row; aliases, facts, claims, and relationships remain separately reviewable.",
+            "actor": "",
+            "can_update_review_state": False,
+        })
+    return rows
+
+
+def entity_row_matches(row, q, queue, entity_type, review_state, source_kind, project):
+    if not entity_queue_match(row, queue):
+        return False
+    if entity_type and entity_type != row.get("entity_type"):
+        return False
+    if review_state and review_state != row.get("review_state"):
+        return False
+    if source_kind and source_kind != row.get("source_kind"):
+        return False
+    if project and project != row.get("source_project"):
+        return False
+    if q:
+        haystack = " ".join(str(row.get(key) or "") for key in (
+            "entity_row_id", "row_kind", "object_id", "entity_name", "mention_text",
+            "canonical_entity_id", "canonical_name", "entity_type", "review_state",
+            "match_reason", "title", "canonical_url", "domain", "author_handle",
+        ))
+        if q.lower() not in haystack.lower():
+            return False
+    return True
+
+
+def entity_preview(row, entity_links, claims, source_map):
+    if not row:
+        return {}
+    name = (row.get("entity_name") or row.get("mention_text") or "").lower()
+    object_id = row.get("object_id") or ""
+    source_ids = set(row.get("sample_source_ids") or [])
+    if row.get("source_evidence_id"):
+        source_ids.add(row.get("source_evidence_id"))
+    mentions = []
+    for link in entity_links:
+        link_name = first_nonempty(link.get("canonical_name"), link.get("mention_text")).lower()
+        if link.get("entity_link_id") == object_id or (name and name in link_name) or (link.get("source_evidence_id") in source_ids):
+            source = source_for_ledger_row(source_map, link.get("source_evidence_id") or "")
+            mentions.append({**link, "source_title": source.get("title"), "source_kind": source.get("source_kind"), "canonical_url": source.get("canonical_url")})
+    relationship_claims = []
+    for claim in claims:
+        claim_text = (claim.get("claim_text") or "").lower()
+        if claim.get("source_evidence_id") in source_ids or (name and name in claim_text):
+            relationship_claims.append(claim)
+    matches = []
+    canonical = first_nonempty(row.get("canonical_name"), row.get("canonical_entity_id"))
+    if canonical:
+        matches.append({
+            "candidate": canonical,
+            "reason": row.get("match_reason") or "Existing canonical candidate.",
+            "state": row.get("review_state") or "",
+        })
+    if row.get("mention_text") and row.get("mention_text") != canonical:
+        matches.append({
+            "candidate": row.get("mention_text"),
+            "reason": "Mention text is preserved as an alias candidate.",
+            "state": "alias_candidate",
+        })
+    source = source_for_ledger_row(source_map, row.get("source_evidence_id") or (next(iter(source_ids), "")))
+    return {
+        "row": row,
+        "source": source,
+        "mentions": mentions[:30],
+        "proposed_matches": matches[:12],
+        "relationship_proposals": relationship_claims[:20],
+        "provenance": [
+            {"label": "Identity candidate", "value": row.get("entity_name") or "", "meta": row.get("row_kind") or ""},
+            {"label": "Source mentions", "value": f"{row.get('mention_count') or len(mentions)} mention(s)", "meta": f"{row.get('source_count') or len(source_ids)} source(s)"},
+            {"label": "Canonical match", "value": canonical or "not selected", "meta": "identity only"},
+            {"label": "Relations", "value": f"{len(relationship_claims)} relationship/claim candidate(s)", "meta": "separate review object"},
+            {"label": "Updated", "value": row.get("updated_at") or "", "meta": row.get("actor") or ""},
+        ],
+    }
+
+
 def entity_directory(params):
     limit = sql_int(params.get("limit", ["120"])[0], 120)
+    fetch_limit = max(limit * 3, 180)
+    q = (params.get("q", [""])[0] or "").strip()
+    queue = (params.get("queue", ["all"])[0] or "all").strip()
+    entity_type = (params.get("entity_type", [""])[0] or "").strip()
+    review_state = (params.get("review_state", [""])[0] or "").strip()
+    source_kind = (params.get("source_kind", [""])[0] or "").strip()
+    project = (params.get("project", [""])[0] or "").strip()
+    inspect = (params.get("inspect", [""])[0] or "").strip()
+    if inspect.startswith("entity:"):
+        inspect = inspect.removeprefix("entity:")
+
     curated = ch_data(
         f"""
         SELECT
           entity_link_id, source_evidence_id, evidence_selection_id, mention_text,
-          entity_type, canonical_entity_id, canonical_name, status, note,
-          actor, created_at, updated_at
+          entity_type, canonical_entity_id, canonical_name, source_anchor_json,
+          status, note, actor, created_at, updated_at
         FROM entity_links FINAL
         ORDER BY updated_at DESC
-        LIMIT {limit}
+        LIMIT {fetch_limit}
         """,
         fallback=[],
     )
     extracted = ch_data(
-        """
+        f"""
         SELECT
           entity,
           count() AS mentions,
           uniqExact(evidence_id) AS sources,
+          groupArray(12)(evidence_id) AS sample_source_ids,
           max(ingested_at) AS last_seen
         FROM
         (
@@ -2234,20 +2468,73 @@ def entity_directory(params):
         WHERE entity != ''
         GROUP BY entity
         ORDER BY mentions DESC, last_seen DESC
-        LIMIT 120
+        LIMIT {fetch_limit}
         """,
         fallback=[],
     )
-    type_counts = ch_data(
-        """
-        SELECT entity_type, count() AS rows
-        FROM entity_links FINAL
-        GROUP BY entity_type
-        ORDER BY rows DESC, entity_type ASC
+    claims = ch_data(
+        f"""
+        SELECT
+          claim_id, source_evidence_id, evidence_selection_id, claim_text,
+          claim_type, evidence_relation, status, updated_at
+        FROM claim_records FINAL
+        ORDER BY updated_at DESC
+        LIMIT {fetch_limit}
         """,
         fallback=[],
     )
-    return {"curated": curated, "extracted": extracted, "type_counts": type_counts}
+    source_ids = []
+    source_ids.extend(row.get("source_evidence_id") for row in curated)
+    source_ids.extend(row.get("source_evidence_id") for row in claims)
+    for row in extracted:
+        source_ids.extend(entity_source_ids(row))
+    source_map = hydrate_source_rows(source_ids)
+    claim_counts = {}
+    for claim in claims:
+        source_id = claim.get("source_evidence_id") or ""
+        if source_id:
+            claim_counts[source_id] = claim_counts.get(source_id, 0) + 1
+
+    rows = []
+    rows.extend(make_canonical_entity_rows(curated, source_map, claim_counts))
+    rows.extend(make_entity_link_row(row, source_map, claim_counts) for row in curated)
+    rows.extend(make_extracted_entity_row(row, source_map, claim_counts) for row in extracted)
+    rows.sort(key=lambda row: str(row.get("updated_at") or ""), reverse=True)
+    filtered = [row for row in rows if entity_row_matches(row, q, queue, entity_type, review_state, source_kind, project)]
+    visible = filtered[:limit]
+    selected = next((row for row in visible if row.get("entity_row_id") == inspect), None) or (visible[0] if visible else None)
+    return {
+        "scope": {
+            "q": q,
+            "queue": queue,
+            "entity_type": entity_type,
+            "review_state": review_state,
+            "source_kind": source_kind,
+            "project": project,
+            "limit": limit,
+        },
+        "summary": {
+            "entities": len(rows),
+            "visible": len(filtered),
+            "canonical": sum(1 for row in rows if row.get("row_kind") == "canonical_entity"),
+            "candidates": sum(1 for row in rows if row.get("row_kind") in ("entity_candidate", "extracted_entity")),
+            "merge_clusters": sum(1 for row in rows if row.get("row_kind") == "merge_cluster"),
+            "pending_relations": sum(1 for row in rows if int(row.get("pending_relation_count") or 0) > 0),
+        },
+        "facets": {
+            "queues": entity_queue_counts(rows),
+            "entity_types": evidence_facet_counts(rows, "entity_type"),
+            "review_states": evidence_facet_counts(rows, "review_state"),
+            "row_kinds": evidence_facet_counts(rows, "row_kind"),
+            "source_kinds": evidence_facet_counts(rows, "source_kind"),
+            "projects": evidence_facet_counts(rows, "source_project"),
+        },
+        "rows": visible,
+        "selected_id": selected.get("entity_row_id") if selected else "",
+        "preview": entity_preview(selected, curated, claims, source_map),
+        "generated_at": now_iso(),
+        "version": "entity-directory.v2",
+    }
 
 
 def claims_ledger(params):

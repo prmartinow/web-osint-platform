@@ -36,6 +36,14 @@ const state = {
   evidenceSelectedIds: new Set(),
   evidencePreviewTab: 'overview',
   evidenceRows: [],
+  entityQueue: 'all',
+  entityType: '',
+  entityReviewState: '',
+  entitySourceKind: '',
+  entitySelectedId: '',
+  entitySelectedIds: new Set(),
+  entityPreviewTab: 'identity',
+  entityRows: [],
 };
 
 const $ = (id) => document.getElementById(id);
@@ -181,6 +189,16 @@ function applyHashParams() {
     const inspect = params.get('inspect') || '';
     state.evidenceSelectedId = inspect.startsWith('evidence:') ? inspect.slice(9) : inspect;
   }
+  if (route === 'entities') {
+    state.q = params.get('q') || state.q || '';
+    state.project = params.get('project') || state.project || '';
+    state.entityQueue = params.get('queue') || state.entityQueue || 'all';
+    state.entityType = params.get('entity_type') || '';
+    state.entityReviewState = params.get('review_state') || '';
+    state.entitySourceKind = params.get('source_kind') || '';
+    const inspect = params.get('inspect') || '';
+    state.entitySelectedId = inspect.startsWith('entity:') ? inspect.slice(7) : inspect;
+  }
 }
 
 function routeHash() {
@@ -197,6 +215,18 @@ function routeHash() {
     if (state.evidenceSelectedId) params.set('inspect', `evidence:${state.evidenceSelectedId}`);
     const query = params.toString();
     return `#evidence${query ? '?' + query : ''}`;
+  }
+  if (state.route === 'entities') {
+    const params = new URLSearchParams();
+    if (state.q) params.set('q', state.q);
+    if (state.project) params.set('project', state.project);
+    if (state.entityQueue && state.entityQueue !== 'all') params.set('queue', state.entityQueue);
+    if (state.entityType) params.set('entity_type', state.entityType);
+    if (state.entityReviewState) params.set('review_state', state.entityReviewState);
+    if (state.entitySourceKind) params.set('source_kind', state.entitySourceKind);
+    if (state.entitySelectedId) params.set('inspect', `entity:${state.entitySelectedId}`);
+    const query = params.toString();
+    return `#entities${query ? '?' + query : ''}`;
   }
   if (state.route !== 'library') return `#${state.route}`;
   const params = new URLSearchParams();
@@ -2003,37 +2033,474 @@ function bindEvidencePage(data) {
   bindEvidenceKeyboard();
 }
 
-function renderEntitiesPage(data) {
-  const curated = data.curated || [];
-  const extracted = data.extracted || [];
-  $('routePage').innerHTML = `
-    ${pageHeader('Entity Directory', 'Candidate and curated entities with source-backed mentions.')}
-    ${metricCards([
-      { label: 'Curated links', value: curated.length },
-      { label: 'Extracted entities', value: extracted.length },
-      { label: 'Entity types', value: (data.type_counts || []).length },
-    ])}
-    <section class="page-two-col">
-      <div class="panel page-panel">
-        <div class="panel-title-row"><h2>Curated Entity Links</h2><span class="status-badge">human layer</span></div>
-        ${curated.map((row) => `
-          <article class="review-item">
-            <div class="tag-line"><span class="pill">${escapeHtml(row.status)}</span><span class="pill">${escapeHtml(row.entity_type)}</span></div>
-            <p><strong>${escapeHtml(row.canonical_name || row.canonical_entity_id || row.mention_text)}</strong></p>
-            <p class="muted">${escapeHtml(row.mention_text || '')}</p>
-            <button class="secondary object-link" data-id="${escapeHtml(row.source_evidence_id)}">Open source</button>
-          </article>
-        `).join('') || '<p class="muted padded">No curated entity links yet.</p>'}
-      </div>
-      <div class="panel page-panel">
-        <div class="panel-title-row"><h2>Extracted Mentions</h2><span class="status-badge warn">machine / parser layer</span></div>
-        <div class="chip-cloud">${extracted.map((row) => `
-          <span class="entity-chip"><strong>${escapeHtml(row.entity)}</strong><em>${escapeHtml(row.sources)} sources · ${escapeHtml(row.mentions)} mentions</em></span>
-        `).join('') || '<p class="muted padded">No extracted entity array values yet.</p>'}</div>
+function entityRowKey(row) {
+  return row.entity_row_id || [row.row_kind, row.object_id || row.entity_name].filter(Boolean).join(':');
+}
+
+function entityGlyph(row) {
+  if (row.row_kind === 'canonical_entity') return 'I';
+  if (row.row_kind === 'merge_cluster') return 'M';
+  if (row.row_kind === 'extracted_entity') return 'X';
+  if ((row.review_state || '').includes('rejected')) return 'R';
+  return 'E';
+}
+
+function entityQueueGroup(items) {
+  const queues = items || [];
+  return `
+    <section class="entity-facet-group">
+      <h3>Resolution queues</h3>
+      <div class="facet-list compact">
+        ${queues.map((item) => `
+          <button class="facet ${state.entityQueue === item.id ? 'active' : ''}" type="button" data-entity-queue="${escapeHtml(item.id)}">
+            <span>${escapeHtml(item.label || item.id)}</span><strong>${escapeHtml(item.count || 0)}</strong>
+          </button>
+        `).join('')}
       </div>
     </section>
   `;
-  document.querySelectorAll('.object-link[data-id]').forEach((button) => button.addEventListener('click', () => selectSource(button.dataset.id)));
+}
+
+function entityFacetGroup(title, items, activeValue, filterName) {
+  const options = items || [];
+  return `
+    <section class="entity-facet-group">
+      <h3>${escapeHtml(title)}</h3>
+      <button class="facet ${activeValue ? '' : 'active'}" type="button" data-entity-filter="${escapeHtml(filterName)}" data-filter-value="">
+        <span>All ${escapeHtml(title.toLowerCase())}</span><strong>${escapeHtml(options.reduce((sum, item) => sum + Number(item.count || 0), 0))}</strong>
+      </button>
+      <div class="facet-list compact">
+        ${options.map((item) => `
+          <button class="facet ${activeValue === item.id ? 'active' : ''}" type="button" data-entity-filter="${escapeHtml(filterName)}" data-filter-value="${escapeHtml(item.id)}">
+            <span>${escapeHtml(item.label || item.id)}</span><strong>${escapeHtml(item.count || 0)}</strong>
+          </button>
+        `).join('')}
+      </div>
+    </section>
+  `;
+}
+
+function renderEntityPreview(data) {
+  const preview = data.preview || {};
+  const row = preview.row || null;
+  if (!row) {
+    return `
+      <div class="empty-state">
+        <h2>Identity Preview</h2>
+        <p>Select an entity row to inspect mentions, proposed canonical matches, relation proposals, and provenance.</p>
+      </div>
+    `;
+  }
+  const activeTab = ['identity', 'mentions', 'relations', 'provenance'].includes(state.entityPreviewTab) ? state.entityPreviewTab : 'identity';
+  const tab = (id, label) => `<button class="${activeTab === id ? 'active' : ''}" type="button" data-entity-preview-tab="${id}">${label}</button>`;
+  const sectionClass = (id) => `entity-preview-section ${activeTab === id ? 'active' : ''}`;
+  const mentions = preview.mentions || [];
+  const matches = preview.proposed_matches || [];
+  const relations = preview.relationship_proposals || [];
+  return `
+    <div class="entity-preview-head">
+      <span class="source-glyph">${escapeHtml(entityGlyph(row))}</span>
+      <div>
+        <h2>${escapeHtml(row.entity_name || row.mention_text || 'Unnamed entity')}</h2>
+        <p>${escapeHtml([row.entity_type, titleCase(row.row_kind || ''), row.review_state].filter(Boolean).join(' · '))}</p>
+      </div>
+    </div>
+    <nav class="entity-preview-tabs" aria-label="Entity preview sections">
+      ${tab('identity', 'Identity')}
+      ${tab('mentions', 'Mentions')}
+      ${tab('relations', 'Relations')}
+      ${tab('provenance', 'Provenance')}
+    </nav>
+    <section class="${sectionClass('identity')}" data-entity-preview-section="identity">
+      <div class="entity-layer-stack">
+        <div><span>Mention</span><strong>${escapeHtml(row.mention_text || row.entity_name || '')}</strong></div>
+        <div><span>Canonical candidate</span><strong>${escapeHtml(row.canonical_name || row.canonical_entity_id || 'Not selected')}</strong></div>
+        <div><span>Match rationale</span><strong>${escapeHtml(row.match_reason || 'No rationale recorded.')}</strong></div>
+        <div><span>Boundary</span><strong>Matching resolves identity only. Aliases, facts, claims, and relationships remain separately reviewable.</strong></div>
+      </div>
+      <div class="tag-line">
+        <span class="pill">${escapeHtml(row.review_state || 'candidate')}</span>
+        <span class="pill">${escapeHtml(row.entity_type || 'unknown')}</span>
+        <span class="pill">${escapeHtml(row.match_confidence || 'review')}</span>
+        ${row.pending_relation_count ? `<span class="pill warn">${escapeHtml(row.pending_relation_count)} relation candidates</span>` : ''}
+      </div>
+    </section>
+    <section class="${sectionClass('mentions')}" data-entity-preview-section="mentions">
+      <article class="entity-preview-card">
+        <h4>Exact source-capture mentions (${mentions.length})</h4>
+        ${mentions.map((item) => `
+          <p><strong>${escapeHtml(item.mention_text || item.canonical_name || '')}</strong> · ${escapeHtml(item.status || '')}<br>${escapeHtml(item.source_title || item.source_evidence_id || '')}</p>
+        `).join('') || '<p class="muted">No source-linked mentions found for this row.</p>'}
+      </article>
+      <article class="entity-preview-card">
+        <h4>Proposed canonical matches</h4>
+        ${matches.map((item) => `<p><strong>${escapeHtml(item.candidate || '')}</strong> · ${escapeHtml(item.state || '')}<br>${escapeHtml(item.reason || '')}</p>`).join('') || '<p class="muted">No canonical match proposals recorded.</p>'}
+      </article>
+    </section>
+    <section class="${sectionClass('relations')}" data-entity-preview-section="relations">
+      <article class="entity-preview-card">
+        <h4>Relationship and claim proposals (${relations.length})</h4>
+        ${relations.map((item) => `<p><strong>${escapeHtml(item.claim_type || 'claim')}</strong> · ${escapeHtml(item.evidence_relation || '')} · ${escapeHtml(item.status || '')}<br>${escapeHtml(item.claim_text || '')}</p>`).join('') || '<p class="muted">No linked claim or relation proposals found.</p>'}
+      </article>
+      <div class="entity-warning">Accepting an identity match does not accept aliases, identifiers, facts, claims, or relationships.</div>
+    </section>
+    <section class="${sectionClass('provenance')}" data-entity-preview-section="provenance">
+      <div class="entity-provenance-stack">
+        ${(preview.provenance || []).map((step, index) => `
+          <article>
+            <span>${String(index + 1).padStart(2, '0')}</span>
+            <div><strong>${escapeHtml(step.label)}</strong><p>${escapeHtml(step.value)}</p>${step.meta ? `<em>${escapeHtml(step.meta)}</em>` : ''}</div>
+          </article>
+        `).join('')}
+      </div>
+      ${preview.source?.canonical_url ? `<p><a href="${escapeHtml(preview.source.canonical_url)}" target="_blank" rel="noreferrer">${escapeHtml(preview.source.canonical_url)}</a></p>` : ''}
+    </section>
+    <label class="preview-note">Resolution note
+      <input id="entityDecisionNote" placeholder="Optional identity rationale, alias note, relation handoff, or merge context">
+    </label>
+    <div id="entityActionStatus" class="review-status muted"></div>
+    <div class="entity-preview-actions">
+      <button class="secondary" data-entity-action="defer">Defer</button>
+      <button class="secondary" data-entity-action="reject">Reject</button>
+      <button class="secondary" data-entity-action="merge">Merge</button>
+      <button class="secondary" data-entity-action="split">Split</button>
+      <button class="secondary" data-entity-action="open_source">Open source</button>
+      <button data-entity-action="create">Create identity</button>
+      <button data-entity-action="match">Match & next</button>
+    </div>
+  `;
+}
+
+function renderEntitiesPage(data) {
+  const rows = data.rows || [];
+  state.entityRows = rows;
+  if (!state.entitySelectedId || !rows.some((row) => entityRowKey(row) === state.entitySelectedId)) {
+    state.entitySelectedId = data.selected_id || (rows[0] ? entityRowKey(rows[0]) : '');
+  }
+  const summary = data.summary || {};
+  const facets = data.facets || {};
+  const selectedId = state.entitySelectedId;
+  $('routePage').innerHTML = `
+    ${pageHeader('Entity Directory', 'Resolve canonical identities, mentions, aliases, and relation candidates without promoting facts or claims.')}
+    ${metricCards([
+      { label: 'Visible entities', value: summary.visible ?? rows.length },
+      { label: 'Candidates', value: summary.candidates ?? 0 },
+      { label: 'Canonical', value: summary.canonical ?? 0 },
+      { label: 'Pending relations', value: summary.pending_relations ?? 0 },
+    ])}
+    <section class="entity-shell">
+      <aside class="panel entity-filter-panel">
+        ${entityQueueGroup(facets.queues)}
+        ${entityFacetGroup('Entity type', facets.entity_types, state.entityType, 'entity_type')}
+        ${entityFacetGroup('Review state', facets.review_states, state.entityReviewState, 'review_state')}
+        ${entityFacetGroup('Source kind', facets.source_kinds, state.entitySourceKind, 'source_kind')}
+      </aside>
+      <section class="panel entity-results-panel">
+        <div class="entity-search-strip">
+          <label><span>Entity search</span><input id="entitySearchInput" value="${escapeHtml(state.q)}" placeholder="Search names, aliases, handles, labs, models, sources"></label>
+          <button class="secondary" id="entityClearFilters">Clear</button>
+        </div>
+        <div class="entity-explanation">
+          <span class="status-badge info">${escapeHtml(titleCase(state.entityQueue || 'all'))}</span>
+          <p>Rows represent identities, unresolved candidates, merge clusters, or entities with pending relations.</p>
+        </div>
+        <div class="entity-bulk-toolbar">
+          <label><input type="checkbox" id="entitySelectAll"> Select visible</label>
+          ${['match', 'create', 'reject', 'defer', 'merge', 'split'].map((action) => `<button class="secondary" data-entity-bulk-action="${action}">${escapeHtml(titleCase(action))}</button>`).join('')}
+          <span id="entityBulkStatus" class="muted"></span>
+        </div>
+        <div class="entity-results-list">
+          ${rows.length ? rows.map((row) => {
+            const rowKey = entityRowKey(row);
+            const selected = rowKey === selectedId;
+            return `
+              <article class="entity-row ${selected ? 'active' : ''}" data-entity-row-id="${escapeHtml(rowKey)}" data-source-id="${escapeHtml(row.source_evidence_id || '')}" data-object-type="${escapeHtml(row.object_type || '')}">
+                <input class="entity-check" type="checkbox" aria-label="Select entity row" ${state.entitySelectedIds.has(rowKey) ? 'checked' : ''}>
+                <span class="source-glyph">${escapeHtml(entityGlyph(row))}</span>
+                <div class="entity-row-main">
+                  <div class="entity-title-line">
+                    <strong>${escapeHtml(row.entity_name || row.mention_text || 'Unnamed entity')}</strong>
+                    ${row.row_kind === 'merge_cluster' ? '<span class="pill warn">merge</span>' : ''}
+                  </div>
+                  <p>${escapeHtml(row.match_reason || row.note || '')}</p>
+                  <div class="row-meta">
+                    <span class="pill">${escapeHtml(titleCase(row.row_kind || 'entity'))}</span>
+                    <span class="pill">${escapeHtml(row.entity_type || 'unknown')}</span>
+                    <span class="pill">${escapeHtml(row.review_state || 'candidate')}</span>
+                    ${row.source_label ? `<span class="pill">${escapeHtml(row.source_label)}</span>` : ''}
+                    ${row.domain ? `<span class="pill">${escapeHtml(row.domain)}</span>` : ''}
+                  </div>
+                </div>
+                <div class="entity-row-counts">
+                  <strong>${escapeHtml(row.mention_count || 0)}</strong><em>mentions</em>
+                  <strong>${escapeHtml(row.source_count || 0)}</strong><em>sources</em>
+                  <strong>${escapeHtml(row.pending_relation_count || 0)}</strong><em>relations</em>
+                </div>
+              </article>
+            `;
+          }).join('') : '<div class="empty-state"><h2>No entity rows</h2><p>Try another queue or filter.</p></div>'}
+        </div>
+      </section>
+      <aside class="panel entity-preview-panel">
+        ${renderEntityPreview(data)}
+      </aside>
+    </section>
+  `;
+  bindEntityPage(data);
+}
+
+function entityStatusForAction(row, action) {
+  if (action === 'match') return 'matched';
+  if (action === 'create') return 'created';
+  if (action === 'reject') return 'rejected';
+  if (action === 'defer') return 'proposed';
+  if (action === 'merge') return 'merged';
+  if (action === 'split') return 'proposed';
+  return row.review_state || 'proposed';
+}
+
+function entityEventTypeForAction(action) {
+  return {
+    match: 'entity.identity_match.recorded',
+    create: 'entity.identity_create.requested',
+    reject: 'entity.identity_reject.recorded',
+    defer: 'entity.identity_defer.recorded',
+    merge: 'entity.merge.requested',
+    split: 'entity.split.requested',
+  }[action] || 'entity.action.recorded';
+}
+
+function entityAnchorForRow(row, action) {
+  return {
+    kind: 'entity_directory_row',
+    entity_row_id: entityRowKey(row),
+    source_evidence_id: row.source_evidence_id || '',
+    object_type: row.object_type || '',
+    object_id: row.object_id || '',
+    entity_name: row.entity_name || '',
+    entity_type: row.entity_type || '',
+    action,
+  };
+}
+
+async function persistEntityAction(row, action, note = '') {
+  if (!row) return;
+  if (action === 'open_source') {
+    if (row.source_evidence_id) await selectSource(row.source_evidence_id);
+    return;
+  }
+  if (row.object_type === 'entity_link' && row.object_id && ['match', 'create', 'reject', 'defer', 'merge', 'split'].includes(action)) {
+    await postJson('/api/review-state', {
+      source_evidence_id: row.source_evidence_id || '',
+      source_project: row.source_project || '',
+      project: row.source_project || state.project || '',
+      subject_type: 'entity_link',
+      subject_id: row.object_id,
+      status: entityStatusForAction(row, action),
+      note,
+      source_anchor: entityAnchorForRow(row, action),
+      idempotency_key: `${entityRowKey(row)}:${action}:${Date.now()}`,
+    });
+    return;
+  }
+  await postJson('/api/review/events', {
+    event_type: entityEventTypeForAction(action),
+    source_evidence_id: row.source_evidence_id || '',
+    source_project: row.source_project || '',
+    project: row.source_project || state.project || '',
+    subject_type: row.object_type || row.row_kind || 'entity',
+    subject_id: row.object_id || entityRowKey(row),
+    action,
+    status: entityStatusForAction(row, action),
+    note,
+    source_anchor: entityAnchorForRow(row, action),
+    idempotency_key: `${entityRowKey(row)}:${action}:${Date.now()}`,
+  });
+}
+
+function nextEntitySelectionAfter(row) {
+  const rows = state.entityRows || [];
+  const index = rows.findIndex((item) => entityRowKey(item) === entityRowKey(row));
+  const next = rows[index + 1] || rows[index - 1] || null;
+  return next ? entityRowKey(next) : '';
+}
+
+async function applyEntityAction(row, action) {
+  const status = $('entityActionStatus') || $('entityBulkStatus');
+  const note = $('entityDecisionNote')?.value || '';
+  if (!row) {
+    if (status) status.textContent = 'Select an entity row first.';
+    return;
+  }
+  if (status) status.textContent = `${titleCase(action)}...`;
+  await persistEntityAction(row, action, note);
+  if (['match', 'create', 'reject', 'defer'].includes(action)) {
+    state.entitySelectedId = nextEntitySelectionAfter(row);
+  }
+  state.entitySelectedIds.clear();
+  if (status) status.textContent = `${titleCase(action)} recorded.`;
+  replaceRouteHash();
+  await loadRoutePage();
+}
+
+async function applyBulkEntityAction(action) {
+  const status = $('entityBulkStatus');
+  const selectedIds = Array.from(document.querySelectorAll('.entity-row .entity-check:checked'))
+    .map((checkbox) => checkbox.closest('.entity-row')?.dataset.entityRowId)
+    .filter(Boolean);
+  const selectedRows = state.entityRows.filter((row) => selectedIds.includes(entityRowKey(row)));
+  if (!selectedRows.length) {
+    if (status) status.textContent = 'Select at least one entity row.';
+    return;
+  }
+  if (status) status.textContent = `${titleCase(action)} ${selectedRows.length} entity row${selectedRows.length === 1 ? '' : 's'}...`;
+  for (const row of selectedRows) {
+    await persistEntityAction(row, action, `Bulk ${titleCase(action)} from Entity Directory`);
+  }
+  state.entitySelectedIds.clear();
+  if (status) status.textContent = `${titleCase(action)} recorded for ${selectedRows.length}.`;
+  await loadRoutePage();
+}
+
+function moveEntitySelection(delta) {
+  if (state.route !== 'entities') return;
+  const rows = state.entityRows || [];
+  if (!rows.length) return;
+  const current = rows.findIndex((row) => entityRowKey(row) === state.entitySelectedId);
+  const nextIndex = Math.max(0, Math.min(rows.length - 1, (current >= 0 ? current : 0) + delta));
+  state.entitySelectedId = entityRowKey(rows[nextIndex]);
+  replaceRouteHash();
+  loadRoutePage();
+}
+
+function bindEntityKeyboard() {
+  if (window.__webOsintEntityKeyboardBound) return;
+  window.__webOsintEntityKeyboardBound = true;
+  window.addEventListener('keydown', async (event) => {
+    if (state.route !== 'entities') return;
+    const active = document.activeElement;
+    if (active && ['INPUT', 'TEXTAREA', 'SELECT', 'BUTTON'].includes(active.tagName)) return;
+    const key = event.key.toLowerCase();
+    if (key === 'j') {
+      event.preventDefault();
+      moveEntitySelection(1);
+    } else if (key === 'k') {
+      event.preventDefault();
+      moveEntitySelection(-1);
+    } else if (['m', 'c', 'r', 'd'].includes(key)) {
+      event.preventDefault();
+      const row = state.entityRows.find((item) => entityRowKey(item) === state.entitySelectedId);
+      const action = key === 'm' ? 'match' : key === 'c' ? 'create' : key === 'r' ? 'reject' : 'defer';
+      try {
+        await applyEntityAction(row, action);
+      } catch (error) {
+        const status = $('entityActionStatus') || $('entityBulkStatus');
+        if (status) status.textContent = error.message;
+      }
+    }
+  });
+}
+
+function bindEntityPage(data) {
+  document.querySelectorAll('[data-entity-queue]').forEach((button) => {
+    button.addEventListener('click', () => {
+      state.entityQueue = button.dataset.entityQueue || 'all';
+      state.entitySelectedId = '';
+      replaceRouteHash();
+      loadRoutePage();
+    });
+  });
+  document.querySelectorAll('[data-entity-filter]').forEach((button) => {
+    button.addEventListener('click', () => {
+      const filter = button.dataset.entityFilter;
+      const value = button.dataset.filterValue || '';
+      if (filter === 'entity_type') state.entityType = value;
+      if (filter === 'review_state') state.entityReviewState = value;
+      if (filter === 'source_kind') state.entitySourceKind = value;
+      state.entitySelectedId = '';
+      replaceRouteHash();
+      loadRoutePage();
+    });
+  });
+  $('entitySearchInput')?.addEventListener('input', () => {
+    state.q = $('entitySearchInput').value.trim();
+    clearTimeout(window.__entitySearchTimer);
+    window.__entitySearchTimer = setTimeout(() => {
+      state.entitySelectedId = '';
+      replaceRouteHash();
+      loadRoutePage();
+    }, 250);
+  });
+  $('entityClearFilters')?.addEventListener('click', () => {
+    state.q = '';
+    state.project = '';
+    state.entityQueue = 'all';
+    state.entityType = '';
+    state.entityReviewState = '';
+    state.entitySourceKind = '';
+    state.entitySelectedId = '';
+    state.entitySelectedIds.clear();
+    replaceRouteHash();
+    loadRoutePage();
+  });
+  $('entitySelectAll')?.addEventListener('change', () => {
+    const checked = $('entitySelectAll').checked;
+    state.entitySelectedIds.clear();
+    document.querySelectorAll('.entity-row').forEach((row) => {
+      const id = row.dataset.entityRowId || '';
+      const checkbox = row.querySelector('.entity-check');
+      if (checkbox) checkbox.checked = checked;
+      if (checked && id) state.entitySelectedIds.add(id);
+    });
+  });
+  document.querySelectorAll('.entity-row').forEach((row) => {
+    row.addEventListener('click', () => {
+      state.entitySelectedId = row.dataset.entityRowId || '';
+      replaceRouteHash();
+      loadRoutePage();
+    });
+    row.addEventListener('dblclick', async () => {
+      if (row.dataset.sourceId) await selectSource(row.dataset.sourceId);
+    });
+    row.querySelector('.entity-check')?.addEventListener('click', (event) => {
+      event.stopPropagation();
+      const id = row.dataset.entityRowId || '';
+      if (!id) return;
+      if (event.currentTarget.checked) state.entitySelectedIds.add(id);
+      else state.entitySelectedIds.delete(id);
+    });
+  });
+  document.querySelectorAll('[data-entity-preview-tab]').forEach((button) => {
+    button.addEventListener('click', () => {
+      state.entityPreviewTab = button.dataset.entityPreviewTab || 'identity';
+      document.querySelectorAll('[data-entity-preview-tab]').forEach((tab) => tab.classList.toggle('active', tab === button));
+      document.querySelectorAll('[data-entity-preview-section]').forEach((section) => {
+        section.classList.toggle('active', section.dataset.entityPreviewSection === state.entityPreviewTab);
+      });
+    });
+  });
+  document.querySelectorAll('[data-entity-action]').forEach((button) => {
+    button.addEventListener('click', async () => {
+      const row = (data.rows || []).find((item) => entityRowKey(item) === state.entitySelectedId) || data.preview?.row;
+      try {
+        await applyEntityAction(row, button.dataset.entityAction || 'defer');
+      } catch (error) {
+        const status = $('entityActionStatus');
+        if (status) status.textContent = error.message;
+      }
+    });
+  });
+  document.querySelectorAll('[data-entity-bulk-action]').forEach((button) => {
+    button.addEventListener('click', async () => {
+      try {
+        await applyBulkEntityAction(button.dataset.entityBulkAction || 'defer');
+      } catch (error) {
+        const status = $('entityBulkStatus');
+        if (status) status.textContent = error.message;
+      }
+    });
+  });
+  bindEntityKeyboard();
 }
 
 function renderClaimsPage(data) {
@@ -2174,6 +2641,13 @@ function routeQuery() {
     if (state.evidenceSourceKind) params.set('source_kind', state.evidenceSourceKind);
     if (state.evidenceAnchorType) params.set('anchor_type', state.evidenceAnchorType);
     if (state.evidenceSelectedId) params.set('inspect', `evidence:${state.evidenceSelectedId}`);
+  }
+  if (state.route === 'entities') {
+    if (state.entityQueue && state.entityQueue !== 'all') params.set('queue', state.entityQueue);
+    if (state.entityType) params.set('entity_type', state.entityType);
+    if (state.entityReviewState) params.set('review_state', state.entityReviewState);
+    if (state.entitySourceKind) params.set('source_kind', state.entitySourceKind);
+    if (state.entitySelectedId) params.set('inspect', `entity:${state.entitySelectedId}`);
   }
   return params.toString();
 }

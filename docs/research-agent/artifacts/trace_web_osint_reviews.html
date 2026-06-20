@@ -1,0 +1,223 @@
+<!DOCTYPE html>
+
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1" name="viewport"/>
+<title>TRACE — Reviews</title>
+<link href="trace_web_osint_reviews.css" rel="stylesheet"/>
+</head>
+<body>
+<div class="app">
+<aside aria-label="Global navigation" class="sidebar">
+<a aria-label="TRACE Research home" class="brand" href="/p/open-model-evidence/home">
+<div class="brand-mark"><svg aria-hidden="true" viewbox="0 0 24 24"><path d="m5 12 4 4 10-10"></path></svg></div>
+<div class="brand-name">TRACE</div><div class="brand-pill">RESEARCH</div>
+</a>
+<div class="side-body">
+<div class="side-label">WORKSPACE</div>
+<nav class="nav">
+<a class="nav-item" href="/p/open-model-evidence/home"><svg viewbox="0 0 24 24"><path d="m3 11 9-8 9 8"></path><path d="M5 10v10h14V10"></path><path d="M9 20v-6h6v6"></path></svg><span>Home</span></a>
+<a class="nav-item" href="/inbox"><svg viewbox="0 0 24 24"><path d="M4 4h16l2 10v6H2v-6L4 4Z"></path><path d="M2 14h6l2 3h4l2-3h6"></path></svg><span>Inbox</span><span class="nav-count">18</span></a>
+<a class="nav-item" href="/projects"><svg viewbox="0 0 24 24"><path d="M3 6h7l2 2h9v11H3Z"></path></svg><span>Projects</span></a>
+<a class="nav-item" href="/library"><svg viewbox="0 0 24 24"><path d="M4 4h16v16H4z"></path><path d="M9 4v16M15 8h2M15 12h2"></path></svg><span>Library</span></a>
+<a class="nav-item" href="/p/open-model-evidence/evidence"><svg viewbox="0 0 24 24"><path d="M4 5h16v14H4z"></path><path d="m7 14 3-3 2 2 4-5 2 2"></path></svg><span>Evidence</span><span class="nav-count">186</span></a>
+<a class="nav-item" href="/knowledge/entities"><svg viewbox="0 0 24 24"><circle cx="6" cy="12" r="3"></circle><circle cx="18" cy="6" r="3"></circle><circle cx="18" cy="18" r="3"></circle><path d="m8.7 10.6 6.6-3.2M8.7 13.4l6.6 3.2"></path></svg><span>Entities</span><span class="nav-count">52</span></a>
+<a class="nav-item" href="/p/open-model-evidence/claims"><svg viewbox="0 0 24 24"><path d="M5 4h14v16H5z"></path><path d="M8 8h8M8 12h8M8 16h5"></path></svg><span>Claims</span><span class="nav-count">94</span></a>
+<a class="nav-item active" href="/reviews"><svg viewbox="0 0 24 24"><rect height="18" rx="3" width="16" x="4" y="3"></rect><path d="m8 12 2.3 2.3L16 8.8"></path></svg><span>Reviews</span><span class="nav-count red">21</span></a>
+<a class="nav-item" href="/publishing"><svg viewbox="0 0 24 24"><path d="M12 16V4"></path><path d="m8 8 4-4 4 4"></path><rect height="9" rx="2" width="14" x="5" y="12"></rect></svg><span>Publishing</span></a>
+<a class="nav-item" href="/taxonomy"><svg viewbox="0 0 24 24"><path d="M20 13 11 22l-9-9 9-9h6l3 3Z"></path><circle cx="14" cy="10" r="1.5"></circle></svg><span>Taxonomy</span></a>
+</nav>
+<div class="side-divider"></div>
+<div class="side-label active-label">ACTIVE PROJECT</div>
+<a class="project-card" href="/p/open-model-evidence/home">
+<div class="project-title"><span class="status-dot"></span>Open model evidence</div>
+<div class="project-sub">Release claims &amp; benchmarks</div>
+<div class="project-progress"><div class="bar"><span style="width:67%"></span></div><small>67%</small></div>
+</a>
+</div>
+<div class="sidebar-bottom">
+<button class="capture-btn" data-toast="Opening a Rebrowser capture session…"><svg viewbox="0 0 24 24"><circle cx="12" cy="12" r="9"></circle><path d="M12 8v8M8 12h8"></path></svg><span>Capture source</span></button>
+<div class="side-foot">Human-led evidence workbench</div>
+</div>
+</aside>
+<div class="workspace">
+<header class="topbar">
+<button aria-label="Change active project" class="project-switch"><div class="eyebrow">REVIEW SCOPE</div><div class="value">All projects <i class="chev"></i></div></button>
+<button aria-label="Open global search" class="global-search"><svg viewbox="0 0 24 24"><circle cx="11" cy="11" r="7"></circle><path d="m20 20-4-4"></path></svg><span class="hint">Search sources, evidence, claims, entities…</span><kbd>⌘ K</kbd></button>
+<div class="top-actions">
+<button class="btn"><svg viewbox="0 0 24 24"><path d="M5 4h14v16H5z"></path><path d="M8 8h8M8 12h8"></path></svg>New note</button>
+<button class="btn primary" data-toast="Opening a Rebrowser capture session…"><svg viewbox="0 0 24 24"><circle cx="12" cy="12" r="9"></circle><path d="M12 8v8M8 12h8"></path></svg>Capture source</button>
+<div aria-label="Signed in as Pierre Roy" class="avatar">PR</div>
+</div>
+</header>
+
+
+<main class="main reviews-main">
+<section aria-labelledby="reviews-title" class="page-head">
+<div>
+<div class="breadcrumb">WORKSPACE / FORMAL REVIEWS</div>
+<div class="title-kickers"><span class="kicker teal">DURABLE HUMAN DECISIONS</span><span class="kicker red">6 PUBLICATION BLOCKERS</span></div>
+<h1 id="reviews-title">Reviews</h1>
+<div class="page-subtitle">Make accountable decisions across source evidence, derived observations, curated assertions, and frozen publication snapshots.</div>
+</div>
+<div class="head-actions">
+<button class="btn soft" data-toast="Opening immutable review-event history"><svg viewbox="0 0 24 24"><path d="M3 12a9 9 0 1 0 3-6.7"></path><path d="M3 4v5h5"></path><path d="M12 7v5l3 2"></path></svg>Decision history</button>
+<button class="btn" data-toast="Review queue builder opened"><svg viewbox="0 0 24 24"><path d="M4 5h16v14H4z"></path><path d="M8 9h8M8 13h5"></path></svg>Create queue</button>
+<button class="btn primary" id="start-assigned"><svg viewbox="0 0 24 24"><rect height="18" rx="3" width="16" x="4" y="3"></rect><path d="m8 12 2.3 2.3L16 8.8"></path></svg>Review 21 assigned</button>
+</div>
+</section>
+<section aria-label="Review task search" class="search-card">
+<div class="search-main">
+<label class="ledger-search">
+<svg viewbox="0 0 24 24"><circle cx="11" cy="11" r="7"></circle><path d="m20 20-4-4"></path></svg>
+<span class="sr-only">Search review tasks</span>
+<input id="review-query" value="benchmark evidence, OCR corrections, publication blockers"/>
+<button aria-label="Clear query" class="clear" type="button">×</button>
+</label>
+<div aria-label="Search mode" class="mode-toggle">
+<button class="mode-btn" data-mode="Exact">Exact</button><button class="mode-btn" data-mode="Semantic">Semantic</button><button class="mode-btn active" data-mode="Hybrid">Hybrid</button>
+</div>
+<button class="selectlike"><svg viewbox="0 0 24 24"><path d="M3 6h7l2 2h9v11H3Z"></path></svg>Scope: All projects <i class="tiny-chev"></i></button>
+<button class="search-go" data-toast="Review queue refreshed">Search</button>
+</div>
+<div class="search-meta">
+<span class="scope-pill">HUMAN REVIEW ONLY</span>
+<div class="search-explain" id="search-explain"><b>Hybrid match:</b> task fields plus exact source anchors, proposed changes, linked claims, entities, reviewer comments, and prior decisions.</div>
+<div class="meta-spacer"></div>
+<div class="corpus-stat"><i class="stat-dot amber"></i><b>31</b> awaiting</div>
+<div class="corpus-stat"><i class="stat-dot red"></i><b>6</b> blocking</div>
+<div class="corpus-stat"><i class="stat-dot blue"></i><b>7</b> in review</div>
+<div class="corpus-stat"><i class="stat-dot teal"></i><b>96</b> decided this week</div>
+</div>
+</section>
+<section aria-label="Review operations workspace" class="ledger-frame reviews-frame">
+<aside aria-label="Review queues and filters" class="facets">
+<div class="pane-head"><h2>Review queues</h2><span class="count">9 active</span><span class="spacer"></span><button class="text-btn" data-toast="Review filters cleared">Clear</button></div>
+<div class="facets-scroll">
+<div class="facet-section">
+<div class="facet-title">My work</div>
+<div class="saved-list">
+<button class="saved-item active"><svg viewbox="0 0 24 24"><circle cx="12" cy="8" r="4"></circle><path d="M4 21c1.2-4.2 3.9-6 8-6s6.8 1.8 8 6"></path></svg>Assigned to me<span class="n amber">21</span></button>
+<button class="saved-item"><svg viewbox="0 0 24 24"><path d="M12 3 2 21h20Z"></path><path d="M12 9v5M12 18h.01"></path></svg>Blocking publication<span class="n alert">6</span></button>
+<button class="saved-item"><svg viewbox="0 0 24 24"><path d="m9 14-4-4 4-4"></path><path d="M5 10h9a5 5 0 0 1 5 5v3"></path></svg>Changes returned<span class="n amber">4</span></button>
+<button class="saved-item"><svg viewbox="0 0 24 24"><path d="M4 4h16v16H4z"></path><path d="M8 8h8M8 12h8M8 16h5"></path></svg>Unread decisions<span class="n">7</span></button>
+<button class="saved-item"><svg viewbox="0 0 24 24"><path d="M3 12a9 9 0 1 0 3-6.7"></path><path d="M3 4v5h5"></path></svg>Recently decided<span class="n teal">12</span></button>
+</div>
+</div>
+<div class="facet-section">
+<div class="facet-title">Review object <span>31 tasks</span></div>
+<label class="facet-row"><input checked="" type="checkbox"/><span class="type-icon license">EV</span><span class="facet-label">Evidence selections</span><span class="facet-count">9</span></label>
+<label class="facet-row"><input checked="" type="checkbox"/><span class="type-icon visual">OCR</span><span class="facet-label">Normalized corrections</span><span class="facet-count">5</span></label>
+<label class="facet-row"><input checked="" type="checkbox"/><span class="type-icon cost">PF</span><span class="facet-label">Proposed facts</span><span class="facet-count">6</span></label>
+<label class="facet-row"><input checked="" type="checkbox"/><span class="type-icon release">ID</span><span class="facet-label">Entity links / merges</span><span class="facet-count">4</span></label>
+<label class="facet-row"><input checked="" type="checkbox"/><span class="type-icon code">CLM</span><span class="facet-label">Claim assertions</span><span class="facet-count">4</span></label>
+<label class="facet-row"><input type="checkbox"/><span class="type-icon bench">PUB</span><span class="facet-label">Publication snapshots</span><span class="facet-count">3</span></label>
+</div>
+<div class="facet-section">
+<div class="facet-title">Decision state</div>
+<label class="facet-row"><input checked="" type="checkbox"/><span class="facet-dot candidate"></span><span class="facet-label">Awaiting decision</span><span class="facet-count">24</span></label>
+<label class="facet-row"><input checked="" type="checkbox"/><span class="facet-dot draft"></span><span class="facet-label">In review</span><span class="facet-count">7</span></label>
+<label class="facet-row"><input checked="" type="checkbox"/><span class="facet-dot review-returned"></span><span class="facet-label">Changes requested</span><span class="facet-count">5</span></label>
+<label class="facet-row"><input type="checkbox"/><span class="facet-dot accepted"></span><span class="facet-label">Approved</span><span class="facet-count">96</span></label>
+<label class="facet-row"><input type="checkbox"/><span class="facet-dot review-rejected"></span><span class="facet-label">Rejected</span><span class="facet-count">18</span></label>
+<label class="facet-row"><input type="checkbox"/><span class="facet-dot deferred"></span><span class="facet-label">Deferred</span><span class="facet-count">11</span></label>
+</div>
+<div class="facet-section compact-facet">
+<div class="facet-title">Priority &amp; assignment</div>
+<div class="mini-filter-grid"><button class="mini-filter active">Blocking <span>6</span></button><button class="mini-filter active">High <span>8</span></button><button class="mini-filter">Unassigned <span>5</span></button><button class="mini-filter">Due today <span>7</span></button></div>
+</div>
+<div class="facet-section compact-facet">
+<div class="facet-title">Epistemic layer</div>
+<div class="mini-filter-grid"><button class="mini-filter active">Source <span>8</span></button><button class="mini-filter active">Observation <span>11</span></button><button class="mini-filter active">Curated <span>9</span></button><button class="mini-filter">Snapshot <span>3</span></button></div>
+</div>
+</div>
+</aside>
+<section aria-label="Formal review task list" class="results">
+<div class="results-head">
+<label aria-label="Select all review tasks" class="master-check"><input id="master-check" type="checkbox"/></label>
+<div class="results-title"><b>31 formal review tasks</b><span>Durable decisions · exact anchors retained · grouped by review subject</span></div>
+<span class="spacer"></span><button class="compact-select"><svg viewbox="0 0 24 24"><path d="M4 7h16M7 12h10M10 17h4"></path></svg>Due soon <i class="tiny-chev"></i></button><button aria-label="List options" class="icon-btn"><svg viewbox="0 0 24 24"><path d="M5 7h14M5 12h14M5 17h14"></path></svg></button>
+</div>
+<div class="result-tabs">
+<button class="result-tab active" data-result-tab="all">All <span>31</span></button><button class="result-tab" data-result-tab="assigned">Assigned <span>21</span></button><button class="result-tab" data-result-tab="blocking">Blocking <span>6</span></button><button class="result-tab" data-result-tab="returned">Returned <span>4</span></button><button class="result-tab" data-result-tab="approved">Decided <span>12</span></button>
+<span class="tabs-spacer"></span><button class="shortcut-help"><kbd>J</kbd><kbd>K</kbd> navigate <kbd>A</kbd> approve <kbd>X</kbd> changes</button>
+</div>
+<div class="bulkbar" id="bulkbar"><b><span id="selected-count">2</span> selected</b><button class="bulk-action" data-bulk="assigned"><svg viewbox="0 0 24 24"><circle cx="12" cy="8" r="4"></circle><path d="M4 21c1.2-4.2 3.9-6 8-6s6.8 1.8 8 6"></path></svg>Assign</button><button class="bulk-action" data-bulk="approved"><svg viewbox="0 0 24 24"><path d="m5 12 4 4 10-10"></path></svg>Approve</button><button class="bulk-action" data-bulk="returned with changes"><svg viewbox="0 0 24 24"><path d="m9 14-4-4 4-4"></path><path d="M5 10h9a5 5 0 0 1 5 5"></path></svg>Request changes</button><button class="bulk-action" data-bulk="deferred"><svg viewbox="0 0 24 24"><path d="M12 7v5l3 2"></path><circle cx="12" cy="12" r="9"></circle></svg>Defer</button><button class="bulk-action" data-bulk="exported with event references"><svg viewbox="0 0 24 24"><path d="M12 16V4"></path><path d="m8 8 4-4 4 4"></path><path d="M5 13v7h14v-7"></path></svg>Export audit</button><span class="spacer"></span><button class="text-btn clear-selected" id="clear-selected">Clear</button></div>
+<div class="review-list">
+<article class="review-row selected active-preview" data-id="RVW-2319" data-state="inreview assigned" data-title="Accept benchmark table row as direct evidence for Qwen3-32B score 78.4" tabindex="0">
+<label class="row-check"><input aria-label="Select RVW-2319" checked="" type="checkbox"/></label><div class="review-type-icon evidence"><span>EV</span><small>PDF</small><i class="review-mark assigned">PR</i></div><div class="row-main"><div class="row-top"><span class="review-badge evidence">EVIDENCE REVIEW</span><h3>Accept benchmark table row as direct evidence for Qwen3-32B score 78.4</h3></div><div class="review-context-line"><b>Technical report PDF</b><i>·</i>CAP-91D2<i>·</i>p. 6, table 2, cell B4<i>·</i>Open model evidence</div><p>Verify the immutable table anchor, evidence stance, and benchmark qualifiers before promotion.</p><div class="row-chips"><span class="chip teal">Exact anchor</span><span class="chip green">Primary source</span><span class="chip purple">OBS-5932</span><span class="chip red">1 conflict</span></div></div><div class="row-side"><span class="state-pill inreview">In review</span><div class="side-line"><span class="priority high"></span>High priority</div><div class="side-line">Assigned PR</div><div class="side-line muted">Due in 2h</div></div>
+</article>
+<article class="review-row selected returned-row" data-id="RVW-2324" data-state="returned assigned" data-title="Correct OCR value from 80 GB to 60 GB in benchmark screenshot" tabindex="0">
+<label class="row-check"><input aria-label="Select RVW-2324" checked="" type="checkbox"/></label><div class="review-type-icon correction"><span>OCR</span><small>IMG</small><i class="review-mark returned">↩</i></div><div class="row-main"><div class="row-top"><span class="review-badge correction">NORMALIZED CORRECTION</span><h3>Correct OCR value from 80 GB to 60 GB in benchmark screenshot</h3></div><div class="review-context-line"><b>Hardware comparison image</b><i>·</i>CAP-771C<i>·</i>region [611,244,793,306]</div><p>Returned because the original region is low contrast and the correction lacks a second visual check.</p><div class="row-chips"><span class="chip purple">OCR overlay</span><span class="chip amber">Visual check</span><span class="chip blue">Correction diff</span></div></div><div class="row-side"><span class="state-pill returned">Changes requested</span><div class="side-line"><span class="priority high"></span>High priority</div><div class="side-line">Assigned JL</div><div class="side-line muted">Returned 18m ago</div></div>
+</article>
+<article class="review-row" data-id="RVW-2328" data-state="awaiting assigned" data-title="Resolve @QwenLM account to the canonical Qwen Team organization" tabindex="0">
+<label class="row-check"><input aria-label="Select RVW-2328" type="checkbox"/></label><div class="review-type-icon entity"><span>ID</span><small>X</small><i class="review-mark assigned">MK</i></div><div class="row-main"><div class="row-top"><span class="review-badge entity">ENTITY LINK</span><h3>Resolve @QwenLM account to the canonical Qwen Team organization</h3></div><div class="review-context-line"><b>X account capture</b><i>·</i>platform id 172811…<i>·</i>3 candidate entities</div><p>Confirm whether the account represents the organization, a product identity, or a maintained alias.</p><div class="row-chips"><span class="chip blue">3 candidates</span><span class="chip amber">Handle ambiguity</span><span class="chip teal">14 mentions</span></div></div><div class="row-side"><span class="state-pill awaiting">Awaiting decision</span><div class="side-line"><span class="priority medium"></span>Normal priority</div><div class="side-line">Assigned MK</div><div class="side-line muted">Due today</div></div>
+</article>
+<article class="review-row" data-id="RVW-2331" data-state="awaiting assigned" data-title="Review proposed fact: Qwen3-32B uses a 128K context window" tabindex="0">
+<label class="row-check"><input aria-label="Select RVW-2331" type="checkbox"/></label><div class="review-type-icon fact"><span>PF</span><small>WEB</small><i class="review-mark assigned">PR</i></div><div class="row-main"><div class="row-top"><span class="review-badge fact">PROPOSED FACT</span><h3>Review proposed fact: Qwen3-32B uses a 128K context window</h3></div><div class="review-context-line"><b>Model card + provider docs</b><i>·</i>2 evidence candidates<i>·</i>scope qualifier missing</div><p>Provider and model-card limits differ; the proposed fact must remain scoped by provider and date.</p><div class="row-chips"><span class="chip amber">Qualifier missing</span><span class="chip red">2 values</span><span class="chip purple">Observation</span></div></div><div class="row-side"><span class="state-pill awaiting">Awaiting decision</span><div class="side-line"><span class="priority high"></span>High priority</div><div class="side-line">Assigned PR</div><div class="side-line muted">Due in 5h</div></div>
+</article>
+<article class="review-row" data-id="RVW-2337" data-state="awaiting assigned" data-title="Review analyst annotation about benchmark harness mismatch" tabindex="0">
+<label class="row-check"><input aria-label="Select RVW-2337" type="checkbox"/></label><div class="review-type-icon annotation"><span>AN</span><small>NOTE</small><i class="review-mark assigned">JL</i></div><div class="row-main"><div class="row-top"><span class="review-badge annotation">ANNOTATION FOLLOW-UP</span><h3>Review analyst annotation about benchmark harness mismatch</h3></div><div class="review-context-line"><b>ANN-442</b><i>·</i>linked to EV-145 and CLM-084<i>·</i>project visibility</div><p>Decide whether the note remains working context, becomes evidence context, or opens a contradiction task.</p><div class="row-chips"><span class="chip amber">Needs disposition</span><span class="chip blue">Claim linked</span><span class="chip red">Possible conflict</span></div></div><div class="row-side"><span class="state-pill awaiting">Awaiting decision</span><div class="side-line"><span class="priority medium"></span>Normal priority</div><div class="side-line">Assigned JL</div><div class="side-line muted">Due tomorrow</div></div>
+</article>
+<article class="review-row blocking-row" data-id="RVW-2342" data-state="blocking assigned" data-title="Resolve disputed context-window assertion before publication" tabindex="0">
+<label class="row-check"><input aria-label="Select RVW-2342" type="checkbox"/></label><div class="review-type-icon claim"><span>CLM</span><small>094</small><i class="review-mark blocking">!</i></div><div class="row-main"><div class="row-top"><span class="review-badge claim">CLAIM ASSERTION</span><h3>Resolve disputed context-window assertion before publication</h3></div><div class="review-context-line"><b>CLM-094</b><i>·</i>3 assertions<i>·</i>4 source classes<i>·</i>bundle PUB-044</div><p>Two accepted evidence items support different values under different provider scopes.</p><div class="row-chips"><span class="chip red">Publication blocker</span><span class="chip purple">Conflict cluster</span><span class="chip green">4 evidence</span></div></div><div class="row-side"><span class="state-pill blocking">Blocking</span><div class="side-line"><span class="priority high"></span>Critical</div><div class="side-line">Assigned PR</div><div class="side-line muted">Due in 47m</div></div>
+</article>
+<article class="review-row blocking-row" data-id="RVW-2348" data-state="blocking assigned" data-title="Approve publication snapshot Open Model Release Comparison v0.4" tabindex="0">
+<label class="row-check"><input aria-label="Select RVW-2348" type="checkbox"/></label><div class="review-type-icon publication"><span>PUB</span><small>v0.4</small><i class="review-mark blocking">2</i></div><div class="row-main"><div class="row-top"><span class="review-badge publication">PUBLICATION SNAPSHOT</span><h3>Approve publication snapshot “Open Model Release Comparison” v0.4</h3></div><div class="review-context-line"><b>SNP-2B19</b><i>·</i>manifest 4d86…c201<i>·</i>71 checks<i>·</i>2 blockers</div><p>Approval applies only to the frozen claim, evidence, entity, capture, taxonomy, and page revisions.</p><div class="row-chips"><span class="chip red">2 blockers</span><span class="chip teal">69 checks passed</span><span class="chip blue">Frozen manifest</span></div></div><div class="row-side"><span class="state-pill blocking">Blocking</span><div class="side-line"><span class="priority high"></span>Critical</div><div class="side-line">Assigned PR</div><div class="side-line muted">Due today</div></div>
+</article>
+<article class="review-row decided-row" data-id="RVW-2292" data-state="approved" data-title="Approve repository commit lines as evidence for tokenizer change" tabindex="0">
+<label class="row-check"><input aria-label="Select RVW-2292" type="checkbox"/></label><div class="review-type-icon decided"><span>EV</span><small>GH</small><i class="review-mark decided">✓</i></div><div class="row-main"><div class="row-top"><span class="review-badge decided">DECIDED EVIDENCE</span><h3>Approve repository commit lines as evidence for tokenizer change</h3></div><div class="review-context-line"><b>commit 4d91c7a</b><i>·</i>tokenizer.py lines 118–147<i>·</i>decision REV-2264</div><p>The exact revision-pinned line range was accepted; the linked claim remains separately reviewed.</p><div class="row-chips"><span class="chip green">Approved</span><span class="chip teal">Exact repo anchor</span><span class="chip blue">Event retained</span></div></div><div class="row-side"><span class="state-pill approved">Approved</span><div class="side-line"><span class="priority normal"></span>Complete</div><div class="side-line">Reviewed MK</div><div class="side-line muted">42m ago</div></div>
+</article>
+</div>
+<div class="results-foot"><span>Showing 8 of 31 tasks · decisions append immutable review events</span><span class="spacer"></span><button class="page-btn active">1</button><button class="page-btn">2</button><button class="page-btn">3</button><button class="page-btn">›</button></div>
+</section>
+<aside aria-label="Review task detail" class="preview open">
+<div class="preview-head"><div><h2>Review task</h2><span id="preview-id">RVW-2319 · evidence selection</span></div><span class="spacer"></span><span class="preview-state inreview" id="preview-state">IN REVIEW</span><button aria-label="Close preview" class="close-preview">×</button></div>
+<div class="preview-tabs" role="tablist"><button class="preview-tab active" data-panel="review">Review</button><button class="preview-tab" data-panel="source">Source</button><button class="preview-tab" data-panel="change">Proposed change</button><button class="preview-tab" data-panel="provenance">Provenance</button><button class="preview-tab" data-panel="history">History</button></div>
+<div class="preview-body">
+<section class="preview-panel active" data-preview-panel="review"><div class="preview-scroll">
+<div class="detail-card review-summary"><div class="summary-kickers"><span class="layer-badge curated">CURATED OBJECT PROPOSAL</span><span class="layer-badge formal">FORMAL DECISION</span></div><h3 id="preview-title">Accept benchmark table row as direct evidence for Qwen3-32B score 78.4</h3><p>Approval accepts a versioned evidence object anchored to an immutable capture. It does not automatically accept the extracted fact or linked claim.</p><div class="detail-meta-grid"><div><span>REVIEW SUBJECT</span><b>EV-CAND-145</b></div><div><span>ASSIGNEE</span><b>Pierre Roy</b></div><div><span>REQUESTED BY</span><b>Maya Chen</b></div><div><span>DUE</span><b>Today · 14:30 UTC</b></div></div></div>
+<div class="detail-card"><div class="section-head"><h4>Object layers</h4><span class="reviewable">BOUNDARIES PRESERVED</span></div><div class="review-object-stack"><div class="layer-row"><span class="layer-icon capture">CAP</span><div><b>Immutable capture CAP-91D2</b><span>Technical report PDF · SHA-256 5c2f…aa91</span></div><em>OBSERVED</em></div><div class="layer-row"><span class="layer-icon observation">OBS</span><div><b>Machine observation OBS-5932</b><span>Table parser v17 proposed score 78.4</span></div><em>PROPOSED</em></div><div class="layer-row current"><span class="layer-icon evidence">EV</span><div><b>Evidence candidate EV-CAND-145</b><span>p. 6 · table 2 · row Qwen3-32B · cell B4</span></div><em>REVIEW NOW</em></div><div class="layer-row"><span class="layer-icon claim">CLM</span><div><b>Linked claim CLM-084</b><span>Separately disputed; not decided here</span></div><em>SEPARATE</em></div></div></div>
+<div class="detail-card"><div class="section-head"><h4>Decision checklist</h4><button class="text-btn" data-toast="Review policy opened">Policy</button></div><div class="decision-check ok"><i>✓</i><div><b>Exact source anchor resolves</b><span>Capture, page, table row, and cell coordinates verified</span></div><em>PASS</em></div><div class="decision-check ok"><i>✓</i><div><b>Source class is primary</b><span>Technical report published by the model team</span></div><em>PASS</em></div><div class="decision-check warn"><i>!</i><div><b>Benchmark qualifier needs attention</b><span>Five-shot harness present; evaluator build not stated</span></div><em>NOTE</em></div><div class="decision-check block"><i>×</i><div><b>Linked claim has conflicting evidence</b><span>Tracker value 76.2 remains a separate assertion</span></div><em>SEPARATE</em></div></div>
+<div class="detail-card"><div class="section-head"><h4>Reviewer comment</h4><span class="reviewable">SAVED WITH EVENT</span></div><textarea class="review-comment">Accept as direct primary-source evidence. Preserve the five-shot qualifier and do not choose a preferred claim value in this decision.</textarea></div>
+<button class="open-workbench" data-toast="Opening PDF page 6, table 2, cell B4 in Source Workbench"><svg viewbox="0 0 24 24"><path d="M4 5h16v14H4z"></path><path d="m7 14 3-3 2 2 4-5 2 2"></path></svg><span><b>Open exact source in Source Workbench</b><small>Original capture · normalized table · artifacts · provenance</small></span><span class="arrow">→</span></button>
+</div></section>
+<section class="preview-panel" data-preview-panel="source"><div class="preview-scroll"><div class="detail-card source-anchor-mini"><div class="section-head"><h4>Immutable source anchor</h4><span class="source-state">CAPTURE COMPLETE</span></div><div class="anchor-toolbar"><span class="pdf-dot"></span><span class="pdf-dot"></span><span class="pdf-dot"></span><b>Qwen3 Technical Report.pdf</b><span class="spacer"></span>p. 6 / 42</div><div class="review-paper"><div class="paper-heading">Table 2 · MMLU-Pro evaluation</div><div class="paper-lines"><i></i><i class="short"></i></div><div class="review-table"><span>Model</span><span>Shots</span><span>Score</span><span>Harness</span><b>Qwen3-8B</b><b>5</b><b>71.1</b><b>internal</b><b>Qwen3-32B</b><b>5</b><b><mark>78.4</mark></b><b>internal</b></div><div class="anchor-code-line">anchor: pdf:sha256:5c2f…aa91 / page:6 / bbox:[336,411,408,438]</div></div><div class="capture-caption"><b>Captured 2026-06-19 09:42 UTC</b><span class="spacer"></span><span class="hash">CAP-91D2 · 5c2f…aa91</span></div></div><div class="detail-card"><div class="section-head"><h4>Capture and artifact manifest</h4></div><div class="simple-list"><div><span>Source record</span><b>SRC-2201 · Qwen3 Technical Report</b></div><div><span>Capture</span><b>CAP-91D2 · immutable · complete</b></div><div><span>Artifact</span><b>ART-PDF-991 · application/pdf</b></div><div><span>Extraction</span><b>EXT-731 · table parser v17</b></div></div></div></div></section>
+<section class="preview-panel" data-preview-panel="change"><div class="preview-scroll"><div class="detail-card"><div class="section-head"><h4>Proposed evidence object</h4><button class="text-btn" data-toast="Proposal editor opened">Edit</button></div><div class="review-diff"><div class="review-diff-head">PROPOSED VERSION EV-CAND-145 v3</div><div class="diff-line"><span>Type</span><b>Benchmark result</b></div><div class="diff-line"><span>Excerpt</span><b>“Qwen3-32B · 5-shot · <ins>78.4</ins>”</b></div><div class="diff-line"><span>Stance</span><b>Supports CLM-084</b></div><div class="diff-line"><span>Directness</span><b><ins>Direct</ins> primary-source result</b></div><div class="diff-line"><span>Qualifiers</span><b>benchmark=MMLU-Pro; shots=5; <ins>report-version=2026-04-18</ins></b></div><div class="diff-line"><span>Note</span><b><del>canonical score</del> <ins>author-reported score under stated configuration</ins></b></div></div></div><div class="detail-card"><div class="section-head"><h4>Separate proposed fact</h4><span class="fact-warning">NOT DECIDED HERE</span></div><div class="fact-grid"><span>Subject</span><b>Qwen3-32B</b><span>Property</span><b>benchmark.result.score</b><span>Value</span><b class="fact-value">78.4</b><span>State</span><b>Observation proposal · unreviewed</b></div></div></div></section>
+<section class="preview-panel" data-preview-panel="provenance"><div class="preview-scroll"><div class="detail-card"><div class="section-head"><h4>Source-to-decision trail</h4></div><div class="prov-timeline"><div class="prov-step capture"><i></i><div><b>Source capture CAP-91D2</b><span>Rebrowser · immutable PDF · captured 09:42 UTC</span></div></div><div class="prov-step artifact"><i></i><div><b>Artifact ART-PDF-991</b><span>SHA-256 5c2f8dd1…aa91 · 42 pages</span></div></div><div class="prov-step model"><i></i><div><b>Extraction run EXT-731</b><span>Qwen3 table parser v17 · observation only</span></div></div><div class="prov-step observation"><i></i><div><b>Observation OBS-5932</b><span>Cell value 78.4 · confidence 0.93</span></div></div><div class="prov-step evidence"><i></i><div><b>Evidence candidate EV-CAND-145</b><span>Created by Maya Chen · anchor corrected once</span></div></div><div class="prov-step review-node"><i></i><div><b>Formal review RVW-2319</b><span>Assigned to Pierre Roy · expected version v3</span></div></div><div class="prov-step decision-node"><i></i><div><b>Pending durable decision event</b><span>Actor, before/after version, reason, comment, correlation id</span></div></div></div></div></div></section>
+<section class="preview-panel" data-preview-panel="history"><div class="preview-scroll"><div class="detail-card"><div class="section-head"><h4>Review and audit history</h4></div><div class="review-history-row"><span class="act-icon model">AI</span><div><b>Table observation generated</b><span>EXT-731 · parser v17 · 2h ago</span></div><em class="event-chip audit">AUDIT</em></div><div class="review-history-row"><span class="act-icon">MC</span><div><b>Evidence candidate created</b><span>EV-CAND-145 v1 · exact cell anchor retained</span></div><em class="event-chip audit">AUDIT</em></div><div class="review-history-row"><span class="act-icon amber">!</span><div><b>Five-shot qualifier added</b><span>Evidence v2 → v3</span></div><em class="event-chip review">REVIEW</em></div><div class="review-history-row"><span class="act-icon">PR</span><div><b>Review taken by Pierre Roy</b><span>assigned → in_progress · 22m ago</span></div><em class="event-chip audit">AUDIT</em></div></div></div></section>
+</div>
+<div class="decision-bar"><button class="decision danger" data-decision="rejected with a formal reason"><kbd>R</kbd>Reject</button><button class="decision request" data-decision="returned with requested changes"><kbd>X</kbd>Changes</button><button class="decision defer" data-decision="deferred"><kbd>D</kbd>Defer</button><button class="decision primary" data-decision="approved"><kbd>A</kbd>Approve + next</button></div>
+</aside>
+</section>
+</main>
+
+</div>
+</div>
+<div aria-live="polite" class="toast" role="status"></div>
+
+
+<script>
+(() => {
+ const toast=document.querySelector('.toast'); let timer;
+ const show=m=>{toast.textContent=m;toast.classList.add('show');clearTimeout(timer);timer=setTimeout(()=>toast.classList.remove('show'),2400)};
+ document.querySelectorAll('[data-toast]').forEach(x=>x.addEventListener('click',()=>show(x.dataset.toast)));
+ const explanations={Exact:'<b>Exact match:</b> identifiers, task text, source excerpts, comments, and event fields.',Semantic:'<b>Semantic match:</b> conceptually related review subjects, proposed changes, claims, entities, and source context.',Hybrid:'<b>Hybrid match:</b> task fields plus exact source anchors, proposed changes, linked claims, entities, reviewer comments, and prior decisions.'};
+ document.querySelectorAll('.mode-btn').forEach(b=>b.addEventListener('click',()=>{document.querySelectorAll('.mode-btn').forEach(x=>x.classList.remove('active'));b.classList.add('active');document.getElementById('search-explain').innerHTML=explanations[b.dataset.mode]}));
+ document.querySelector('.clear').addEventListener('click',()=>{document.getElementById('review-query').value='';document.getElementById('review-query').focus()});
+ document.querySelectorAll('.saved-item').forEach(q=>q.addEventListener('click',()=>{document.querySelectorAll('.saved-item').forEach(x=>x.classList.remove('active'));q.classList.add('active');show('Review queue loaded; filters and selected task remain URL-addressable')}));
+ const rows=[...document.querySelectorAll('.review-row')]; const preview=document.querySelector('.preview');
+ function meta(s){if(s.includes('blocking'))return['blocking','BLOCKING','blocking review'];if(s.includes('returned'))return['returned','CHANGES REQUESTED','returned review'];if(s.includes('approved'))return['approved','APPROVED','decided review'];if(s.includes('awaiting'))return['awaiting','AWAITING DECISION','awaiting review'];return['inreview','IN REVIEW','active review']}
+ function select(row){rows.forEach(r=>r.classList.remove('active-preview'));row.classList.add('active-preview');preview.classList.add('open');const [c,l,d]=meta(row.dataset.state||'awaiting');document.getElementById('preview-id').textContent=row.dataset.id+' · '+d;document.getElementById('preview-title').textContent=row.dataset.title;const p=document.getElementById('preview-state');p.className='preview-state '+c;p.textContent=l}
+ rows.forEach(r=>{r.addEventListener('click',e=>{if(!e.target.closest('input'))select(r)});r.addEventListener('keydown',e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();select(r)}})});
+ const boxes=[...document.querySelectorAll('.row-check input')],bar=document.getElementById('bulkbar'),count=document.getElementById('selected-count');
+ function update(){const s=boxes.filter(x=>x.checked);count.textContent=s.length;bar.classList.toggle('hidden',!s.length);rows.forEach((r,i)=>r.classList.toggle('selected',boxes[i].checked))} boxes.forEach(x=>x.addEventListener('change',update));document.getElementById('master-check').addEventListener('change',e=>{boxes.forEach(x=>x.checked=e.target.checked);update()});document.getElementById('clear-selected').addEventListener('click',()=>{boxes.forEach(x=>x.checked=false);document.getElementById('master-check').checked=false;update()});document.querySelectorAll('[data-bulk]').forEach(b=>b.addEventListener('click',()=>show(boxes.filter(x=>x.checked).length+' compatible tasks '+b.dataset.bulk+'; each result receives a separate review event')));
+ document.querySelectorAll('.preview-tab').forEach(t=>t.addEventListener('click',()=>{document.querySelectorAll('.preview-tab').forEach(x=>x.classList.remove('active'));document.querySelectorAll('.preview-panel').forEach(x=>x.classList.remove('active'));t.classList.add('active');document.querySelector('[data-preview-panel="'+t.dataset.panel+'"]').classList.add('active')}));
+ function visible(){return rows.filter(r=>r.style.display!=='none')} function move(d){const v=visible(),i=v.findIndex(r=>r.classList.contains('active-preview')),n=v[Math.max(0,Math.min(v.length-1,(i<0?0:i)+d))];if(n){select(n);n.focus();n.scrollIntoView({block:'nearest'})}} function decide(a){const r=rows.find(x=>x.classList.contains('active-preview'))||rows[0];show(r.dataset.id+' '+a+'; review event committed before loading next');setTimeout(()=>move(1),350)}
+ document.querySelectorAll('[data-decision]').forEach(b=>b.addEventListener('click',()=>decide(b.dataset.decision)));document.querySelectorAll('.result-tab').forEach(t=>t.addEventListener('click',()=>{document.querySelectorAll('.result-tab').forEach(x=>x.classList.remove('active'));t.classList.add('active');const m=t.dataset.resultTab;rows.forEach(r=>r.style.display=m==='all'||(r.dataset.state||'').includes(m)?'':'none')}));document.getElementById('start-assigned').addEventListener('click',()=>{document.querySelector('[data-result-tab="assigned"]').click();select(rows[0]);show('Assigned human-review queue opened · 21 tasks')});
+ document.addEventListener('keydown',e=>{if(['INPUT','TEXTAREA'].includes(document.activeElement?.tagName))return;const k=e.key.toLowerCase();if(k==='j'){e.preventDefault();move(1)}if(k==='k'){e.preventDefault();move(-1)}if(k==='a'){e.preventDefault();decide('approved')}if(k==='r'){e.preventDefault();decide('rejected with a formal reason')}if(k==='x'){e.preventDefault();decide('returned with requested changes')}if(k==='d'){e.preventDefault();decide('deferred')}if(k==='e'){e.preventDefault();show('Editing the proposed object version; source capture remains immutable')}if(k==='o'){e.preventDefault();show('Opening exact source anchor in Source Workbench')}if(k==='h'){e.preventDefault();document.querySelector('[data-panel="history"]').click()}}); update();
+})();
+</script>
+</body>
+</html>

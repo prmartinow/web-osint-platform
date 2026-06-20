@@ -62,6 +62,9 @@ const state = {
   reviewSelectedIds: new Set(),
   reviewPreviewTab: 'review',
   reviewRows: [],
+  publishingRows: [],
+  publishingSelectedId: '',
+  publishingPreviewTab: 'readiness',
 };
 
 const $ = (id) => document.getElementById(id);
@@ -240,6 +243,13 @@ function applyHashParams() {
     const inspect = params.get('inspect') || '';
     state.reviewSelectedId = inspect.startsWith('review:') ? inspect.slice(7) : inspect;
   }
+  if (route === 'publishing') {
+    state.q = params.get('q') || state.q || '';
+    state.project = params.get('project') || state.project || '';
+    state.publishingPreviewTab = params.get('tab') || state.publishingPreviewTab || 'readiness';
+    const inspect = params.get('inspect') || '';
+    state.publishingSelectedId = inspect.startsWith('bundle:') ? inspect.slice(7) : inspect;
+  }
 }
 
 function routeHash() {
@@ -295,6 +305,15 @@ function routeHash() {
     if (state.reviewPreviewTab && state.reviewPreviewTab !== 'review') params.set('tab', state.reviewPreviewTab);
     const query = params.toString();
     return `#reviews${query ? '?' + query : ''}`;
+  }
+  if (state.route === 'publishing') {
+    const params = new URLSearchParams();
+    if (state.q) params.set('q', state.q);
+    if (state.project) params.set('project', state.project);
+    if (state.publishingSelectedId) params.set('inspect', `bundle:${state.publishingSelectedId}`);
+    if (state.publishingPreviewTab && state.publishingPreviewTab !== 'readiness') params.set('tab', state.publishingPreviewTab);
+    const query = params.toString();
+    return `#publishing${query ? '?' + query : ''}`;
   }
   if (state.route !== 'library') return `#${state.route}`;
   const params = new URLSearchParams();
@@ -3255,16 +3274,49 @@ function renderReviewsPage(data) {
   const summary = data.summary || {};
   const facets = data.facets || {};
   const selectedId = state.reviewSelectedId;
+  const queueLabel = (data.queues || []).find((queue) => queue.id === state.reviewQueue)?.label || titleCase(state.reviewQueue || 'all');
   $('routePage').innerHTML = `
-    ${pageHeader('Reviews', 'Formal decision surface for version-bound human decisions across capture, observation, curated object, and publication layers.')}
-    ${metricCards([
-      { label: 'Visible tasks', value: summary.visible ?? rows.length },
-      { label: 'Open', value: summary.open ?? 0 },
-      { label: 'Assigned', value: summary.assigned ?? 0 },
-      { label: 'Blockers', value: summary.blockers ?? 0 },
-      { label: 'Publication gates', value: summary.publication ?? 0 },
-    ])}
-    <section class="review-shell">
+    <header class="page-header trace-page-header">
+      <div>
+        <span class="breadcrumb">Research UI / Formal reviews</span>
+        <div class="title-action-group">
+          <span class="status-badge ok">durable human decisions</span>
+          <span class="status-badge danger">${escapeHtml(summary.blockers ?? 0)} publication blockers</span>
+        </div>
+        <h1>Reviews</h1>
+        <p>Make accountable decisions across source evidence, derived observations, curated assertions, and frozen publication snapshots.</p>
+      </div>
+      <div class="page-actions">
+        <button class="secondary" data-review-action-shortcut="history">Decision history</button>
+        <button class="secondary" data-review-action-shortcut="create_queue">Create queue</button>
+        <button data-review-bulk-action="approve">Review assigned</button>
+      </div>
+    </header>
+    <section class="operation-search-card">
+      <label class="operation-search">
+        <span class="sr-only">Review search</span>
+        <input id="reviewSearchInput" value="${escapeHtml(state.q)}" placeholder="Search review tasks, source anchors, proposed changes, claims, facts, blockers">
+      </label>
+      <div class="operation-search-controls">
+        <div class="segmented-control" aria-label="Review search mode">
+          <button class="secondary" type="button">Exact</button>
+          <button class="secondary" type="button">Semantic</button>
+          <button class="active" type="button">Hybrid</button>
+        </div>
+        <select id="reviewScopeSelect" aria-label="Review scope">
+          <option value="">Scope: All projects</option>
+          ${state.project ? `<option value="${escapeHtml(state.project)}" selected>Project: ${escapeHtml(state.project)}</option>` : ''}
+        </select>
+        <button id="reviewSearchButton" type="button">Search</button>
+        <button class="secondary compact-clear" id="reviewClearFilters" type="button">Clear</button>
+      </div>
+      <div class="operation-search-meta">
+        <span class="status-badge info">Human review only</span>
+        <p>Hybrid match: task fields plus exact source anchors, proposed changes, linked claims, entities, reviewer comments, and prior decisions.</p>
+        <strong>${escapeHtml(summary.open ?? 0)} waiting · ${escapeHtml(summary.blockers ?? 0)} blocking · ${escapeHtml(summary.visible ?? rows.length)} visible</strong>
+      </div>
+    </section>
+    <section class="review-shell trace-workbench">
       <aside class="panel review-filter-panel">
         ${reviewQueueGroup(data.queues)}
         ${reviewFacetGroup('Object type', facets.object_types, state.reviewType, 'type')}
@@ -3273,12 +3325,8 @@ function renderReviewsPage(data) {
         ${reviewFacetGroup('Epistemic layer', facets.epistemic_layers, state.reviewLayer, 'layer')}
       </aside>
       <section class="panel review-ledger-panel">
-        <div class="review-search-strip">
-          <label><span>Review search</span><input id="reviewSearchInput" value="${escapeHtml(state.q)}" placeholder="Search review tasks, anchors, sources, claims, facts, or blockers"></label>
-          <button class="secondary" id="reviewClearFilters">Clear</button>
-        </div>
         <div class="review-explanation">
-          <span class="status-badge info">${escapeHtml(titleCase(state.reviewQueue || 'all'))}</span>
+          <span class="status-badge info">${escapeHtml(queueLabel)}</span>
           <p>Tasks are formal decisions. Inbox triage stays separate; save-and-next advances only after the durable event succeeds.</p>
         </div>
         <div class="review-bulk-toolbar">
@@ -3310,10 +3358,11 @@ function renderReviewsPage(data) {
                     ${row.domain ? `<span class="pill">${escapeHtml(row.domain)}</span>` : ''}
                   </div>
                 </div>
-                <div class="review-row-counts">
-                  <strong>${escapeHtml(row.linked_conflicts || 0)}</strong><em>conflicts</em>
-                  <strong>${escapeHtml(row.blocker_count || 0)}</strong><em>blockers</em>
-                  <strong>${escapeHtml(fmtDate(row.updated_at || row.created_at) || '')}</strong><em>updated</em>
+                <div class="review-row-state">
+                  <span class="status-badge ${Number(row.blocker_count || 0) ? 'danger' : row.decision_state === 'approved' ? 'ok' : 'warn'}">${escapeHtml(titleCase(row.decision_state || 'open'))}</span>
+                  <em>${escapeHtml(titleCase(row.priority || 'normal'))} priority</em>
+                  <em>${row.assignee ? `Assigned ${escapeHtml(row.assignee)}` : 'Unassigned'}</em>
+                  <em>${escapeHtml(fmtDate(row.updated_at || row.created_at) || '')}</em>
                 </div>
               </article>
             `;
@@ -3521,6 +3570,18 @@ function bindReviewPage(data) {
       loadRoutePage();
     }, 250);
   });
+  $('reviewSearchButton')?.addEventListener('click', () => {
+    state.q = $('reviewSearchInput')?.value.trim() || '';
+    state.reviewSelectedId = '';
+    replaceRouteHash();
+    loadRoutePage();
+  });
+  $('reviewScopeSelect')?.addEventListener('change', () => {
+    state.project = $('reviewScopeSelect').value || '';
+    state.reviewSelectedId = '';
+    replaceRouteHash();
+    loadRoutePage();
+  });
   $('reviewClearFilters')?.addEventListener('click', () => {
     state.q = '';
     state.project = '';
@@ -3533,6 +3594,23 @@ function bindReviewPage(data) {
     state.reviewSelectedIds.clear();
     replaceRouteHash();
     loadRoutePage();
+  });
+  document.querySelectorAll('[data-review-action-shortcut]').forEach((button) => {
+    button.addEventListener('click', async () => {
+      const row = state.reviewRows.find((item) => reviewTaskKey(item) === state.reviewSelectedId) || state.reviewRows[0];
+      const action = button.dataset.reviewActionShortcut || 'history';
+      const status = $('reviewBulkStatus');
+      if (action === 'history') {
+        state.reviewPreviewTab = 'history';
+        replaceRouteHash();
+        loadRoutePage();
+        return;
+      }
+      if (status) status.textContent = `${button.textContent.trim()} is queued for a later workflow cut.`;
+      if (row) {
+        await persistReviewAction(row, 'history', `${button.textContent.trim()} opened from Reviews header.`);
+      }
+    });
   });
   $('reviewSelectAll')?.addEventListener('change', () => {
     const checked = $('reviewSelectAll').checked;
@@ -3595,26 +3673,335 @@ function bindReviewPage(data) {
   bindReviewKeyboard();
 }
 
+function publishingBundleKey(row) {
+  return row.bundle_id || [row.project, row.package_type].filter(Boolean).join(':');
+}
+
+function publishingGlyph(row) {
+  const type = row.package_type || '';
+  if (type.includes('comparison')) return 'CMP';
+  if (type.includes('benchmark')) return 'BRF';
+  if (type.includes('entity')) return 'ENT';
+  if (type.includes('timeline')) return 'TL';
+  if (type.includes('export')) return 'EXP';
+  return 'PUB';
+}
+
+function publishingStateClass(value) {
+  const stateValue = String(value || '');
+  if (stateValue.includes('failed') || stateValue.includes('blocked')) return 'danger';
+  if (stateValue.includes('ready') || stateValue.includes('approved') || stateValue.includes('published')) return 'ok';
+  if (stateValue.includes('review') || stateValue.includes('assembling')) return 'info';
+  return 'warn';
+}
+
+function renderPublishingPreview(data) {
+  const preview = data.preview || {};
+  const row = preview.row || null;
+  if (!row) {
+    return `
+      <div class="empty-state">
+        <h2>Package detail</h2>
+        <p>Select a publication package to inspect readiness, contents, citations, snapshot state, handoff targets, and history.</p>
+      </div>
+    `;
+  }
+  const activeTab = ['readiness', 'contents', 'citations', 'snapshot', 'handoff', 'history'].includes(state.publishingPreviewTab) ? state.publishingPreviewTab : 'readiness';
+  const tab = (id, label) => `<button class="${activeTab === id ? 'active' : ''}" type="button" data-publishing-preview-tab="${id}">${label}</button>`;
+  const sectionClass = (id) => `publishing-preview-section ${activeTab === id ? 'active' : ''}`;
+  const checkClass = (check) => check.state === 'pass' ? 'ok' : check.state === 'blocked' ? 'danger' : 'warn';
+  return `
+    <div class="review-preview-head publishing-preview-head">
+      <span class="source-glyph">${escapeHtml(publishingGlyph(row))}</span>
+      <div>
+        <h2>${escapeHtml(row.title || 'Publication package')}</h2>
+        <p>${escapeHtml([row.display_state, row.package_type_label, row.target].filter(Boolean).map(titleCase).join(' · '))}</p>
+      </div>
+    </div>
+    <nav class="review-preview-tabs publishing-preview-tabs" aria-label="Publication detail sections">
+      ${tab('readiness', 'Readiness')}
+      ${tab('contents', 'Contents')}
+      ${tab('citations', 'Citations')}
+      ${tab('snapshot', 'Snapshot')}
+      ${tab('handoff', 'Handoff')}
+      ${tab('history', 'History')}
+    </nav>
+    <section class="${sectionClass('readiness')}" data-publishing-preview-section="readiness">
+      <article class="review-preview-card readiness-card">
+        <h4>Snapshot readiness</h4>
+        <div class="readiness-line">
+          <strong>${escapeHtml(row.readiness_percent || 0)}%</strong>
+          <span>${escapeHtml(row.checks_passed || 0)} of ${escapeHtml(row.checks_total || 0)} checks pass</span>
+          <em>${escapeHtml(row.blocker_count || 0)} blockers</em>
+        </div>
+        ${progressBar(row.readiness_percent || 0)}
+      </article>
+      <article class="review-preview-card">
+        <h4>Blocking and required checks</h4>
+        ${(preview.checks || []).map((check) => `
+          <p><span class="status-badge ${checkClass(check)}">${escapeHtml(check.state || '')}</span> <strong>${escapeHtml(check.label || '')}</strong><br>${escapeHtml(check.detail || '')}</p>
+        `).join('')}
+      </article>
+      <article class="review-preview-card">
+        <h4>Package layers</h4>
+        <div class="review-layer-stack">
+          <div><span>Mutable draft</span><strong>${escapeHtml(row.draft_revision || '')}</strong></div>
+          <div><span>Curated objects</span><strong>${escapeHtml(row.claim_count || 0)} claims · ${escapeHtml(row.evidence_count || 0)} evidence</strong></div>
+          <div><span>Package manifest</span><strong>${escapeHtml(row.manifest_version || '')}</strong></div>
+          <div><span>Snapshot</span><strong>${escapeHtml(titleCase(row.snapshot_state || 'none'))}</strong></div>
+          <div><span>Handoff</span><strong>${escapeHtml(row.release_state || 'waiting')}</strong></div>
+        </div>
+      </article>
+    </section>
+    <section class="${sectionClass('contents')}" data-publishing-preview-section="contents">
+      <article class="review-preview-card">
+        <h4>Package outline</h4>
+        ${(preview.contents || []).map((item, index) => `<p><strong>${String(index + 1).padStart(2, '0')} · ${escapeHtml(item.label || '')}</strong><br>${escapeHtml(item.detail || '')}</p>`).join('')}
+      </article>
+      <article class="review-preview-card manifest-grid">
+        <h4>Manifest composition</h4>
+        <p><strong>${escapeHtml(row.section_count || 0)}</strong><br>sections</p>
+        <p><strong>${escapeHtml(row.claim_count || 0)}</strong><br>claims</p>
+        <p><strong>${escapeHtml(row.evidence_count || 0)}</strong><br>evidence objects</p>
+        <p><strong>${escapeHtml(row.citation_count || 0)}</strong><br>citations</p>
+        <p><strong>${escapeHtml(row.capture_count || 0)}</strong><br>captures</p>
+        <p><strong>${escapeHtml(row.media_count || 0)}</strong><br>media assets</p>
+      </article>
+    </section>
+    <section class="${sectionClass('citations')}" data-publishing-preview-section="citations">
+      <article class="review-preview-card">
+        <h4>Citation and provenance checks</h4>
+        ${(preview.citations || []).map((item) => `<p><span class="status-badge ${publishingStateClass(item.state)}">${escapeHtml(item.state || '')}</span> <strong>${escapeHtml(item.label || '')}</strong><br>${escapeHtml(item.detail || '')}</p>`).join('')}
+      </article>
+    </section>
+    <section class="${sectionClass('snapshot')}" data-publishing-preview-section="snapshot">
+      <article class="review-preview-card">
+        <h4>Snapshot candidate</h4>
+        <p><strong>${escapeHtml(titleCase(preview.snapshot?.state || 'none'))}</strong><br>${escapeHtml(preview.snapshot?.note || '')}</p>
+        <p><strong>Manifest hash</strong><br><code>${escapeHtml(preview.snapshot?.manifest_hash || '')}</code></p>
+        <p><strong>Frozen inputs</strong><br>${escapeHtml(preview.snapshot?.draft_revision || '')} · ${escapeHtml(preview.snapshot?.manifest_version || '')}</p>
+      </article>
+    </section>
+    <section class="${sectionClass('handoff')}" data-publishing-preview-section="handoff">
+      <article class="review-preview-card">
+        <h4>Configured handoff targets</h4>
+        ${(preview.handoff || []).map((item) => `<p><strong>${escapeHtml(item.label || '')}</strong><br>${escapeHtml(item.detail || '')}</p>`).join('')}
+      </article>
+    </section>
+    <section class="${sectionClass('history')}" data-publishing-preview-section="history">
+      <article class="review-preview-card">
+        <h4>Package, review, and release history</h4>
+        ${(preview.history || []).map((item) => `<p><strong>${escapeHtml(item.event_type || '')}</strong><br>${escapeHtml(fmtDate(item.created_at))} · ${escapeHtml(item.actor || '')}<br>${escapeHtml(item.detail || '')}</p>`).join('')}
+      </article>
+    </section>
+    <div id="publishingActionStatus" class="review-status muted"></div>
+    <div class="review-preview-actions publishing-actions">
+      <button class="secondary" data-publishing-action="open_package">Open package</button>
+      <button class="secondary" data-publishing-action="run_checks">Run checks</button>
+      <button class="secondary" data-publishing-action="focus_blockers">Resolve blockers</button>
+      <button class="secondary" data-publishing-action="create_snapshot">Create snapshot</button>
+      <button data-publishing-action="request_review">Request review</button>
+    </div>
+  `;
+}
+
+async function persistPublishingAction(row, action) {
+  if (!row) return;
+  await postJson('/api/review/events', {
+    event_type: `publishing.${action}.recorded`,
+    source_evidence_id: '',
+    source_project: row.project || state.project || '',
+    project: row.project || state.project || '',
+    subject_type: 'publication_bundle',
+    subject_id: publishingBundleKey(row),
+    action,
+    status: row.display_state || 'draft',
+    note: `${titleCase(action)} from Publishing workspace`,
+    source_anchor: {
+      kind: 'publication_bundle',
+      bundle_id: publishingBundleKey(row),
+      manifest_hash: row.manifest_hash || '',
+      optimistic_version: row.optimistic_version || '',
+    },
+    idempotency_key: `${publishingBundleKey(row)}:${action}:${Date.now()}`,
+  });
+}
+
+function bindPublishingPage(data) {
+  $('publishingSearchInput')?.addEventListener('input', () => {
+    state.q = $('publishingSearchInput').value.trim();
+    clearTimeout(window.__publishingSearchTimer);
+    window.__publishingSearchTimer = setTimeout(() => {
+      state.publishingSelectedId = '';
+      replaceRouteHash();
+      loadRoutePage();
+    }, 250);
+  });
+  $('publishingSearchButton')?.addEventListener('click', () => {
+    state.q = $('publishingSearchInput')?.value.trim() || '';
+    state.publishingSelectedId = '';
+    replaceRouteHash();
+    loadRoutePage();
+  });
+  $('publishingScopeSelect')?.addEventListener('change', () => {
+    state.project = $('publishingScopeSelect').value || '';
+    state.publishingSelectedId = '';
+    replaceRouteHash();
+    loadRoutePage();
+  });
+  $('publishingClearFilters')?.addEventListener('click', () => {
+    state.q = '';
+    state.project = '';
+    state.publishingSelectedId = '';
+    state.publishingPreviewTab = 'readiness';
+    replaceRouteHash();
+    loadRoutePage();
+  });
+  document.querySelectorAll('.publish-row').forEach((rowEl) => {
+    rowEl.addEventListener('click', () => {
+      state.publishingSelectedId = rowEl.dataset.bundleId || '';
+      replaceRouteHash();
+      loadRoutePage();
+    });
+  });
+  document.querySelectorAll('[data-publishing-preview-tab]').forEach((button) => {
+    button.addEventListener('click', () => {
+      state.publishingPreviewTab = button.dataset.publishingPreviewTab || 'readiness';
+      replaceRouteHash();
+      document.querySelectorAll('[data-publishing-preview-tab]').forEach((tab) => tab.classList.toggle('active', tab === button));
+      document.querySelectorAll('[data-publishing-preview-section]').forEach((section) => {
+        section.classList.toggle('active', section.dataset.publishingPreviewSection === state.publishingPreviewTab);
+      });
+    });
+  });
+  document.querySelectorAll('[data-publishing-action]').forEach((button) => {
+    button.addEventListener('click', async () => {
+      const row = (data.bundles || []).find((item) => publishingBundleKey(item) === state.publishingSelectedId) || data.preview?.row;
+      const status = $('publishingActionStatus');
+      try {
+        if (status) status.textContent = `${button.textContent.trim()}...`;
+        await persistPublishingAction(row, button.dataset.publishingAction || 'run_checks');
+        if (status) status.textContent = `${button.textContent.trim()} recorded.`;
+      } catch (error) {
+        if (status) status.textContent = error.message;
+      }
+    });
+  });
+}
+
 function renderPublishingPage(data) {
-  const checks = data.checks || [];
+  const rows = data.bundles || data.results?.rows || [];
+  state.publishingRows = rows;
+  if (!state.publishingSelectedId || !rows.some((row) => publishingBundleKey(row) === state.publishingSelectedId)) {
+    state.publishingSelectedId = data.preview?.row ? publishingBundleKey(data.preview.row) : (rows[0] ? publishingBundleKey(rows[0]) : '');
+  }
+  const summary = data.summary || {};
   $('routePage').innerHTML = `
-    ${pageHeader('Publishing', 'Frozen snapshots and approval gates before public website reuse.')}
-    ${metricCards([
-      { label: 'Bundles', value: (data.bundles || []).length },
-      { label: 'Checks', value: checks.length },
-      { label: 'Blocked', value: checks.filter((item) => item.state === 'blocked').length },
-    ])}
-    <section class="panel page-panel">
-      <div class="panel-title-row"><h2>Publication Checks</h2><span class="status-badge warn">snapshot not active yet</span></div>
-      ${checks.map((item) => `
-        <article class="check-row">
-          <span class="status-badge ${item.state === 'pass' ? 'ok' : item.state === 'blocked' ? 'danger' : 'warn'}">${escapeHtml(item.state)}</span>
-          <strong>${escapeHtml(item.label)}</strong>
-        </article>
-      `).join('')}
-      <p class="muted padded">${escapeHtml(data.snapshot_policy || '')}</p>
+    <header class="page-header trace-page-header">
+      <div>
+        <span class="breadcrumb">Research UI / Publication preparation</span>
+        <div class="title-action-group">
+          <span class="status-badge ok">versioned handoff</span>
+          <span class="status-badge danger">${escapeHtml(summary.blocked || 0)} blocking checks</span>
+        </div>
+        <h1>Publishing</h1>
+        <p>Assemble reviewed claims and exact source citations into frozen, reusable publication packages.</p>
+      </div>
+      <div class="page-actions">
+        <button class="secondary" data-publishing-action="published_releases">Published releases</button>
+        <button class="secondary" data-publishing-action="create_from_draft">Create from draft</button>
+        <button data-publishing-action="new_package">New package</button>
+      </div>
+    </header>
+    <section class="operation-search-card">
+      <label class="operation-search">
+        <span class="sr-only">Publishing search</span>
+        <input id="publishingSearchInput" value="${escapeHtml(state.q)}" placeholder="Search publication packages, claims, citations, handoff targets">
+      </label>
+      <div class="operation-search-controls">
+        <div class="segmented-control" aria-label="Publishing search mode">
+          <button class="secondary" type="button">Exact</button>
+          <button class="secondary" type="button">Semantic</button>
+          <button class="active" type="button">Hybrid</button>
+        </div>
+        <select id="publishingScopeSelect" aria-label="Publishing scope">
+          <option value="">Project: All projects</option>
+          ${state.project ? `<option value="${escapeHtml(state.project)}" selected>Project: ${escapeHtml(state.project)}</option>` : ''}
+        </select>
+        <button id="publishingSearchButton" type="button">Search</button>
+        <button class="secondary compact-clear" id="publishingClearFilters" type="button">Clear</button>
+      </div>
+      <div class="operation-search-meta">
+        <span class="status-badge info">Frozen snapshot workflow</span>
+        <p>Approvals and releases reference immutable snapshot IDs and manifest hashes, never mutable live bundle queries.</p>
+        <strong>${escapeHtml(summary.bundles ?? rows.length)} active · ${escapeHtml(summary.blocked ?? 0)} blocked · ${escapeHtml(summary.ready ?? 0)} ready</strong>
+      </div>
+    </section>
+    <section class="publishing-shell trace-workbench">
+      <aside class="panel review-filter-panel publishing-filter-panel">
+        <section class="review-facet-group">
+          <h3>Publishing queues</h3>
+          <div class="facet-list compact">
+            ${(data.queues || []).map((item) => `
+              <button class="facet" type="button">
+                <span>${escapeHtml(item.label || item.id)}</span><strong>${escapeHtml(item.count || 0)}</strong>
+              </button>
+            `).join('')}
+          </div>
+        </section>
+        ${reviewFacetGroup('Package type', data.facets?.package_types, '', 'publishing_type')}
+        ${reviewFacetGroup('Displayed state', data.facets?.displayed_states, '', 'publishing_state')}
+        ${reviewFacetGroup('Target and handoff', data.facets?.targets, '', 'publishing_target')}
+      </aside>
+      <section class="panel review-ledger-panel publishing-ledger-panel">
+        <div class="review-explanation">
+          <span class="status-badge info">${escapeHtml(summary.bundles || 0)} publication packages</span>
+          <p>Mutable package manifests become publishable only after checks pass, a frozen snapshot is created, and snapshot review is complete.</p>
+        </div>
+        <div class="review-bulk-toolbar">
+          <label><input type="checkbox" id="publishingSelectAll"> Select visible</label>
+          ${['run_checks', 'create_snapshot', 'request_review', 'create_handoff'].map((action) => `<button class="secondary" data-publishing-action="${action}">${escapeHtml(titleCase(action))}</button>`).join('')}
+          <span id="publishingBulkStatus" class="muted"></span>
+        </div>
+        <div class="publish-results-list">
+          ${rows.length ? rows.map((row) => {
+            const rowKey = publishingBundleKey(row);
+            const selected = rowKey === state.publishingSelectedId;
+            return `
+              <article class="publish-row ${selected ? 'active' : ''}" data-bundle-id="${escapeHtml(rowKey)}">
+                <input class="review-check" type="checkbox" aria-label="Select publication package">
+                <span class="package-glyph">${escapeHtml(publishingGlyph(row))}</span>
+                <div class="review-row-main">
+                  <div class="review-title-line">
+                    <span class="pill">${escapeHtml(row.package_type_label || row.package_type || 'Package')}</span>
+                    <strong>${escapeHtml(row.title || 'Publication package')}</strong>
+                  </div>
+                  <p>${escapeHtml(row.section_count || 0)} sections · ${escapeHtml(row.claim_count || 0)} claims · ${escapeHtml(row.evidence_count || 0)} evidence objects · ${escapeHtml(row.citation_count || 0)} citations</p>
+                  <div class="row-meta">
+                    <span class="pill ${row.blocker_count ? 'warn' : 'ok'}">${escapeHtml(row.blocker_count || 0)} blockers</span>
+                    <span class="pill">${escapeHtml(row.checks_passed || 0)} / ${escapeHtml(row.checks_total || 0)} checks</span>
+                    <span class="pill">${escapeHtml(row.snapshot_state || 'no snapshot')}</span>
+                    <span class="pill">${escapeHtml(row.capture_count || 0)} captures pinned</span>
+                  </div>
+                  <div class="package-progress">${progressBar(row.readiness_percent || 0)}<small>${escapeHtml(row.readiness_percent || 0)}% ready</small></div>
+                </div>
+                <div class="review-row-state">
+                  <span class="status-badge ${publishingStateClass(row.display_state)}">${escapeHtml(titleCase(row.display_state || 'draft'))}</span>
+                  <em>${escapeHtml(row.owner || '')}</em>
+                  <em>${escapeHtml(row.draft_revision || '')}</em>
+                  <em>${escapeHtml(fmtDate(row.updated_at) || '')}</em>
+                </div>
+              </article>
+            `;
+          }).join('') : '<div class="empty-state"><h2>No publication packages</h2><p>Create a package from reviewed claims, evidence, or a draft.</p></div>'}
+        </div>
+      </section>
+      <aside class="panel review-preview-panel publishing-preview-panel">
+        ${renderPublishingPreview(data)}
+      </aside>
     </section>
   `;
+  bindPublishingPage(data);
 }
 
 function renderTaxonomyPage(data) {
@@ -3698,6 +4085,10 @@ function routeQuery() {
     if (state.reviewLayer) params.set('layer', state.reviewLayer);
     if (state.reviewSelectedId) params.set('inspect', `review:${state.reviewSelectedId}`);
     if (state.reviewPreviewTab && state.reviewPreviewTab !== 'review') params.set('tab', state.reviewPreviewTab);
+  }
+  if (state.route === 'publishing') {
+    if (state.publishingSelectedId) params.set('inspect', `bundle:${state.publishingSelectedId}`);
+    if (state.publishingPreviewTab && state.publishingPreviewTab !== 'readiness') params.set('tab', state.publishingPreviewTab);
   }
   return params.toString();
 }

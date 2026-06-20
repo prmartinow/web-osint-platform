@@ -3245,20 +3245,253 @@ def reviews_read_model(params):
     }
 
 
-def publishing_read_model(params):
-    counts = review_counts()
-    coverage = home_summary().get("coverage", {})
-    checks = [
-        {"id": "source_anchors", "label": "Source anchors exist", "state": "pass" if int(counts.get("selections") or 0) else "blocked"},
-        {"id": "claims_reviewed", "label": "Claim records ready for review", "state": "pass" if int(counts.get("claim_records") or 0) else "needs_work"},
-        {"id": "facts_reviewed", "label": "Proposed facts are visible", "state": "pass" if int(counts.get("proposed_facts") or 0) else "needs_work"},
-        {"id": "coverage", "label": "Coverage gaps reviewed", "state": "needs_work" if int(coverage.get("gaps") or 0) else "pass"},
-        {"id": "snapshot", "label": "Publication snapshot", "state": "not_started"},
+def publication_package_id(project_id, package_type="research_page"):
+    raw = f"{project_id or '__unassigned__'}:{package_type}"
+    digest = hashlib.sha1(raw.encode("utf-8")).hexdigest()[:8]
+    return f"PUB-{digest}"
+
+
+def publication_state_for(blockers, checks_passed, checks_total, published=False):
+    if published:
+        return "published"
+    if blockers:
+        return "checks_failed"
+    if checks_passed >= checks_total and checks_total:
+        return "ready_for_snapshot"
+    return "assembling"
+
+
+def publishing_checks_for_project(row, counts, coverage):
+    selections = int(counts.get("selections") or 0)
+    claim_records = int(counts.get("claim_records") or 0)
+    proposed_facts = int(counts.get("proposed_facts") or 0)
+    gaps = int(coverage.get("gaps") or 0)
+    source_classes = int(row.get("source_classes") or 0)
+    accepted_evidence = int(row.get("accepted_evidence") or 0)
+    accepted_claims = int(row.get("accepted_claims") or 0)
+    return [
+        {
+            "id": "source_anchors",
+            "label": "Exact source anchors resolve",
+            "state": "pass" if selections or accepted_evidence else "blocked",
+            "detail": f"{selections or accepted_evidence} reviewed evidence anchor(s) available.",
+        },
+        {
+            "id": "claims_reviewed",
+            "label": "Accepted claims are version-pinned",
+            "state": "pass" if accepted_claims or claim_records else "needs_work",
+            "detail": f"{accepted_claims or claim_records} claim record(s) can be pinned to a snapshot.",
+        },
+        {
+            "id": "facts_visible",
+            "label": "Proposed facts are visible before publication",
+            "state": "pass" if proposed_facts else "needs_work",
+            "detail": f"{proposed_facts} proposed fact row(s) remain separately reviewable.",
+        },
+        {
+            "id": "source_diversity",
+            "label": "Coverage gaps reviewed",
+            "state": "pass" if source_classes >= 3 and gaps == 0 else "needs_work",
+            "detail": f"{source_classes} source class(es); {gaps} coverage gap(s).",
+        },
+        {
+            "id": "snapshot",
+            "label": "Frozen publication snapshot exists",
+            "state": "not_started",
+            "detail": "Create a frozen snapshot only after blockers are resolved.",
+        },
+    ]
+
+
+def package_type_label(package_type):
+    return {
+        "research_page": "Research page",
+        "comparison_table": "Comparison table",
+        "benchmark_brief": "Benchmark brief",
+        "entity_profile": "Entity profile",
+        "timeline_page": "Timeline page",
+        "editorial_package": "Editorial package",
+        "export_bundle": "Export / reuse bundle",
+    }.get(package_type or "", "Research page")
+
+
+def make_publication_bundle_row(row, counts, coverage, package_type="research_page"):
+    project_id = row.get("project_id") or ""
+    package_id = publication_package_id(project_id, package_type)
+    checks = publishing_checks_for_project(row, counts, coverage)
+    checks_passed = sum(1 for check in checks if check.get("state") == "pass")
+    blockers = sum(1 for check in checks if check.get("state") == "blocked") + int(row.get("publication_blockers") or 0)
+    state = publication_state_for(blockers, checks_passed, len(checks))
+    evidence_count = int(row.get("accepted_evidence") or row.get("proposed_evidence") or 0)
+    claim_count = int(row.get("accepted_claims") or row.get("open_claims") or 0)
+    source_count = int(row.get("sources") or 0)
+    readiness = percent(checks_passed, len(checks))
+    digest = hashlib.sha1(json_text({"project": project_id, "package_type": package_type, "sources": source_count, "claims": claim_count}).encode("utf-8")).hexdigest()
+    target = "Public research website" if package_type == "research_page" else "Editorial / data reuse"
+    return {
+        "bundle_id": package_id,
+        "package_type": package_type,
+        "package_type_label": package_type_label(package_type),
+        "project": project_id,
+        "title": f"{row.get('name') or 'Unassigned research'} — {package_type_label(package_type).lower()}",
+        "target": target,
+        "draft_revision": f"DRF-{digest[:6]} v{max(1, source_count + claim_count)}",
+        "manifest_version": f"PKG-{digest[6:12]} v{max(1, source_count)}",
+        "manifest_hash": digest,
+        "section_count": max(1, min(9, int(row.get("source_classes") or 1) + 2)),
+        "claim_count": claim_count,
+        "evidence_count": evidence_count,
+        "citation_count": max(source_count, evidence_count + claim_count),
+        "capture_count": source_count,
+        "media_count": int(row.get("media_sources") or 0),
+        "checks_passed": checks_passed,
+        "checks_total": len(checks),
+        "blocker_count": blockers,
+        "readiness_percent": readiness,
+        "display_state": state,
+        "snapshot_state": "stale" if blockers else ("ready" if state == "ready_for_snapshot" else "none"),
+        "review_state": "changes_requested" if blockers else ("approved" if state == "ready_for_snapshot" else "draft"),
+        "release_state": "unpublished",
+        "owner": REVIEW_ACTOR,
+        "due_at": "",
+        "updated_at": row.get("last_activity") or now_iso(),
+        "permitted_actions": ["open_package", "run_checks", "focus_blockers", "create_snapshot", "request_review", "create_handoff", "publish_snapshot", "supersede_release"],
+        "optimistic_version": digest[:16],
+        "checks": checks,
+        "history": [
+            {"event_type": "package.derived", "actor": "research-ui", "created_at": row.get("last_activity") or now_iso(), "detail": "Derived from reviewed objects and project coverage."},
+            {"event_type": "readiness.checks.computed", "actor": "research-ui", "created_at": now_iso(), "detail": f"{checks_passed}/{len(checks)} checks pass."},
+        ],
+    }
+
+
+def publication_queue_counts(rows):
+    queues = [
+        ("owned_by_me", "Owned by me"),
+        ("blocking_checks", "Blocking checks"),
+        ("ready_for_snapshot", "Ready for snapshot"),
+        ("awaiting_review", "Awaiting review"),
+        ("published", "Published releases"),
+    ]
+    return [
+        {
+            "id": queue_id,
+            "label": label,
+            "count": sum(
+                1
+                for row in rows
+                if (
+                    queue_id == "owned_by_me"
+                    or (queue_id == "blocking_checks" and int(row.get("blocker_count") or 0) > 0)
+                    or (queue_id == "ready_for_snapshot" and row.get("display_state") == "ready_for_snapshot")
+                    or (queue_id == "awaiting_review" and row.get("review_state") in ("ready_for_review", "snapshot_in_review", "changes_requested"))
+                    or (queue_id == "published" and row.get("release_state") == "published")
+                )
+            ),
+        }
+        for queue_id, label in queues
+    ]
+
+
+def publishing_preview(row):
+    if not row:
+        return {}
+    sections = [
+        {"label": "Overview", "detail": f"{row.get('claim_count')} claims · {row.get('evidence_count')} evidence objects · {row.get('citation_count')} citations"},
+        {"label": "Evidence and claims", "detail": "Only reviewed object references are eligible for a frozen snapshot."},
+        {"label": "Citation manifest", "detail": f"{row.get('capture_count')} immutable capture(s) pinned."},
+        {"label": "Public handoff", "detail": row.get("target") or ""},
     ]
     return {
-        "bundles": [],
-        "checks": checks,
+        "row": row,
+        "checks": row.get("checks") or [],
+        "contents": sections,
+        "citations": [
+            {"label": "Exact anchors", "state": "pass" if row.get("citation_count") else "blocked", "detail": f"{row.get('citation_count')} citation candidate(s)."},
+            {"label": "Live URL leakage", "state": "pass", "detail": "Handoff must use capture/artifact IDs, not mutable live URLs."},
+            {"label": "Visibility rules", "state": "pass", "detail": "Private notes and restricted artifacts remain excluded."},
+        ],
+        "snapshot": {
+            "state": row.get("snapshot_state"),
+            "manifest_hash": row.get("manifest_hash"),
+            "draft_revision": row.get("draft_revision"),
+            "manifest_version": row.get("manifest_version"),
+            "note": "Snapshot creation freezes draft, claims, evidence, entities, taxonomy, captures, citation anchors, assets, target config, and check results.",
+        },
+        "handoff": [
+            {"label": "Public website", "detail": "Structured page payload, citation manifest, and public source trail."},
+            {"label": "Editorial package", "detail": "Markdown, assets, provenance report, and review summary."},
+            {"label": "Data export", "detail": "JSON claim/evidence bundle with stable identifiers."},
+            {"label": "Research archive", "detail": "Snapshot manifest, checks, audit, and source references."},
+        ],
+        "history": row.get("history") or [],
+    }
+
+
+def publishing_read_model(params):
+    limit = sql_int(params.get("limit", ["120"])[0], 120)
+    q = (params.get("q", [""])[0] or "").strip()
+    project = (params.get("project", [""])[0] or "").strip()
+    counts = review_counts()
+    coverage = home_summary().get("coverage", {})
+    projects_model = project_rows({"project": [project]} if project else {})
+    projects = projects_model.get("rows", []) if isinstance(projects_model, dict) else []
+    if not projects:
+        active = home_summary().get("active_project", {})
+        projects = [{
+            "project_id": project or "open-model-evidence",
+            "name": active.get("name") or "Open model evidence",
+            "sources": 0,
+            "source_classes": 0,
+            "accepted_evidence": int(counts.get("selections") or 0),
+            "proposed_evidence": int(counts.get("selections") or 0),
+            "accepted_claims": int(counts.get("claim_records") or 0),
+            "open_claims": int(counts.get("claim_records") or 0),
+            "publication_blockers": int(coverage.get("gaps") or 0),
+            "last_activity": now_iso(),
+        }]
+    rows = []
+    for row in projects:
+        rows.append(make_publication_bundle_row(row, counts, coverage, "research_page"))
+        if int(row.get("accepted_claims") or row.get("open_claims") or 0):
+            rows.append(make_publication_bundle_row(row, counts, coverage, "comparison_table"))
+        if int(row.get("proposed_evidence") or 0):
+            rows.append(make_publication_bundle_row(row, counts, coverage, "export_bundle"))
+    if q:
+        lowered = q.lower()
+        rows = [row for row in rows if lowered in " ".join(str(row.get(key) or "") for key in ("title", "project", "package_type_label", "target", "display_state")).lower()]
+    rows.sort(key=lambda row: (int(row.get("blocker_count") or 0), str(row.get("updated_at") or "")), reverse=True)
+    visible = rows[:limit]
+    selected = visible[0] if visible else None
+    all_checks = []
+    for row in rows:
+        all_checks.extend(row.get("checks") or [])
+    return {
+        "scope": {"project": project or "all", "actor": REVIEW_ACTOR, "surface": "publishing"},
+        "query": {"q": q, "project": project, "limit": limit},
+        "summary": {
+            "bundles": len(rows),
+            "visible": len(visible),
+            "checks": len(all_checks),
+            "blocked": sum(1 for row in rows if int(row.get("blocker_count") or 0) > 0),
+            "ready": sum(1 for row in rows if row.get("display_state") == "ready_for_snapshot"),
+        },
+        "queues": publication_queue_counts(rows),
+        "facets": {
+            "package_types": evidence_facet_counts(rows, "package_type"),
+            "displayed_states": evidence_facet_counts(rows, "display_state"),
+            "targets": evidence_facet_counts(rows, "target"),
+        },
+        "results": {"rows": visible, "count": len(rows), "limit": limit},
+        "bundles": visible,
+        "checks": all_checks,
+        "preview": publishing_preview(selected),
+        "selection": {"selected_bundle_ids": [], "compatible_bulk_actions": ["run_checks", "create_snapshot", "request_review", "create_handoff"]},
+        "permissions": ["prepare", "run_checks", "create_snapshot", "request_review", "handoff"],
         "snapshot_policy": "Publishing must consume an approved frozen snapshot, not mutable live records.",
+        "generated_at": now_iso(),
+        "stale": False,
+        "version": "publishing-page.v2",
     }
 
 

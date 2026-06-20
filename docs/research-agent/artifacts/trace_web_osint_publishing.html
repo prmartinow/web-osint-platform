@@ -1,0 +1,269 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1" name="viewport"/>
+<title>TRACE — Publishing</title>
+<link href="trace_web_osint_publishing.css" rel="stylesheet"/>
+</head>
+<body>
+<div class="app">
+<aside aria-label="Global navigation" class="sidebar">
+<a aria-label="TRACE Research home" class="brand" href="/p/open-model-evidence/home">
+<div class="brand-mark"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="m5 12 4 4 10-10"></path></svg></div>
+<div class="brand-name">TRACE</div><div class="brand-pill">RESEARCH</div>
+</a>
+<div class="side-body">
+<div class="side-label">WORKSPACE</div>
+<nav class="nav">
+<a class="nav-item" href="/p/open-model-evidence/home"><svg viewBox="0 0 24 24"><path d="m3 11 9-8 9 8"></path><path d="M5 10v10h14V10"></path><path d="M9 20v-6h6v6"></path></svg><span>Home</span></a>
+<a class="nav-item" href="/inbox"><svg viewBox="0 0 24 24"><path d="M4 4h16l2 10v6H2v-6L4 4Z"></path><path d="M2 14h6l2 3h4l2-3h6"></path></svg><span>Inbox</span><span class="nav-count">18</span></a>
+<a class="nav-item" href="/projects"><svg viewBox="0 0 24 24"><path d="M3 6h7l2 2h9v11H3Z"></path></svg><span>Projects</span></a>
+<a class="nav-item" href="/library"><svg viewBox="0 0 24 24"><path d="M4 4h16v16H4z"></path><path d="M9 4v16M15 8h2M15 12h2"></path></svg><span>Library</span></a>
+<a class="nav-item" href="/p/open-model-evidence/evidence"><svg viewBox="0 0 24 24"><path d="M4 5h16v14H4z"></path><path d="m7 14 3-3 2 2 4-5 2 2"></path></svg><span>Evidence</span><span class="nav-count">186</span></a>
+<a class="nav-item" href="/knowledge/entities"><svg viewBox="0 0 24 24"><circle cx="6" cy="12" r="3"></circle><circle cx="18" cy="6" r="3"></circle><circle cx="18" cy="18" r="3"></circle><path d="m8.7 10.6 6.6-3.2M8.7 13.4l6.6 3.2"></path></svg><span>Entities</span><span class="nav-count">52</span></a>
+<a class="nav-item" href="/p/open-model-evidence/claims"><svg viewBox="0 0 24 24"><path d="M5 4h14v16H5z"></path><path d="M8 8h8M8 12h8M8 16h5"></path></svg><span>Claims</span><span class="nav-count">94</span></a>
+<a class="nav-item" href="/reviews"><svg viewBox="0 0 24 24"><rect height="18" rx="3" width="16" x="4" y="3"></rect><path d="m8 12 2.3 2.3L16 8.8"></path></svg><span>Reviews</span><span class="nav-count red">21</span></a>
+<a class="nav-item active" href="/publishing"><svg viewBox="0 0 24 24"><path d="M12 16V4"></path><path d="m8 8 4-4 4 4"></path><rect height="9" rx="2" width="14" x="5" y="12"></rect></svg><span>Publishing</span><span class="nav-count red">3</span></a>
+<a class="nav-item" href="/taxonomy"><svg viewBox="0 0 24 24"><path d="M20 13 11 22l-9-9 9-9h6l3 3Z"></path><circle cx="14" cy="10" r="1.5"></circle></svg><span>Taxonomy</span></a>
+</nav>
+<div class="side-divider"></div>
+<div class="side-label active-label">ACTIVE PROJECT</div>
+<a class="project-card" href="/p/open-model-evidence/home">
+<div class="project-title"><span class="status-dot"></span>Open model evidence</div>
+<div class="project-sub">Release claims &amp; benchmarks</div>
+<div class="project-progress"><div class="bar"><span style="width:67%"></span></div><small>67%</small></div>
+</a>
+</div>
+<div class="sidebar-bottom">
+<button class="capture-btn" data-toast="Opening a Rebrowser capture session…"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"></circle><path d="M12 8v8M8 12h8"></path></svg><span>Capture source</span></button>
+<div class="side-foot">Human-led evidence workbench</div>
+</div>
+</aside>
+<div class="workspace">
+<header class="topbar">
+<button aria-label="Change publishing scope" class="project-switch"><div class="eyebrow">PUBLISHING SCOPE</div><div class="value">Open model evidence <i class="chev"></i></div></button>
+<button aria-label="Open global search" class="global-search"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"></circle><path d="m20 20-4-4"></path></svg><span class="hint">Search sources, evidence, claims, entities…</span><kbd>⌘ K</kbd></button>
+<div class="top-actions">
+<button class="btn"><svg viewBox="0 0 24 24"><path d="M5 4h14v16H5z"></path><path d="M8 8h8M8 12h8"></path></svg>New note</button>
+<button class="btn primary" data-toast="Opening a Rebrowser capture session…"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"></circle><path d="M12 8v8M8 12h8"></path></svg>Capture source</button>
+<div aria-label="Signed in as Pierre Roy" class="avatar">PR</div>
+</div>
+</header>
+
+<main class="main publishing-main">
+<section aria-labelledby="publishing-title" class="page-head">
+<div>
+<div class="breadcrumb">WORKSPACE / PUBLICATION PREPARATION</div>
+<div class="title-kickers"><span class="kicker teal">VERSIONED HANDOFF</span><span class="kicker red">3 BLOCKING CHECKS</span></div>
+<h1 id="publishing-title">Publishing</h1>
+<div class="page-subtitle">Assemble reviewed claims and exact source citations into frozen, reusable publication packages.</div>
+</div>
+<div class="head-actions">
+<button class="btn soft" data-toast="Opening published release history"><svg viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 3-6.7"></path><path d="M3 4v5h5"></path><path d="M12 7v5l3 2"></path></svg>Published releases</button>
+<button class="btn" data-toast="Draft picker opened"><svg viewBox="0 0 24 24"><path d="M5 4h14v16H5z"></path><path d="M8 8h8M8 12h8M8 16h5"></path></svg>Create from draft</button>
+<button class="btn primary" id="new-package"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"></path></svg>New package</button>
+</div>
+</section>
+
+<section aria-label="Publication package search" class="search-card">
+<div class="search-main">
+<label class="ledger-search"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"></circle><path d="m20 20-4-4"></path></svg><span class="sr-only">Search publication packages</span><input id="publish-query" value="model comparison, benchmark evidence pack, licensing matrix"/><button aria-label="Clear query" class="clear" type="button">×</button></label>
+<div aria-label="Search mode" class="mode-toggle"><button class="mode-btn" data-mode="Exact">Exact</button><button class="mode-btn" data-mode="Semantic">Semantic</button><button class="mode-btn active" data-mode="Hybrid">Hybrid</button></div>
+<button class="selectlike"><svg viewBox="0 0 24 24"><path d="M3 6h7l2 2h9v11H3Z"></path></svg>Project: Open model evidence <i class="tiny-chev"></i></button>
+<button class="search-go" data-toast="Publication packages refreshed">Search</button>
+</div>
+<div class="search-meta">
+<span class="scope-pill">FROZEN SNAPSHOT WORKFLOW</span>
+<div class="search-explain" id="search-explain"><b>Hybrid match:</b> package titles and sections plus linked claim text, citation anchors, snapshot manifests, and handoff metadata.</div>
+<div class="meta-spacer"></div>
+<div class="corpus-stat"><i class="stat-dot blue"></i><b>14</b> active</div>
+<div class="corpus-stat"><i class="stat-dot red"></i><b>3</b> blocked</div>
+<div class="corpus-stat"><i class="stat-dot amber"></i><b>2</b> awaiting review</div>
+<div class="corpus-stat"><i class="stat-dot teal"></i><b>8</b> published</div>
+</div>
+</section>
+
+<section aria-label="Publishing workspace" class="ledger-frame publishing-frame">
+<aside aria-label="Publishing queues and filters" class="facets">
+<div class="pane-head"><h2>Publishing queues</h2><span class="count">6 active</span><span class="spacer"></span><button class="text-btn" data-toast="Publishing filters cleared">Clear</button></div>
+<div class="facets-scroll">
+<div class="facet-section">
+<div class="facet-title">My publication work</div>
+<div class="saved-list">
+<button class="saved-item active"><svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"></circle><path d="M4 21c1.2-4.2 3.9-6 8-6s6.8 1.8 8 6"></path></svg>Owned by me<span class="n amber">7</span></button>
+<button class="saved-item"><svg viewBox="0 0 24 24"><path d="M12 3 2 21h20Z"></path><path d="M12 9v5M12 18h.01"></path></svg>Blocking checks<span class="n alert">3</span></button>
+<button class="saved-item"><svg viewBox="0 0 24 24"><path d="m5 12 4 4 10-10"></path></svg>Ready for snapshot<span class="n teal">2</span></button>
+<button class="saved-item"><svg viewBox="0 0 24 24"><rect height="18" rx="3" width="16" x="4" y="3"></rect><path d="m8 12 2.3 2.3L16 8.8"></path></svg>Awaiting review<span class="n amber">2</span></button>
+<button class="saved-item"><svg viewBox="0 0 24 24"><path d="M12 16V4"></path><path d="m8 8 4-4 4 4"></path><path d="M5 13v7h14v-7"></path></svg>Published releases<span class="n teal">8</span></button>
+</div>
+</div>
+<div class="facet-section">
+<div class="facet-title">Package type <span>14 packages</span></div>
+<label class="facet-row"><input checked type="checkbox"/><span class="type-icon release">PAGE</span><span class="facet-label">Research pages</span><span class="facet-count">4</span></label>
+<label class="facet-row"><input checked type="checkbox"/><span class="type-icon bench">CMP</span><span class="facet-label">Comparison tables</span><span class="facet-count">3</span></label>
+<label class="facet-row"><input checked type="checkbox"/><span class="type-icon license">PACK</span><span class="facet-label">Export / reuse bundles</span><span class="facet-count">3</span></label>
+<label class="facet-row"><input checked type="checkbox"/><span class="type-icon cost">BRF</span><span class="facet-label">Benchmark briefs</span><span class="facet-count">2</span></label>
+<label class="facet-row"><input type="checkbox"/><span class="type-icon code">ENT</span><span class="facet-label">Entity profiles</span><span class="facet-count">2</span></label>
+</div>
+<div class="facet-section">
+<div class="facet-title">Displayed state</div>
+<label class="facet-row"><input checked type="checkbox"/><span class="facet-dot draft"></span><span class="facet-label">Draft / assembling</span><span class="facet-count">5</span></label>
+<label class="facet-row"><input checked type="checkbox"/><span class="facet-dot review-rejected"></span><span class="facet-label">Checks failed</span><span class="facet-count">3</span></label>
+<label class="facet-row"><input checked type="checkbox"/><span class="facet-dot accepted"></span><span class="facet-label">Ready for snapshot</span><span class="facet-count">2</span></label>
+<label class="facet-row"><input checked type="checkbox"/><span class="facet-dot candidate"></span><span class="facet-label">Snapshot in review</span><span class="facet-count">2</span></label>
+<label class="facet-row"><input type="checkbox"/><span class="facet-dot accepted"></span><span class="facet-label">Published</span><span class="facet-count">8</span></label>
+<label class="facet-row"><input type="checkbox"/><span class="facet-dot deferred"></span><span class="facet-label">Superseded / archived</span><span class="facet-count">4</span></label>
+</div>
+<div class="facet-section compact-facet">
+<div class="facet-title">Target &amp; handoff</div>
+<div class="mini-filter-grid"><button class="mini-filter active">Public site <span>8</span></button><button class="mini-filter active">Editorial <span>3</span></button><button class="mini-filter">Data export <span>2</span></button><button class="mini-filter">Archive <span>1</span></button></div>
+</div>
+<div class="facet-section compact-facet">
+<div class="facet-title">Readiness</div>
+<div class="mini-filter-grid"><button class="mini-filter active">Citation issues <span>3</span></button><button class="mini-filter active">Stale objects <span>4</span></button><button class="mini-filter">No snapshot <span>5</span></button><button class="mini-filter">Due today <span>3</span></button></div>
+</div>
+</div>
+</aside>
+
+<section aria-label="Publication package list" class="results">
+<div class="results-head">
+<label aria-label="Select all publication packages" class="master-check"><input id="master-check" type="checkbox"/></label>
+<div class="results-title"><b>14 publication packages</b><span>Mutable package manifests · version-pinned objects · snapshot-specific approvals</span></div>
+<span class="spacer"></span><button class="compact-select"><svg viewBox="0 0 24 24"><path d="M4 7h16M7 12h10M10 17h4"></path></svg>Recently updated <i class="tiny-chev"></i></button><button aria-label="List options" class="icon-btn"><svg viewBox="0 0 24 24"><path d="M5 7h14M5 12h14M5 17h14"></path></svg></button>
+</div>
+<div class="result-tabs">
+<button class="result-tab active" data-result-tab="all">All <span>14</span></button><button class="result-tab" data-result-tab="blocked">Blocking <span>3</span></button><button class="result-tab" data-result-tab="ready">Ready <span>2</span></button><button class="result-tab" data-result-tab="review">In review <span>2</span></button><button class="result-tab" data-result-tab="published">Published <span>8</span></button>
+<span class="tabs-spacer"></span><button class="shortcut-help"><kbd>J</kbd><kbd>K</kbd> navigate <kbd>C</kbd> checks <kbd>O</kbd> open</button>
+</div>
+<div class="bulkbar" id="bulkbar"><b><span id="selected-count">2</span> selected</b><button class="bulk-action" data-bulk="assigned an owner"><svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"></circle><path d="M4 21c1.2-4.2 3.9-6 8-6s6.8 1.8 8 6"></path></svg>Assign</button><button class="bulk-action" data-bulk="queued for readiness checks"><svg viewBox="0 0 24 24"><path d="m5 12 4 4 10-10"></path></svg>Run checks</button><button class="bulk-action" data-bulk="prepared for snapshot creation"><svg viewBox="0 0 24 24"><path d="M4 5h16v14H4z"></path><path d="M8 9h8M8 13h5"></path></svg>Create snapshot</button><button class="bulk-action" data-bulk="exported as versioned handoff manifests"><svg viewBox="0 0 24 24"><path d="M12 16V4"></path><path d="m8 8 4-4 4 4"></path><path d="M5 13v7h14v-7"></path></svg>Export handoff</button><button class="bulk-action danger" data-bulk="archived"><svg viewBox="0 0 24 24"><path d="M4 7h16M6 7v13h12V7M9 11h6"></path></svg>Archive</button><span class="spacer"></span><button class="text-btn clear-selected" id="clear-selected">Clear</button></div>
+
+<div class="publish-list">
+<article class="publish-row selected active-preview blocked-row" data-id="PUB-0421" data-state="blocked checksfailed" data-title="Open model release comparison — v0.4" tabindex="0">
+<label class="row-check"><input aria-label="Select PUB-0421" checked type="checkbox"/></label><div class="package-icon page"><span>PUB</span><small>PAGE</small><i class="package-mark blocked">3</i></div><div class="row-main"><div class="row-top"><span class="package-badge page">RESEARCH PAGE</span><h3>Open model release comparison — v0.4</h3></div><div class="package-context-line"><b>Open model evidence</b><i>·</i>public website /research/open-models<i>·</i>draft DRF-0084</div><p>7 sections · 24 accepted claims · 86 evidence objects · 112 exact citations · 4 media assets</p><div class="row-chips"><span class="chip red">3 blockers</span><span class="chip purple">Snapshot stale</span><span class="chip blue">19 / 22 checks</span><span class="chip teal">61 captures pinned</span></div><div class="package-progress"><div class="mini-bar"><span style="width:86%"></span></div><small class="block">86% ready · evidence changed after snapshot</small></div></div><div class="row-side"><span class="state-pill checksfailed">Checks failed</span><div class="side-line"><span class="priority high"></span>Blocking</div><div class="side-line">Owner PR</div><div class="side-line muted">Updated 8m ago</div></div>
+</article>
+<article class="publish-row selected ready-row" data-id="PUB-0437" data-state="ready" data-title="Qwen3-32B benchmark evidence pack — 2026-06-20" tabindex="0">
+<label class="row-check"><input aria-label="Select PUB-0437" checked type="checkbox"/></label><div class="package-icon bundle"><span>EXP</span><small>ZIP</small><i class="package-mark ready">✓</i></div><div class="row-main"><div class="row-top"><span class="package-badge bundle">EXPORT / REUSE BUNDLE</span><h3>Qwen3-32B benchmark evidence pack — 2026-06-20</h3></div><div class="package-context-line"><b>Open model evidence</b><i>·</i>editorial + JSON/Markdown export<i>·</i>package v1.0</div><p>3 sections · 18 reviewed claims · 42 evidence objects · 55 citations · 2 benchmark tables</p><div class="row-chips"><span class="chip green">22 / 22 checks</span><span class="chip teal">Version-pinned</span><span class="chip blue">Ready for snapshot</span></div><div class="package-progress"><div class="mini-bar"><span style="width:100%"></span></div><small>All required checks pass</small></div></div><div class="row-side"><span class="state-pill ready">Ready</span><div class="side-line"><span class="priority medium"></span>High priority</div><div class="side-line">Owner MC</div><div class="side-line muted">Updated 24m ago</div></div>
+</article>
+<article class="publish-row returned-row" data-id="PUB-0414" data-state="review changes" data-title="Open-weight licensing matrix — editorial handoff" tabindex="0">
+<label class="row-check"><input aria-label="Select PUB-0414" type="checkbox"/></label><div class="package-icon compare"><span>CMP</span><small>TABLE</small><i class="package-mark returned">↩</i></div><div class="row-main"><div class="row-top"><span class="package-badge compare">COMPARISON TABLE</span><h3>Open-weight licensing matrix — editorial handoff</h3></div><div class="package-context-line"><b>Licensing research</b><i>·</i>review RVW-2390<i>·</i>snapshot SNP-1077</div><p>12 entities · 38 claim cells · 49 citations · reviewer requested two capture-anchor corrections</p><div class="row-chips"><span class="chip amber">Changes requested</span><span class="chip red">2 citation fixes</span><span class="chip purple">Snapshot v2</span></div><div class="package-progress"><div class="mini-bar"><span style="width:89%"></span></div><small>16 / 18 checks pass</small></div></div><div class="row-side"><span class="state-pill changes">Changes requested</span><div class="side-line"><span class="priority high"></span>High priority</div><div class="side-line">Reviewer LN</div><div class="side-line muted">Returned 31m ago</div></div>
+</article>
+<article class="publish-row" data-id="PUB-0440" data-state="assembling" data-title="Model launch timeline — 2026 Q2" tabindex="0">
+<label class="row-check"><input aria-label="Select PUB-0440" type="checkbox"/></label><div class="package-icon timeline"><span>TL</span><small>PAGE</small><i class="package-mark assembling">…</i></div><div class="row-main"><div class="row-top"><span class="package-badge timeline">TIMELINE PAGE</span><h3>Model launch timeline — 2026 Q2</h3></div><div class="package-context-line"><b>Launch tracking</b><i>·</i>draft DRF-0092<i>·</i>public website candidate</div><p>29 dated events · 64 captures · 11 accepted claims · 4 open questions · 3 missing event dates</p><div class="row-chips"><span class="chip purple">Assembling</span><span class="chip amber">3 incomplete events</span><span class="chip blue">12 / 18 checks</span></div><div class="package-progress"><div class="mini-bar"><span style="width:67%"></span></div><small>Manifest remains mutable</small></div></div><div class="row-side"><span class="state-pill assembling">Assembling</span><div class="side-line"><span class="priority normal"></span>Normal</div><div class="side-line">Owner JL</div><div class="side-line muted">Updated 1h ago</div></div>
+</article>
+<article class="publish-row ready-row" data-id="PUB-0398" data-state="review approved" data-title="Qwen Team research profile — snapshot v1.3" tabindex="0">
+<label class="row-check"><input aria-label="Select PUB-0398" type="checkbox"/></label><div class="package-icon profile"><span>ENT</span><small>PAGE</small><i class="package-mark approved">✓</i></div><div class="row-main"><div class="row-top"><span class="package-badge profile">ENTITY PROFILE</span><h3>Qwen Team research profile — snapshot v1.3</h3></div><div class="package-context-line"><b>Entity Qwen Team</b><i>·</i>SNP-1091<i>·</i>manifest 773d…9a21</div><p>15 accepted facts · 9 relations · 31 evidence objects · 42 citations · approval bound to snapshot</p><div class="row-chips"><span class="chip blue">Snapshot approved</span><span class="chip green">22 / 22 checks</span><span class="chip teal">Handoff ready</span></div><div class="package-progress"><div class="mini-bar"><span style="width:100%"></span></div><small>Approved snapshot is immutable</small></div></div><div class="row-side"><span class="state-pill approved">Approved</span><div class="side-line"><span class="priority normal"></span>Complete</div><div class="side-line">Reviewer MK</div><div class="side-line muted">Approved 2h ago</div></div>
+</article>
+<article class="publish-row blocked-row" data-id="PUB-0442" data-state="blocked checksfailed" data-title="Benchmark methodology and comparability appendix" tabindex="0">
+<label class="row-check"><input aria-label="Select PUB-0442" type="checkbox"/></label><div class="package-icon appendix"><span>BRF</span><small>PDF</small><i class="package-mark blocked">2</i></div><div class="row-main"><div class="row-top"><span class="package-badge appendix">BENCHMARK BRIEF</span><h3>Benchmark methodology and comparability appendix</h3></div><div class="package-context-line"><b>Benchmark methods</b><i>·</i>editorial PDF handoff<i>·</i>draft DRF-0095</div><p>8 benchmark versions · 23 result rows · 2 unsupported rows · 1 stale evidence link</p><div class="row-chips"><span class="chip red">2 blockers</span><span class="chip amber">1 stale source</span><span class="chip purple">Methodology gate</span></div><div class="package-progress"><div class="mini-bar"><span style="width:78%"></span></div><small class="block">14 / 18 checks pass</small></div></div><div class="row-side"><span class="state-pill checksfailed">Checks failed</span><div class="side-line"><span class="priority high"></span>Blocking</div><div class="side-line">Owner PR</div><div class="side-line muted">Due today</div></div>
+</article>
+<article class="publish-row published-row" data-id="PUB-0332" data-state="published" data-title="Open model evidence briefing — May 2026" tabindex="0">
+<label class="row-check"><input aria-label="Select PUB-0332" type="checkbox"/></label><div class="package-icon published"><span>PUB</span><small>v1.2</small><i class="package-mark published">✓</i></div><div class="row-main"><div class="row-top"><span class="package-badge published">PUBLISHED RELEASE</span><h3>Open model evidence briefing — May 2026</h3></div><div class="package-context-line"><b>Public site release REL-0188</b><i>·</i>snapshot SNP-0992<i>·</i>manifest 11be…02d7</div><p>Immutable release · 102 citations · 58 captures · public provenance links resolve to preserved artifacts</p><div class="row-chips"><span class="chip green">Published</span><span class="chip teal">Snapshot retained</span><span class="chip blue">Public trace enabled</span></div><div class="package-progress"><div class="mini-bar"><span style="width:100%"></span></div><small>Released 2026-05-29</small></div></div><div class="row-side"><span class="state-pill published">Published</span><div class="side-line"><span class="priority normal"></span>Immutable</div><div class="side-line">Release PR</div><div class="side-line muted">22d ago</div></div>
+</article>
+</div>
+<div class="results-foot"><span>Showing 7 of 14 packages · approvals and publication always reference a frozen snapshot</span><span class="spacer"></span><button class="page-btn active">1</button><button class="page-btn">2</button><button class="page-btn">›</button></div>
+</section>
+
+<aside aria-label="Publication package detail" class="preview publish-preview open">
+<div class="preview-head"><div><h2>Publication package</h2><span id="preview-id">PUB-0421 · mutable package manifest</span></div><span class="spacer"></span><span class="preview-state checksfailed" id="preview-state">CHECKS FAILED</span><button aria-label="Close preview" class="close-preview">×</button></div>
+<div class="preview-tabs" role="tablist"><button class="preview-tab active" data-panel="readiness">Readiness</button><button class="preview-tab" data-panel="contents">Contents</button><button class="preview-tab" data-panel="citations">Citations</button><button class="preview-tab" data-panel="snapshot">Snapshot</button><button class="preview-tab" data-panel="handoff">Handoff</button><button class="preview-tab" data-panel="history">History</button></div>
+<div class="preview-body">
+<section class="preview-panel active" data-preview-panel="readiness"><div class="preview-scroll">
+<div class="detail-card publish-summary"><div class="summary-kickers"><span class="layer-badge package">MUTABLE PACKAGE</span><span class="layer-badge blocked">3 BLOCKERS</span></div><h3 id="preview-title">Open model release comparison — v0.4</h3><p>The package assembles reviewed object versions and exact citations. Its stale snapshot cannot be approved or published until the manifest is frozen again.</p><div class="detail-meta-grid"><div><span>TARGET</span><b>Public research website</b></div><div><span>OWNER</span><b>Pierre Roy</b></div><div><span>DRAFT REVISION</span><b>DRF-0084 v19</b></div><div><span>DUE</span><b>Today · 18:00 UTC</b></div></div></div>
+<div class="detail-card"><div class="section-head"><h4>Snapshot readiness</h4><button class="text-btn" data-toast="Readiness policy opened">Policy</button></div><div class="readiness-meter"><div class="readiness-score"><div><b>86%</b><span>READY</span></div></div><div class="readiness-copy"><b>19 of 22 checks pass</b><span>Last run 8 minutes ago · policy PUB-WEB-v3</span></div><span class="blocker-count">3 BLOCKERS</span></div></div>
+<div class="detail-card"><div class="section-head"><h4>Blocking and required checks</h4><button class="text-btn" data-toast="All 22 check results opened">View all</button></div>
+<div class="publish-check pass"><i>✓</i><div><b>Accepted claims are version-pinned</b><span>24 assertions reference reviewed versions and explicit scopes</span></div><em>PASS</em></div>
+<div class="publish-check pass"><i>✓</i><div><b>Exact source anchors resolve</b><span>111 citations resolve to immutable capture artifacts</span></div><em>PASS</em></div>
+<div class="publish-check block"><i>×</i><div><b>Two claims changed after the last snapshot</b><span>CLM-094 and CLM-107 have newer accepted assertion versions</span></div><em>BLOCK</em></div>
+<div class="publish-check block"><i>×</i><div><b>Comparison row lacks an independent source</b><span>Context-window row currently uses vendor documentation only</span></div><em>BLOCK</em></div>
+<div class="publish-check block"><i>×</i><div><b>One citation points to a live URL</b><span>Section 4 citation 17 must target capture CAP-771C, not the live page</span></div><em>BLOCK</em></div>
+</div>
+<div class="detail-card"><div class="section-head"><h4>Package layers</h4><span class="source-state">BOUNDARIES PRESERVED</span></div><div class="layer-stack">
+<div class="publish-layer draft"><i>DRF</i><div><b>Draft revision DRF-0084 v19</b><span>Mutable narrative and section order</span></div><em>MUTABLE</em></div>
+<div class="publish-layer curated"><i>CUR</i><div><b>Curated claims and evidence</b><span>24 claims · 86 evidence · individually reviewed</span></div><em>PINNED</em></div>
+<div class="publish-layer package current"><i>PKG</i><div><b>Package manifest PUB-0421 v12</b><span>Sections, citations, media, target and visibility rules</span></div><em>CURRENT</em></div>
+<div class="publish-layer snapshot stale"><i>SNP</i><div><b>Snapshot candidate SNP-1104</b><span>Manifest no longer matches current reviewed objects</span></div><em>STALE</em></div>
+<div class="publish-layer handoff"><i>WEB</i><div><b>Website/content handoff</b><span>Not generated until an approved snapshot exists</span></div><em>WAITING</em></div>
+</div></div>
+<div class="detail-card"><div class="section-head"><h4>Manifest composition</h4></div><div class="manifest-strip"><div class="manifest-stat"><b>7</b><span>sections</span><em>draft v19</em></div><div class="manifest-stat"><b>24</b><span>accepted claims</span><em>version-pinned</em></div><div class="manifest-stat"><b>86</b><span>evidence objects</span><em>reviewed</em></div><div class="manifest-stat"><b>112</b><span>citations</span><em>111 resolve</em></div><div class="manifest-stat"><b>61</b><span>captures</span><em>immutable</em></div><div class="manifest-stat"><b>4</b><span>media assets</span><em>licensed</em></div></div></div>
+</div></section>
+
+<section class="preview-panel" data-preview-panel="contents"><div class="preview-scroll">
+<div class="detail-card"><div class="section-head"><h4>Package outline</h4><button class="text-btn" data-toast="Package editor opened">Edit package</button></div><div class="contents-tree">
+<div class="content-row"><i>01</i><div><b>Release landscape</b><span>4 accepted claims · 13 citations · 2 entities</span></div><em>READY</em></div>
+<div class="content-row"><i>02</i><div><b>Model and provider comparison</b><span>9 claims · 42 evidence objects · comparison CMP-014</span></div><em>READY</em></div>
+<div class="content-row"><i>03</i><div><b>Benchmark results</b><span>6 claims · 2 tables · methodology qualifiers retained</span></div><em>READY</em></div>
+<div class="content-row"><i>04</i><div><b>Context-window claims</b><span>3 claims · 1 disputed scope · independent source missing</span></div><em style="color:#ad3942">BLOCKED</em></div>
+<div class="content-row"><i>05</i><div><b>Licensing and reuse</b><span>2 claims · 17 citations · license snapshots</span></div><em>READY</em></div>
+<div class="content-row"><i>06</i><div><b>Known limitations</b><span>Project Brief limitations + unresolved evidence gaps</span></div><em>READY</em></div>
+<div class="content-row"><i>07</i><div><b>Source trail</b><span>Generated from the frozen citation and capture manifest</span></div><em>DERIVED</em></div>
+</div></div>
+<div class="detail-card"><div class="section-head"><h4>Example evidence-linked section</h4></div><div class="section-trace"><div class="section-trace-head"><b>03 · Benchmark results</b><span>6 claims · 29 citations</span></div><div class="trace-line"><span>CLM-084</span><b>Qwen3-32B scored 78.4 on MMLU-Pro under the stated five-shot harness</b><em class="ok">4 SOURCES</em></div><div class="trace-line"><span>EV-145</span><b>Technical report table 2 · p. 6 · exact cell B4</b><em class="ok">PINNED</em></div><div class="trace-line"><span>CIT-031</span><b>CAP-91D2 · pdf bbox [336,411,408,438]</b><em class="ok">RESOLVES</em></div></div></div>
+</div></section>
+
+<section class="preview-panel" data-preview-panel="citations"><div class="preview-scroll">
+<div class="detail-card"><div class="section-head"><h4>Citation and provenance checks</h4><span class="fact-warning">1 BLOCKER</span></div>
+<div class="citation-row"><i>PDF</i><div><b>CIT-031 · Technical report table 2</b><span>CAP-91D2 · page 6 · bbox · SHA-256 5c2f…aa91</span></div><em class="pass">RESOLVES</em></div>
+<div class="citation-row"><i>GH</i><div><b>CIT-044 · tokenizer.py lines 118–147</b><span>commit 4d91c7a · repository path and lines pinned</span></div><em class="pass">RESOLVES</em></div>
+<div class="citation-row"><i>X</i><div><b>CIT-062 · launch thread post 4 of 9</b><span>platform post id + capture CAP-70A2 + media artifact</span></div><em class="pass">RESOLVES</em></div>
+<div class="citation-row"><i>WEB</i><div><b>CIT-017 · provider context-window documentation</b><span>Currently references live URL; capture CAP-771C exists</span></div><em class="block">REPAIR</em></div>
+<div class="citation-row"><i>VID</i><div><b>CIT-088 · interview transcript 12:43–13:18</b><span>media hash + time range + transcript tokens</span></div><em class="pass">RESOLVES</em></div>
+</div>
+<button class="open-workbench" data-toast="Opening CIT-017 at capture CAP-771C in Source Workbench"><svg viewBox="0 0 24 24"><path d="M4 5h16v14H4z"></path><path d="m7 14 3-3 2 2 4-5 2 2"></path></svg><span><b>Repair citation in Source Workbench</b><small>Open the immutable capture and select the exact anchor</small></span><span class="arrow">→</span></button>
+</div></section>
+
+<section class="preview-panel" data-preview-panel="snapshot"><div class="preview-scroll">
+<div class="detail-card snapshot-card"><div class="snapshot-head"><h4>Snapshot candidate SNP-1104</h4><span class="snapshot-state">STALE</span></div><div class="snapshot-hash">manifest_sha256: 91f0c72d8d5a…c2e8<br/>created_from: PUB-0421 v10<br/>created_at: 2026-06-20T16:44:19Z<br/>object_versions: 176</div><p class="snapshot-note"><b>Material change detected:</b> accepted assertions CLM-094 v8 and CLM-107 v4 differ from the versions frozen in this snapshot. Approval is disabled.</p></div>
+<div class="detail-card"><div class="section-head"><h4>Snapshot rules</h4></div><div class="simple-list"><div><span>Frozen inputs</span><b>Draft, claims, evidence, entities, taxonomy, captures</b></div><div><span>Approval scope</span><b>One immutable snapshot ID and manifest hash</b></div><div><span>Material edit</span><b>Creates a new candidate and invalidates prior approval</b></div><div><span>Serving source</span><b>Approved snapshot projection only</b></div></div></div>
+<button class="open-workbench" data-toast="Comparing stale snapshot SNP-1104 with package PUB-0421 v12"><svg viewBox="0 0 24 24"><path d="M8 4H4v16h4M16 4h4v16h-4M10 8h4M10 12h4M10 16h4"></path></svg><span><b>Compare snapshot to current package</b><small>Review all object-version and content changes</small></span><span class="arrow">→</span></button>
+</div></section>
+
+<section class="preview-panel" data-preview-panel="handoff"><div class="preview-scroll">
+<div class="detail-card"><div class="section-head"><h4>Configured handoff targets</h4><button class="text-btn" data-toast="Handoff target settings opened">Configure</button></div><div class="handoff-grid"><div class="handoff-card"><b>Public website</b><span>Structured page payload, citation manifest, public source trail</span><em>PRIMARY</em></div><div class="handoff-card"><b>Editorial package</b><span>Markdown, assets, provenance report, review summary</span><em>AVAILABLE</em></div><div class="handoff-card"><b>Data export</b><span>JSON-LD claim/evidence bundle with stable identifiers</span><em>AVAILABLE</em></div><div class="handoff-card"><b>Research archive</b><span>Snapshot manifest, checks, audit and source references</span><em>REQUIRED</em></div></div></div>
+<div class="detail-card"><div class="section-head"><h4>Handoff gate</h4></div><div class="publish-check block"><i>×</i><div><b>No approved current snapshot</b><span>Resolve blockers, create a new snapshot, and complete formal review</span></div><em>WAITING</em></div><div class="publish-check pass"><i>✓</i><div><b>Target schema is valid</b><span>Website page schema v4 and export schema v2 are compatible</span></div><em>PASS</em></div><div class="publish-check pass"><i>✓</i><div><b>Public visibility rules are resolved</b><span>Private notes and restricted artifacts are excluded</span></div><em>PASS</em></div></div>
+</div></section>
+
+<section class="preview-panel" data-preview-panel="history"><div class="preview-scroll">
+<div class="detail-card"><div class="section-head"><h4>Package, review, and release history</h4></div>
+<div class="publish-event"><span class="act-icon">PR</span><div><b>Package manifest updated to v12</b><span>Added claim CLM-107 and changed section 4 · 8m ago</span></div><em class="event-chip audit">AUDIT</em></div>
+<div class="publish-event"><span class="act-icon model">✓</span><div><b>Readiness checks completed</b><span>19 pass · 3 block · run CHK-6671</span></div><em class="event-chip audit">AUDIT</em></div>
+<div class="publish-event"><span class="act-icon amber">S</span><div><b>Snapshot SNP-1104 created</b><span>Package v10 · manifest 91f0…c2e8</span></div><em class="event-chip snapshot">SNAPSHOT</em></div>
+<div class="publish-event"><span class="act-icon">MC</span><div><b>Snapshot review requested</b><span>RVW-2387 · later invalidated by material change</span></div><em class="event-chip review">REVIEW</em></div>
+<div class="publish-event"><span class="act-icon amber">!</span><div><b>Approval invalidated</b><span>Accepted claim versions changed after snapshot creation</span></div><em class="event-chip review">REVIEW</em></div>
+<div class="publish-event"><span class="act-icon">WEB</span><div><b>Previous release v0.3 published</b><span>REL-0183 · SNP-1042 · 2026-06-02</span></div><em class="event-chip publish">RELEASE</em></div>
+</div></div></section>
+</div>
+<div class="decision-bar"><button class="decision" data-action="opened in package editor"><kbd>O</kbd>Open package</button><button class="decision run" data-action="queued for readiness checks"><kbd>C</kbd>Run checks</button><button class="decision fixes" data-action="returned to owners with blocker details"><kbd>X</kbd>Request fixes</button><button class="decision primary resolve" data-action="opened the three blocking checks"><kbd>B</kbd>Resolve 3 blockers</button></div>
+</aside>
+</section>
+</main>
+</div>
+</div>
+<div aria-live="polite" class="toast" role="status"></div>
+<script>
+(() => {
+ const toast=document.querySelector('.toast'); let timer;
+ const show=m=>{toast.textContent=m;toast.classList.add('show');clearTimeout(timer);timer=setTimeout(()=>toast.classList.remove('show'),2400)};
+ document.querySelectorAll('[data-toast]').forEach(x=>x.addEventListener('click',()=>show(x.dataset.toast)));
+ const explanations={Exact:'<b>Exact match:</b> package titles, section text, identifiers, target routes, snapshot hashes, and citation metadata.',Semantic:'<b>Semantic match:</b> conceptually related package sections, linked claims, evidence, citation context, and handoff purpose.',Hybrid:'<b>Hybrid match:</b> package titles and sections plus linked claim text, citation anchors, snapshot manifests, and handoff metadata.'};
+ document.querySelectorAll('.mode-btn').forEach(b=>b.addEventListener('click',()=>{document.querySelectorAll('.mode-btn').forEach(x=>x.classList.remove('active'));b.classList.add('active');document.getElementById('search-explain').innerHTML=explanations[b.dataset.mode]}));
+ document.querySelector('.clear').addEventListener('click',()=>{document.getElementById('publish-query').value='';document.getElementById('publish-query').focus()});
+ document.querySelectorAll('.saved-item').forEach(q=>q.addEventListener('click',()=>{document.querySelectorAll('.saved-item').forEach(x=>x.classList.remove('active'));q.classList.add('active');show('Publishing queue loaded; package selection and preview remain URL-addressable')}));
+ const rows=[...document.querySelectorAll('.publish-row')]; const preview=document.querySelector('.publish-preview');
+ function meta(s){if(s.includes('blocked'))return['checksfailed','CHECKS FAILED','mutable package manifest'];if(s.includes('published'))return['published','PUBLISHED','frozen release snapshot'];if(s.includes('approved'))return['approved','SNAPSHOT APPROVED','approved snapshot'];if(s.includes('changes'))return['changes','CHANGES REQUESTED','snapshot review'];if(s.includes('ready'))return['ready','READY FOR SNAPSHOT','mutable package manifest'];if(s.includes('review'))return['assembling','IN REVIEW','snapshot review'];return['assembling','ASSEMBLING','mutable package manifest']}
+ function select(row){rows.forEach(r=>r.classList.remove('active-preview'));row.classList.add('active-preview');preview.classList.add('open');const [c,l,d]=meta(row.dataset.state||'assembling');document.getElementById('preview-id').textContent=row.dataset.id+' · '+d;document.getElementById('preview-title').textContent=row.dataset.title;const p=document.getElementById('preview-state');p.className='preview-state '+c;p.textContent=l}
+ rows.forEach(r=>{r.addEventListener('click',e=>{if(!e.target.closest('input'))select(r)});r.addEventListener('keydown',e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();select(r)}})});
+ const boxes=[...document.querySelectorAll('.row-check input')],bar=document.getElementById('bulkbar'),count=document.getElementById('selected-count');
+ function update(){const s=boxes.filter(x=>x.checked);count.textContent=s.length;bar.classList.toggle('hidden',!s.length);rows.forEach((r,i)=>r.classList.toggle('selected',boxes[i].checked))}
+ boxes.forEach(x=>x.addEventListener('change',update));document.getElementById('master-check').addEventListener('change',e=>{boxes.forEach(x=>x.checked=e.target.checked);update()});document.getElementById('clear-selected').addEventListener('click',()=>{boxes.forEach(x=>x.checked=false);document.getElementById('master-check').checked=false;update()});document.querySelectorAll('[data-bulk]').forEach(b=>b.addEventListener('click',()=>show(boxes.filter(x=>x.checked).length+' compatible packages '+b.dataset.bulk+'; per-package outcomes retained')));
+ document.querySelectorAll('.preview-tab').forEach(t=>t.addEventListener('click',()=>{document.querySelectorAll('.preview-tab').forEach(x=>x.classList.remove('active'));document.querySelectorAll('.preview-panel').forEach(x=>x.classList.remove('active'));t.classList.add('active');document.querySelector('[data-preview-panel="'+t.dataset.panel+'"]').classList.add('active')}));
+ document.querySelectorAll('[data-action]').forEach(b=>b.addEventListener('click',()=>show((document.querySelector('.publish-row.active-preview')?.dataset.id||'Package')+' '+b.dataset.action)));
+ function visible(){return rows.filter(r=>r.style.display!=='none')} function move(d){const v=visible(),i=v.findIndex(r=>r.classList.contains('active-preview')),n=v[Math.max(0,Math.min(v.length-1,(i<0?0:i)+d))];if(n){select(n);n.focus();n.scrollIntoView({block:'nearest'})}}
+ document.querySelectorAll('.result-tab').forEach(t=>t.addEventListener('click',()=>{document.querySelectorAll('.result-tab').forEach(x=>x.classList.remove('active'));t.classList.add('active');const m=t.dataset.resultTab;rows.forEach(r=>r.style.display=m==='all'||(r.dataset.state||'').includes(m)?'':'none')}));
+ document.getElementById('new-package').addEventListener('click',()=>show('New publication package created as a mutable draft; no snapshot exists yet'));
+ document.querySelector('.close-preview').addEventListener('click',()=>preview.classList.remove('open'));
+ document.addEventListener('keydown',e=>{if(['INPUT','TEXTAREA','SELECT'].includes(document.activeElement?.tagName))return;const k=e.key.toLowerCase();if(k==='j'){e.preventDefault();move(1)}if(k==='k'){e.preventDefault();move(-1)}if(k==='o'){e.preventDefault();show('Opening selected package editor')}if(k==='c'){e.preventDefault();show('Readiness checks queued against the current package version')}if(k==='b'){e.preventDefault();document.querySelector('[data-panel="readiness"]').click();show('Blocking checks focused')}if(k==='s'){e.preventDefault();show('Snapshot creation requires all blocking checks to pass')}if(k==='r'){e.preventDefault();show('Snapshot review can be requested only for a current frozen manifest')}if(k==='e'){e.preventDefault();show('Versioned handoff export opened')}if(k==='h'){e.preventDefault();document.querySelector('[data-panel="history"]').click()}}); update();
+})();
+</script>
+</body>
+</html>

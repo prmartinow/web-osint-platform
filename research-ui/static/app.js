@@ -65,6 +65,15 @@ const state = {
   publishingRows: [],
   publishingSelectedId: '',
   publishingPreviewTab: 'readiness',
+  sidebarCollapsed: localStorage.getItem('web-osint-sidebar-collapsed') === '1',
+  taxonomyQueue: 'proposed_terms',
+  taxonomyVocabulary: '',
+  taxonomyReviewState: '',
+  taxonomySearchMode: 'hybrid',
+  taxonomySelectedId: '',
+  taxonomySelectedIds: new Set(),
+  taxonomyPreviewTab: 'overview',
+  taxonomyRows: [],
 };
 
 const $ = (id) => document.getElementById(id);
@@ -250,6 +259,17 @@ function applyHashParams() {
     const inspect = params.get('inspect') || '';
     state.publishingSelectedId = inspect.startsWith('bundle:') ? inspect.slice(7) : inspect;
   }
+  if (route === 'taxonomy') {
+    state.q = params.get('q') || state.q || '';
+    state.project = params.get('project') || state.project || '';
+    state.taxonomyQueue = params.get('queue') || state.taxonomyQueue || 'proposed_terms';
+    state.taxonomyVocabulary = params.get('vocabulary') || '';
+    state.taxonomyReviewState = params.get('review_state') || '';
+    state.taxonomySearchMode = params.get('mode') || state.taxonomySearchMode || 'hybrid';
+    state.taxonomyPreviewTab = params.get('tab') || state.taxonomyPreviewTab || 'overview';
+    const inspect = params.get('inspect') || '';
+    state.taxonomySelectedId = inspect.startsWith('taxonomy:') ? inspect.slice(9) : inspect;
+  }
 }
 
 function routeHash() {
@@ -314,6 +334,19 @@ function routeHash() {
     if (state.publishingPreviewTab && state.publishingPreviewTab !== 'readiness') params.set('tab', state.publishingPreviewTab);
     const query = params.toString();
     return `#publishing${query ? '?' + query : ''}`;
+  }
+  if (state.route === 'taxonomy') {
+    const params = new URLSearchParams();
+    if (state.q) params.set('q', state.q);
+    if (state.project) params.set('project', state.project);
+    if (state.taxonomyQueue && state.taxonomyQueue !== 'proposed_terms') params.set('queue', state.taxonomyQueue);
+    if (state.taxonomyVocabulary) params.set('vocabulary', state.taxonomyVocabulary);
+    if (state.taxonomyReviewState) params.set('review_state', state.taxonomyReviewState);
+    if (state.taxonomySearchMode && state.taxonomySearchMode !== 'hybrid') params.set('mode', state.taxonomySearchMode);
+    if (state.taxonomySelectedId) params.set('inspect', `taxonomy:${state.taxonomySelectedId}`);
+    if (state.taxonomyPreviewTab && state.taxonomyPreviewTab !== 'overview') params.set('tab', state.taxonomyPreviewTab);
+    const query = params.toString();
+    return `#taxonomy${query ? '?' + query : ''}`;
   }
   if (state.route !== 'library') return `#${state.route}`;
   const params = new URLSearchParams();
@@ -392,11 +425,23 @@ function setTheme(theme) {
   $('themeSwitch').setAttribute('aria-checked', theme === 'dark' ? 'true' : 'false');
 }
 
+function setSidebarCollapsed(collapsed) {
+  state.sidebarCollapsed = Boolean(collapsed);
+  document.body.classList.toggle('rail-collapsed', state.sidebarCollapsed);
+  localStorage.setItem('web-osint-sidebar-collapsed', state.sidebarCollapsed ? '1' : '0');
+  const toggle = $('sidebarToggle');
+  if (!toggle) return;
+  toggle.setAttribute('aria-expanded', state.sidebarCollapsed ? 'false' : 'true');
+  toggle.setAttribute('aria-label', state.sidebarCollapsed ? 'Open sidebar' : 'Close sidebar');
+  toggle.setAttribute('title', state.sidebarCollapsed ? 'Open sidebar' : 'Close sidebar');
+}
+
 function renderFacets(data) {
   state.facets = data;
   const totals = data.totals || {};
   $('totals').textContent = `${totals.unique_evidence ?? 0} unique sources · ${totals.evidence_rows ?? 0} rows · last ingest ${fmtDate(totals.last_ingested_at)}`;
   $('navInboxCount').textContent = totals.unique_evidence ?? 0;
+  if ($('pnavInboxCount')) $('pnavInboxCount').textContent = totals.unique_evidence ?? 0;
 
   const queues = data.queues || [];
   $('inboxQueueCount').textContent = queues.length;
@@ -4004,27 +4049,494 @@ function renderPublishingPage(data) {
   bindPublishingPage(data);
 }
 
+function taxonomyRecordKey(row) {
+  return row?.record_id || row?.stable_id || row?.term || '';
+}
+
+function taxonomyGlyph(row) {
+  const vocabulary = row?.vocabulary || '';
+  if (vocabulary === 'model_facets') return 'MOD';
+  if (vocabulary === 'claim_properties') return 'CLM';
+  if (vocabulary === 'benchmark_facets') return 'BEN';
+  if (vocabulary === 'entity_types') return 'ENT';
+  if (vocabulary === 'source_categories') return 'SRC';
+  if (vocabulary === 'evidence_types') return 'EVD';
+  if (vocabulary === 'review_reason_codes') return 'REV';
+  if (vocabulary === 'topics') return 'TOP';
+  return 'TAX';
+}
+
+function taxonomyStateLabel(stateValue) {
+  return {
+    accepted: 'Accepted',
+    proposed: 'Needs mapping',
+    mapping_conflict: 'Conflict',
+    under_review: 'Under review',
+    deprecated: 'Deprecated',
+  }[stateValue] || titleCase(stateValue || 'draft');
+}
+
+function taxonomyStateClass(stateValue) {
+  return {
+    accepted: 'ok',
+    proposed: 'warn',
+    mapping_conflict: 'danger',
+    under_review: 'info',
+    deprecated: '',
+  }[stateValue] || '';
+}
+
+function taxonomyUsageTokens(row) {
+  const usage = row.usage || {};
+  return [
+    ['observations', 'observations'],
+    ['evidence', 'evidence'],
+    ['claims', 'claims'],
+    ['projects', 'projects'],
+    ['packages', 'packages'],
+  ].filter(([key]) => Number(usage[key] || 0) > 0).map(([key, label]) => `
+    <span class="usage-token ${escapeHtml(key)}">${escapeHtml(usage[key])} ${escapeHtml(label)}</span>
+  `).join('');
+}
+
+function taxonomyQueueList(queues) {
+  return `
+    <section class="taxonomy-facet-section">
+      <div class="facet-title">My taxonomy work</div>
+      <div class="saved-list">
+        ${(queues || []).map((item) => `
+          <button class="saved-item ${state.taxonomyQueue === item.id ? 'active' : ''}" type="button" data-taxonomy-queue="${escapeHtml(item.id)}">
+            <span>${escapeHtml(item.label || item.id)}</span>
+            <strong class="${item.id === 'mapping_conflicts' || item.id === 'publication_impact' ? 'alert' : item.id === 'proposed_terms' ? 'amber' : ''}">${escapeHtml(item.count || 0)}</strong>
+          </button>
+        `).join('')}
+      </div>
+    </section>
+  `;
+}
+
+function taxonomyVocabularyList(vocabularies) {
+  return `
+    <section class="taxonomy-facet-section">
+      <div class="facet-title">Controlled vocabularies <span>${escapeHtml((vocabularies || []).length)} sets</span></div>
+      <button class="facet ${state.taxonomyVocabulary ? '' : 'active'}" type="button" data-taxonomy-vocabulary="">
+        <span>All controlled sets</span><strong>${escapeHtml((vocabularies || []).reduce((sum, item) => sum + Number(item.count || 0), 0))}</strong>
+      </button>
+      ${(vocabularies || []).map((item) => `
+        <button class="facet ${state.taxonomyVocabulary === item.id ? 'active' : ''}" type="button" data-taxonomy-vocabulary="${escapeHtml(item.id)}">
+          <span><span class="taxonomy-mini-icon">${escapeHtml((item.label || item.id).slice(0, 3).toUpperCase())}</span>${escapeHtml(item.label || item.id)}</span>
+          <strong>${escapeHtml(item.count || 0)}</strong>
+        </button>
+      `).join('')}
+    </section>
+  `;
+}
+
+function taxonomyHierarchyTree(nodes) {
+  return `
+    <section class="taxonomy-facet-section">
+      <div class="facet-title">Hierarchy <span>active branch</span></div>
+      <div class="taxonomy-tree">
+        ${(nodes || []).map((node) => `
+          <button class="taxonomy-tree-node depth-${escapeHtml(node.depth || 0)} ${node.active ? 'active' : ''} ${node.leaf ? 'leaf' : ''}" type="button" data-taxonomy-inspect="${escapeHtml(node.id || '')}">
+            <span>${node.leaf ? '-' : '+'}</span>
+            <strong>${escapeHtml(node.label || node.id)}</strong>
+            <em>${escapeHtml(node.count || 0)}</em>
+          </button>
+        `).join('')}
+      </div>
+    </section>
+  `;
+}
+
+function taxonomyStateFilters(facets) {
+  const states = facets?.review_states || [];
+  return `
+    <section class="taxonomy-facet-section">
+      <div class="facet-title">Term state</div>
+      <button class="facet ${state.taxonomyReviewState ? '' : 'active'}" type="button" data-taxonomy-state="">
+        <span>All states</span><strong>${escapeHtml(states.reduce((sum, item) => sum + Number(item.count || 0), 0))}</strong>
+      </button>
+      ${states.map((item) => `
+        <button class="facet ${state.taxonomyReviewState === item.id ? 'active' : ''}" type="button" data-taxonomy-state="${escapeHtml(item.id)}">
+          <span><i class="facet-dot ${escapeHtml(item.id)}"></i>${escapeHtml(item.label || item.id)}</span>
+          <strong>${escapeHtml(item.count || 0)}</strong>
+        </button>
+      `).join('')}
+    </section>
+  `;
+}
+
+function renderTaxonomyPreview(data) {
+  const preview = data.preview || {};
+  const row = preview.row || null;
+  if (!row) {
+    return `
+      <div class="empty-state">
+        <h2>Taxonomy Preview</h2>
+        <p>Select a term to inspect mappings, usage, policy, publication impact, and history.</p>
+      </div>
+    `;
+  }
+  const activeTab = ['overview', 'usage', 'mappings', 'publication', 'history'].includes(state.taxonomyPreviewTab) ? state.taxonomyPreviewTab : 'overview';
+  const tab = (id, label) => `<button class="${activeTab === id ? 'active' : ''}" type="button" data-taxonomy-preview-tab="${id}">${label}</button>`;
+  const sectionClass = (id) => `taxonomy-preview-section ${activeTab === id ? 'active' : ''}`;
+  const policy = preview.policy || {};
+  return `
+    <div class="taxonomy-preview-head">
+      <span class="taxonomy-glyph">${escapeHtml(taxonomyGlyph(row))}</span>
+      <div>
+        <h2>${escapeHtml(row.term || 'Taxonomy term')}</h2>
+        <p>${escapeHtml([row.vocabulary_label, row.hierarchy_path, row.stable_id].filter(Boolean).join(' / '))}</p>
+      </div>
+      <span class="status-badge ${escapeHtml(taxonomyStateClass(row.review_state))}">${escapeHtml(taxonomyStateLabel(row.review_state))}</span>
+    </div>
+    <nav class="taxonomy-preview-tabs" aria-label="Taxonomy preview sections">
+      ${tab('overview', 'Overview')}
+      ${tab('usage', 'Usage')}
+      ${tab('mappings', 'Mappings')}
+      ${tab('publication', 'Publication')}
+      ${tab('history', 'History')}
+    </nav>
+    <section class="${sectionClass('overview')}" data-taxonomy-preview-section="overview">
+      <article class="taxonomy-preview-card">
+        <h4>Definition</h4>
+        <p>${escapeHtml(row.definition || 'No definition available.')}</p>
+      </article>
+      <article class="taxonomy-preview-card">
+        <h4>Aliases and observed labels</h4>
+        <div class="tag-line">${(row.aliases || []).map((alias) => `<span class="pill">${escapeHtml(alias)}</span>`).join('') || '<span class="muted">No aliases recorded.</span>'}</div>
+      </article>
+      <div class="taxonomy-policy-grid">
+        <span>Lifecycle</span><strong>${escapeHtml(row.lifecycle_state || '')}</strong>
+        <span>Owner</span><strong>${escapeHtml(row.owner || '')}</strong>
+        <span>Priority</span><strong>${escapeHtml(row.priority || '')}</strong>
+        <span>Publication safe</span><strong class="${policy.publication_safe === false ? 'warn' : ''}">${escapeHtml(policy.publication_safe === false ? 'No' : 'Yes / not restricted')}</strong>
+        <span>Required qualifier</span><strong>${escapeHtml(policy.required_qualifier || 'No required qualifier recorded')}</strong>
+      </div>
+    </section>
+    <section class="${sectionClass('usage')}" data-taxonomy-preview-section="usage">
+      <div class="taxonomy-usage-strip">
+        ${(preview.usage_stats || []).map((item) => `
+          <article><strong>${escapeHtml(item.value || 0)}</strong><span>${escapeHtml(item.label)}</span><em>${escapeHtml(item.hint || '')}</em></article>
+        `).join('')}
+      </div>
+      <article class="taxonomy-preview-card">
+        <h4>Source anchors</h4>
+        ${(preview.anchors || []).map((item) => `
+          <p><strong>${escapeHtml(item.label || item.source_kind || '')}</strong><br>${escapeHtml(item.count || 0)} captured source${Number(item.count || 0) === 1 ? '' : 's'}</p>
+        `).join('') || '<p class="muted">No source anchors are linked yet.</p>'}
+      </article>
+    </section>
+    <section class="${sectionClass('mappings')}" data-taxonomy-preview-section="mappings">
+      <article class="taxonomy-preview-card">
+        <h4>Mapping candidates</h4>
+        ${(preview.mapping_candidates || []).map((item) => `
+          <div class="taxonomy-mapping-row">
+            <span>${escapeHtml(Math.round(Number(item.confidence || 0) * 100))}%</span>
+            <div><strong>${escapeHtml(item.term || '')}</strong><p>${escapeHtml([item.stable_id, item.relation].filter(Boolean).join(' / '))}</p></div>
+          </div>
+        `).join('') || '<p class="muted">No mapping candidates recorded.</p>'}
+      </article>
+    </section>
+    <section class="${sectionClass('publication')}" data-taxonomy-preview-section="publication">
+      <article class="taxonomy-preview-card">
+        <h4>Publication impact</h4>
+        ${(preview.publication_impacts || []).map((item) => `
+          <div class="taxonomy-impact-row ${item.state === 'blocking' ? 'blocking' : ''}">
+            <strong>${escapeHtml(item.label || '')}</strong>
+            <span>${escapeHtml(item.count || 0)}</span>
+            <p>${escapeHtml(item.detail || '')}</p>
+          </div>
+        `).join('') || '<p class="muted">No publication impact recorded.</p>'}
+      </article>
+      <article class="taxonomy-preview-card">
+        <h4>Decision rule</h4>
+        <p>${escapeHtml(policy.decision_rule || policy.replacement || 'No decision policy recorded.')}</p>
+      </article>
+    </section>
+    <section class="${sectionClass('history')}" data-taxonomy-preview-section="history">
+      <article class="taxonomy-preview-card">
+        <h4>History</h4>
+        ${(preview.history || []).map((item) => `<p><strong>${escapeHtml(item.event_type || '')}</strong><br>${escapeHtml(fmtDate(item.created_at))} / ${escapeHtml(item.actor || '')}<br>${escapeHtml(item.detail || '')}</p>`).join('') || '<p class="muted">No history recorded.</p>'}
+      </article>
+    </section>
+    <label class="preview-note">Decision note
+      <input id="taxonomyDecisionNote" placeholder="Optional taxonomy rationale, mapping target, qualifier, or publication note">
+    </label>
+    <div id="taxonomyActionStatus" class="review-status muted"></div>
+    <div class="taxonomy-preview-actions">
+      <button class="secondary" data-taxonomy-action="assign_review">Assign</button>
+      <button class="secondary" data-taxonomy-action="add_alias">Add alias</button>
+      <button class="secondary" data-taxonomy-action="map">Map</button>
+      <button class="secondary" data-taxonomy-action="merge">Merge</button>
+      <button class="secondary" data-taxonomy-action="deprecate">Deprecate</button>
+      <button data-taxonomy-action="promote">Promote</button>
+    </div>
+  `;
+}
+
 function renderTaxonomyPage(data) {
-  const core = data.core || {};
-  const usage = data.usage || {};
-  const group = (title, terms, used = []) => `
-    <section class="panel page-panel">
-      <div class="panel-title-row"><h2>${escapeHtml(title)}</h2><span class="status-badge">controlled terms</span></div>
-      <div class="chip-cloud">${(terms || []).map((term) => {
-        const hit = (used || []).find((row) => row.term === term);
-        return `<span class="entity-chip"><strong>${escapeHtml(term)}</strong><em>${escapeHtml(hit?.usage ?? 0)} uses</em></span>`;
-      }).join('')}</div>
-    </section>
-  `;
+  const rows = data.rows || data.results?.rows || [];
+  state.taxonomyRows = rows;
+  if (!state.taxonomySelectedId || !rows.some((row) => taxonomyRecordKey(row) === state.taxonomySelectedId)) {
+    state.taxonomySelectedId = data.preview?.row ? taxonomyRecordKey(data.preview.row) : (rows[0] ? taxonomyRecordKey(rows[0]) : '');
+  }
+  const summary = data.summary || {};
+  const query = data.query || {};
+  const activeQueueLabel = (data.queues || []).find((item) => item.id === state.taxonomyQueue)?.label || 'Taxonomy work';
   $('routePage').innerHTML = `
-    ${pageHeader('Taxonomy', 'Governed labels for entities, evidence, claim properties, and review reasons.')}
-    <section class="page-two-col">
-      ${group('Entity types', core.entity_types, usage.entity_types)}
-      ${group('Claim properties', core.claim_properties, usage.claim_types)}
-      ${group('Evidence types', core.evidence_types, [])}
-      ${group('Review reason codes', core.review_reason_codes, [])}
+    ${pageHeader(
+      'Taxonomy',
+      'Govern controlled terms, aliases, mappings, and publication-safe vocabulary across the research corpus.',
+      `<button class="secondary" data-taxonomy-action="version_history">Version history</button><button class="secondary" data-taxonomy-action="import_mappings">Import mappings</button><button data-taxonomy-action="create_term">New term</button>`
+    )}
+    <section class="taxonomy-search-card panel">
+      <label class="taxonomy-search-main">
+        <span class="sr-only">Search taxonomy</span>
+        <input id="taxonomySearchInput" type="search" value="${escapeHtml(state.q)}" placeholder="Search terms, aliases, stable IDs, definitions, hierarchy paths...">
+      </label>
+      <div class="mode-toggle taxonomy-mode-toggle">
+        ${['exact', 'semantic', 'hybrid'].map((mode) => `<button class="mode-btn ${state.taxonomySearchMode === mode ? 'active' : ''}" type="button" data-taxonomy-mode="${mode}">${escapeHtml(titleCase(mode))}</button>`).join('')}
+      </div>
+      <select id="taxonomyVocabularySelect">
+        <option value="">Vocabulary: All controlled sets</option>
+        ${(data.vocabularies || []).map((item) => `<option value="${escapeHtml(item.id)}" ${state.taxonomyVocabulary === item.id ? 'selected' : ''}>${escapeHtml(item.label)} (${escapeHtml(item.count || 0)})</option>`).join('')}
+      </select>
+      <button id="taxonomySearchButton">Search</button>
+      <div class="taxonomy-search-meta">
+        <span class="scope-pill">${escapeHtml((query.mode || state.taxonomySearchMode || 'hybrid').toUpperCase())} match</span>
+        <span>${escapeHtml(summary.visible ?? rows.length)} visible of ${escapeHtml(summary.terms ?? rows.length)} terms</span>
+        <span>${escapeHtml(summary.accepted || 0)} accepted</span>
+        <span>${escapeHtml(summary.proposals || 0)} proposals</span>
+        <span>${escapeHtml(summary.conflicts || 0)} conflicts</span>
+        <span>${escapeHtml(summary.publication_impacts || 0)} publication impacts</span>
+      </div>
+    </section>
+    <section class="taxonomy-shell trace-workbench">
+      <aside class="panel taxonomy-filter-panel">
+        <div class="pane-head"><h2>Taxonomy structure</h2><span class="count">${escapeHtml(data.draft_release?.label || 'draft')}</span><button id="taxonomyClearFilters" class="text-button" type="button">Clear</button></div>
+        <div class="taxonomy-facets-scroll">
+          ${taxonomyQueueList(data.queues || [])}
+          ${taxonomyVocabularyList(data.vocabularies || [])}
+          ${taxonomyHierarchyTree(data.hierarchy || [])}
+          ${taxonomyStateFilters(data.facets || {})}
+        </div>
+      </aside>
+      <section class="panel taxonomy-ledger-panel">
+        <div class="taxonomy-results-head">
+          <label><input type="checkbox" id="taxonomySelectAll"> Select visible</label>
+          <div><strong>${escapeHtml(summary.visible ?? rows.length)} terms and mappings</strong><p>${escapeHtml(activeQueueLabel)} / draft taxonomy version / immutable term history</p></div>
+          <span class="spacer"></span>
+          <button class="secondary" data-taxonomy-sort="recent">Recently changed</button>
+        </div>
+        <div class="taxonomy-result-tabs">
+          ${(data.queues || []).filter((item) => ['all', 'proposed_terms', 'awaiting_review', 'mapping_conflicts', 'deprecated'].includes(item.id)).map((item) => `
+            <button class="${state.taxonomyQueue === item.id ? 'active' : ''}" type="button" data-taxonomy-queue="${escapeHtml(item.id)}">${escapeHtml(item.label)} <span>${escapeHtml(item.count || 0)}</span></button>
+          `).join('')}
+        </div>
+        <div class="review-bulk-toolbar">
+          ${['assign_review', 'promote', 'map', 'merge', 'add_alias', 'deprecate', 'export'].map((action) => `<button class="secondary" data-taxonomy-bulk-action="${action}">${escapeHtml(titleCase(action))}</button>`).join('')}
+          <span id="taxonomyBulkStatus" class="muted"></span>
+        </div>
+        <div class="taxonomy-term-list">
+          ${rows.length ? rows.map((row) => {
+            const rowKey = taxonomyRecordKey(row);
+            const selected = rowKey === state.taxonomySelectedId;
+            return `
+              <article class="taxonomy-row ${selected ? 'active' : ''} ${row.review_state || ''}" data-taxonomy-row-id="${escapeHtml(rowKey)}">
+                <input class="taxonomy-check" type="checkbox" aria-label="Select taxonomy row" ${state.taxonomySelectedIds.has(rowKey) ? 'checked' : ''}>
+                <span class="taxonomy-glyph">${escapeHtml(taxonomyGlyph(row))}</span>
+                <div class="taxonomy-row-main">
+                  <div class="taxonomy-title-line">
+                    <span class="status-badge ${escapeHtml(taxonomyStateClass(row.review_state))}">${escapeHtml(taxonomyStateLabel(row.review_state))}</span>
+                    <strong>${escapeHtml(row.term || '')}</strong>
+                    ${row.publication_impacts?.length ? '<span class="pill warn">publication impact</span>' : ''}
+                  </div>
+                  <p>${escapeHtml(row.definition || '')}</p>
+                  <div class="taxonomy-id-line"><strong>${escapeHtml(row.stable_id || row.record_id || '')}</strong><span>${escapeHtml(row.hierarchy_path || '')}</span></div>
+                  <div class="taxonomy-alias-line">${(row.aliases || []).length ? `<strong>Aliases:</strong> ${escapeHtml((row.aliases || []).join(' / '))}` : 'No aliases recorded'}</div>
+                  <div class="taxonomy-usage-line">${taxonomyUsageTokens(row) || '<span class="usage-token">0 usage</span>'}</div>
+                </div>
+                <div class="taxonomy-row-side">
+                  <span class="status-badge ${escapeHtml(taxonomyStateClass(row.review_state))}">${escapeHtml(taxonomyStateLabel(row.review_state))}</span>
+                  <em>${escapeHtml(row.owner || '')}</em>
+                  <em>${escapeHtml(row.priority || '')}</em>
+                  <em>${escapeHtml(fmtDate(row.updated_at) || '')}</em>
+                </div>
+              </article>
+            `;
+          }).join('') : '<div class="empty-state"><h2>No taxonomy rows</h2><p>Try another queue, vocabulary, or search.</p></div>'}
+        </div>
+      </section>
+      <aside class="panel taxonomy-preview-panel">
+        ${renderTaxonomyPreview(data)}
+      </aside>
     </section>
   `;
+  bindTaxonomyPage(data);
+}
+
+async function applyTaxonomyAction(row, action) {
+  if (!row) return;
+  const note = $('taxonomyDecisionNote')?.value || '';
+  const payload = {
+    event_type: `taxonomy.${action}.requested`,
+    source_evidence_id: 'taxonomy:global',
+    project: state.project || '',
+    subject_type: 'taxonomy_term',
+    subject_id: taxonomyRecordKey(row),
+    action,
+    note,
+    source_anchor: {
+      kind: 'taxonomy_term',
+      stable_id: row.stable_id || row.record_id,
+      vocabulary: row.vocabulary,
+      term: row.term,
+    },
+    idempotency_key: `taxonomy-${action}-${taxonomyRecordKey(row)}-${Date.now()}`,
+  };
+  const status = $('taxonomyActionStatus');
+  if (status) status.textContent = 'Recording action...';
+  await postJson('/api/review/events', payload);
+  if (status) status.textContent = `${titleCase(action)} recorded`;
+}
+
+async function applyBulkTaxonomyAction(action) {
+  const ids = Array.from(state.taxonomySelectedIds);
+  const status = $('taxonomyBulkStatus');
+  if (!ids.length) {
+    if (status) status.textContent = 'Select at least one taxonomy row first.';
+    return;
+  }
+  if (status) status.textContent = `Recording ${ids.length} action${ids.length === 1 ? '' : 's'}...`;
+  for (const id of ids) {
+    const row = state.taxonomyRows.find((item) => taxonomyRecordKey(item) === id);
+    if (row) await applyTaxonomyAction(row, action);
+  }
+  if (status) status.textContent = `${titleCase(action)} recorded for ${ids.length} row${ids.length === 1 ? '' : 's'}.`;
+}
+
+function bindTaxonomyPage(data) {
+  const commit = () => {
+    state.taxonomySelectedIds.clear();
+    replaceRouteHash();
+    loadRoutePage();
+  };
+  $('taxonomySearchInput')?.addEventListener('input', () => {
+    state.q = $('taxonomySearchInput').value.trim();
+    clearTimeout(window.__taxonomySearchTimer);
+    window.__taxonomySearchTimer = setTimeout(commit, 260);
+  });
+  $('taxonomySearchButton')?.addEventListener('click', commit);
+  $('taxonomyVocabularySelect')?.addEventListener('change', () => {
+    state.taxonomyVocabulary = $('taxonomyVocabularySelect').value;
+    commit();
+  });
+  $('taxonomyClearFilters')?.addEventListener('click', () => {
+    state.q = '';
+    state.taxonomyQueue = 'proposed_terms';
+    state.taxonomyVocabulary = '';
+    state.taxonomyReviewState = '';
+    state.taxonomySearchMode = 'hybrid';
+    state.taxonomySelectedId = '';
+    state.taxonomySelectedIds.clear();
+    replaceRouteHash();
+    loadRoutePage();
+  });
+  document.querySelectorAll('[data-taxonomy-mode]').forEach((button) => {
+    button.addEventListener('click', () => {
+      state.taxonomySearchMode = button.dataset.taxonomyMode || 'hybrid';
+      commit();
+    });
+  });
+  document.querySelectorAll('[data-taxonomy-queue]').forEach((button) => {
+    button.addEventListener('click', () => {
+      state.taxonomyQueue = button.dataset.taxonomyQueue || 'all';
+      state.taxonomySelectedId = '';
+      commit();
+    });
+  });
+  document.querySelectorAll('[data-taxonomy-vocabulary]').forEach((button) => {
+    button.addEventListener('click', () => {
+      state.taxonomyVocabulary = button.dataset.taxonomyVocabulary || '';
+      state.taxonomySelectedId = '';
+      commit();
+    });
+  });
+  document.querySelectorAll('[data-taxonomy-state]').forEach((button) => {
+    button.addEventListener('click', () => {
+      state.taxonomyReviewState = button.dataset.taxonomyState || '';
+      state.taxonomySelectedId = '';
+      commit();
+    });
+  });
+  document.querySelectorAll('[data-taxonomy-inspect]').forEach((button) => {
+    button.addEventListener('click', () => {
+      const id = button.dataset.taxonomyInspect || '';
+      const match = state.taxonomyRows.find((row) => taxonomyRecordKey(row) === id);
+      if (match) {
+        state.taxonomySelectedId = id;
+        replaceRouteHash();
+        loadRoutePage();
+      }
+    });
+  });
+  $('taxonomySelectAll')?.addEventListener('change', () => {
+    const checked = $('taxonomySelectAll').checked;
+    state.taxonomySelectedIds.clear();
+    document.querySelectorAll('.taxonomy-row').forEach((row) => {
+      const id = row.dataset.taxonomyRowId || '';
+      const checkbox = row.querySelector('.taxonomy-check');
+      if (checkbox) checkbox.checked = checked;
+      if (checked && id) state.taxonomySelectedIds.add(id);
+    });
+  });
+  document.querySelectorAll('.taxonomy-row').forEach((row) => {
+    row.addEventListener('click', () => {
+      state.taxonomySelectedId = row.dataset.taxonomyRowId || '';
+      replaceRouteHash();
+      loadRoutePage();
+    });
+    row.querySelector('.taxonomy-check')?.addEventListener('click', (event) => {
+      event.stopPropagation();
+      const id = row.dataset.taxonomyRowId || '';
+      if (!id) return;
+      if (event.currentTarget.checked) state.taxonomySelectedIds.add(id);
+      else state.taxonomySelectedIds.delete(id);
+    });
+  });
+  document.querySelectorAll('[data-taxonomy-preview-tab]').forEach((button) => {
+    button.addEventListener('click', () => {
+      state.taxonomyPreviewTab = button.dataset.taxonomyPreviewTab || 'overview';
+      document.querySelectorAll('[data-taxonomy-preview-tab]').forEach((tab) => tab.classList.toggle('active', tab === button));
+      document.querySelectorAll('[data-taxonomy-preview-section]').forEach((section) => {
+        section.classList.toggle('active', section.dataset.taxonomyPreviewSection === state.taxonomyPreviewTab);
+      });
+      replaceRouteHash();
+    });
+  });
+  document.querySelectorAll('[data-taxonomy-action]').forEach((button) => {
+    button.addEventListener('click', async () => {
+      const row = state.taxonomyRows.find((item) => taxonomyRecordKey(item) === state.taxonomySelectedId) || data.preview?.row;
+      try {
+        await applyTaxonomyAction(row, button.dataset.taxonomyAction || 'review');
+      } catch (error) {
+        const status = $('taxonomyActionStatus');
+        if (status) status.textContent = error.message;
+      }
+    });
+  });
+  document.querySelectorAll('[data-taxonomy-bulk-action]').forEach((button) => {
+    button.addEventListener('click', async () => {
+      try {
+        await applyBulkTaxonomyAction(button.dataset.taxonomyBulkAction || 'review');
+      } catch (error) {
+        const status = $('taxonomyBulkStatus');
+        if (status) status.textContent = error.message;
+      }
+    });
+  });
 }
 
 function renderRoutePage(route, data) {
@@ -4090,13 +4602,21 @@ function routeQuery() {
     if (state.publishingSelectedId) params.set('inspect', `bundle:${state.publishingSelectedId}`);
     if (state.publishingPreviewTab && state.publishingPreviewTab !== 'readiness') params.set('tab', state.publishingPreviewTab);
   }
+  if (state.route === 'taxonomy') {
+    if (state.taxonomyQueue && state.taxonomyQueue !== 'proposed_terms') params.set('queue', state.taxonomyQueue);
+    if (state.taxonomyVocabulary) params.set('vocabulary', state.taxonomyVocabulary);
+    if (state.taxonomyReviewState) params.set('review_state', state.taxonomyReviewState);
+    if (state.taxonomySearchMode && state.taxonomySearchMode !== 'hybrid') params.set('mode', state.taxonomySearchMode);
+    if (state.taxonomySelectedId) params.set('inspect', `taxonomy:${state.taxonomySelectedId}`);
+    if (state.taxonomyPreviewTab && state.taxonomyPreviewTab !== 'overview') params.set('tab', state.taxonomyPreviewTab);
+  }
   return params.toString();
 }
 
 function updateRouteVisibility() {
   const route = state.route;
   const showHome = route === 'home';
-  const showInbox = route === 'home' || route === 'inbox';
+  const showInbox = route === 'inbox';
   document.querySelector('.brief-hero')?.classList.toggle('hidden', !showHome);
   document.querySelector('.brief-grid')?.classList.toggle('hidden', !showHome);
   document.querySelector('.home-grid')?.classList.toggle('hidden', !showHome);
@@ -5409,6 +5929,10 @@ async function selectSource(id) {
 }
 
 function wireEvents() {
+  setSidebarCollapsed(state.sidebarCollapsed);
+  $('sidebarToggle')?.addEventListener('click', () => {
+    setSidebarCollapsed(!state.sidebarCollapsed);
+  });
   $('themeSwitch').addEventListener('click', () => {
     setTheme(document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark');
   });
@@ -5435,6 +5959,12 @@ function wireEvents() {
   $('captureSourceButton').addEventListener('click', () => {
     setRoute('inbox');
   });
+  $('captureTopButton')?.addEventListener('click', () => {
+    setRoute('inbox');
+  });
+  $('newNoteButton')?.addEventListener('click', () => {
+    openInboxQueue('manual_docs');
+  });
   $('openInboxLink').addEventListener('click', (event) => {
     event.preventDefault();
     setRoute('inbox');
@@ -5459,8 +5989,9 @@ function wireEvents() {
     if ($('inboxLocalSearch') && $('inboxLocalSearch').value !== state.q) $('inboxLocalSearch').value = state.q;
     clearTimeout(window.__inboxTimer);
     window.__inboxTimer = setTimeout(() => {
-      if (state.route === 'library' || state.route === 'evidence' || state.route === 'entities' || state.route === 'claims' || state.route === 'reviews') replaceRouteHash();
-      if (state.route === 'home' || state.route === 'inbox') loadInbox();
+      if (state.route === 'library' || state.route === 'evidence' || state.route === 'entities' || state.route === 'claims' || state.route === 'reviews' || state.route === 'publishing' || state.route === 'taxonomy') replaceRouteHash();
+      if (state.route === 'home') openLibraryView({ q: state.q, mode: 'hybrid', scope: 'corpus' });
+      else if (state.route === 'inbox') loadInbox();
       else loadRoutePage();
     }, 250);
   });
@@ -5503,15 +6034,15 @@ function wireEvents() {
   $('projectSelect').addEventListener('change', () => {
     state.project = $('projectSelect').value;
     state.previewTaskKey = '';
-    loadInbox();
+    if (state.route === 'inbox') loadInbox();
     if (state.route !== 'home' && state.route !== 'inbox') {
-      if (state.route === 'library' || state.route === 'evidence' || state.route === 'entities' || state.route === 'claims' || state.route === 'reviews') replaceRouteHash();
+      if (state.route === 'library' || state.route === 'evidence' || state.route === 'entities' || state.route === 'claims' || state.route === 'reviews' || state.route === 'publishing' || state.route === 'taxonomy') replaceRouteHash();
       loadRoutePage();
     }
   });
   $('limitSelect').addEventListener('change', () => {
     state.limit = $('limitSelect').value;
-    loadInbox();
+    if (state.route === 'inbox') loadInbox();
     if (state.route !== 'home' && state.route !== 'inbox') loadRoutePage();
   });
   document.querySelectorAll('.tab').forEach((tab) => {

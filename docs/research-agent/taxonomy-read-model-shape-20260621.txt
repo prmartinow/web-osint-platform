@@ -1,0 +1,26 @@
+interface TaxonomyPageReadModel {
+  scope: TaxonomyScope;
+  query: TaxonomyQueryState;
+  summary: TaxonomySummary;
+
+  queues: TaxonomyQueueSummary[];
+  vocabularies: TaxonomyVocabularySummary[];
+  hierarchy: TaxonomyHierarchyNode[];
+  facets: TaxonomyFacetGroup[];
+
+  results: CursorPage<TaxonomyLedgerRow>;
+  preview?: TaxonomyPreviewReadModel;
+
+  selection: {
+    selected_record_ids: string[];
+    compatible_actions: TaxonomyAction[];
+  };
+
+  active_release: TaxonomyReleaseSummary;
+  draft_release?: TaxonomyReleaseSummary;
+
+  permissions: string[];
+  generated_at: string;
+  stale: boolean;
+  version: string;
+}

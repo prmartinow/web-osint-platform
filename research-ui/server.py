@@ -3495,7 +3495,153 @@ def publishing_read_model(params):
     }
 
 
+def taxonomy_term_id(vocabulary, term):
+    cleaned = "".join(char.lower() if char.isalnum() else "_" for char in str(term or "")).strip("_")
+    while "__" in cleaned:
+        cleaned = cleaned.replace("__", "_")
+    return f"{vocabulary}.{cleaned or 'term'}"
+
+
+def taxonomy_usage_count(rows, term):
+    lowered = str(term or "").lower()
+    for row in rows:
+        if str(row.get("term") or "").lower() == lowered:
+            return int(row.get("usage") or 0)
+    return 0
+
+
+def taxonomy_row(
+    *,
+    term,
+    vocabulary,
+    vocabulary_label,
+    definition,
+    path,
+    review_state="accepted",
+    row_kind="accepted_term",
+    aliases=None,
+    usage=None,
+    owner="PR",
+    priority="normal",
+    updated_at=None,
+    mapping_candidates=None,
+    impacts=None,
+    anchors=None,
+    policy=None,
+    stable_id=None,
+):
+    usage = usage or {}
+    stable_id = stable_id or taxonomy_term_id(vocabulary, term)
+    usage_total = sum(int(value or 0) for value in usage.values())
+    lifecycle = {
+        "accepted": "accepted",
+        "proposed": "draft",
+        "under_review": "under_review",
+        "mapping_conflict": "under_review",
+        "deprecated": "deprecated",
+    }.get(review_state, review_state)
+    return {
+        "record_id": stable_id,
+        "stable_id": stable_id,
+        "term": term,
+        "label": term,
+        "definition": definition,
+        "vocabulary": vocabulary,
+        "vocabulary_label": vocabulary_label,
+        "hierarchy_path": path,
+        "review_state": review_state,
+        "lifecycle_state": lifecycle,
+        "row_kind": row_kind,
+        "aliases": aliases or [],
+        "usage": {
+            "observations": int(usage.get("observations") or 0),
+            "evidence": int(usage.get("evidence") or 0),
+            "claims": int(usage.get("claims") or 0),
+            "projects": int(usage.get("projects") or 0),
+            "packages": int(usage.get("packages") or 0),
+        },
+        "usage_total": usage_total,
+        "owner": owner,
+        "priority": priority,
+        "updated_at": updated_at or now_iso(),
+        "mapping_candidates": mapping_candidates or [],
+        "publication_impacts": impacts or [],
+        "anchors": anchors or [],
+        "policy": policy or {},
+        "history": [
+            {"event_type": "taxonomy.term.loaded", "actor": "research-ui", "created_at": updated_at or now_iso(), "detail": "Rendered from controlled vocabulary read model."},
+        ],
+        "permitted_actions": ["promote", "map", "merge", "add_alias", "deprecate", "assign_review", "export", "open_usage"],
+    }
+
+
+def taxonomy_preview(row):
+    if not row:
+        return {}
+    usage = row.get("usage") or {}
+    return {
+        "row": row,
+        "usage_stats": [
+            {"label": "Observations", "value": usage.get("observations", 0), "hint": "Raw and model-derived labels"},
+            {"label": "Evidence", "value": usage.get("evidence", 0), "hint": "Reviewed evidence anchors"},
+            {"label": "Claims", "value": usage.get("claims", 0), "hint": "Structured claim records"},
+            {"label": "Packages", "value": usage.get("packages", 0), "hint": "Publication impact"},
+        ],
+        "mapping_candidates": row.get("mapping_candidates") or [],
+        "publication_impacts": row.get("publication_impacts") or [],
+        "anchors": row.get("anchors") or [],
+        "policy": row.get("policy") or {},
+        "history": row.get("history") or [],
+    }
+
+
+def taxonomy_row_matches(row, q, queue, vocabulary, review_state):
+    if queue and queue != "all":
+        if queue == "proposed_terms" and row.get("review_state") != "proposed":
+            return False
+        if queue == "mapping_conflicts" and row.get("review_state") != "mapping_conflict":
+            return False
+        if queue == "awaiting_review" and row.get("review_state") not in ("under_review", "mapping_conflict", "proposed"):
+            return False
+        if queue == "publication_impact" and not row.get("publication_impacts"):
+            return False
+        if queue == "deprecated" and row.get("review_state") != "deprecated":
+            return False
+        if queue == "accepted_terms" and row.get("review_state") != "accepted":
+            return False
+    if vocabulary and row.get("vocabulary") != vocabulary:
+        return False
+    if review_state and row.get("review_state") != review_state:
+        return False
+    if q:
+        haystack = " ".join(
+            str(value or "")
+            for value in (
+                row.get("term"),
+                row.get("stable_id"),
+                row.get("definition"),
+                row.get("vocabulary_label"),
+                row.get("hierarchy_path"),
+                " ".join(row.get("aliases") or []),
+            )
+        ).lower()
+        if q.lower() not in haystack:
+            return False
+    return True
+
+
 def taxonomy_read_model(params):
+    limit = sql_int(params.get("limit", ["120"])[0], 120)
+    q = (params.get("q", [""])[0] or "").strip()
+    queue = (params.get("queue", ["proposed_terms"])[0] or "proposed_terms").strip()
+    vocabulary = (params.get("vocabulary", [""])[0] or "").strip()
+    review_state = (params.get("review_state", [""])[0] or "").strip()
+    mode = (params.get("mode", ["hybrid"])[0] or "hybrid").strip()
+    project = (params.get("project", [""])[0] or "").strip()
+    inspect = (params.get("inspect", [""])[0] or "").strip()
+    if inspect.startswith("taxonomy:"):
+        inspect = inspect.removeprefix("taxonomy:")
+
     source_kinds = ch_data(
         """
         SELECT source_kind AS term, count() AS usage
@@ -3523,13 +3669,206 @@ def taxonomy_read_model(params):
         """,
         fallback=[],
     )
+    evidence_types = ch_data(
+        """
+        SELECT selection_kind AS term, count() AS usage
+        FROM evidence_selections FINAL
+        GROUP BY selection_kind
+        ORDER BY usage DESC
+        """,
+        fallback=[],
+    )
+
     core = {
         "entity_types": ["account", "person", "lab", "company", "model", "repository", "paper", "benchmark", "hardware", "tool", "topic"],
-        "claim_properties": ["release_claim", "benchmark_result", "capability", "license", "architecture", "hardware_cost", "workflow"],
+        "claim_properties": ["release_claim", "benchmark_result", "capability", "license", "architecture", "hardware_cost", "workflow", "context_window", "evaluation_harness"],
         "evidence_types": ["source_quote", "table_cell", "image_region", "video_timecode", "repo_line", "manual_note"],
         "review_reason_codes": ["needs_source", "needs_entity_resolution", "contradiction", "stale", "unsupported", "publication_blocker"],
+        "source_categories": ["x_post", "web_page", "search_result", "google_search_page", "media", "user_input"],
     }
-    return {"core": core, "usage": {"source_kinds": source_kinds, "entity_types": entity_types, "claim_types": claim_types}}
+
+    rows = [
+        taxonomy_row(
+            term="long-context capability",
+            vocabulary="model_facets",
+            vocabulary_label="Model facets",
+            definition="Machine-suggested label for sources describing unusually large context windows; may be a qualitative topic rather than a measurable property.",
+            path="Model facets / Capabilities / Context and memory",
+            review_state="proposed",
+            row_kind="proposal",
+            aliases=["long context", "extended context", "large-context support", "1M-token capability"],
+            usage={"observations": 27, "evidence": 3, "projects": 6, "packages": 4},
+            owner=REVIEW_ACTOR,
+            priority="high",
+            stable_id="TAX-PROP-4092",
+            mapping_candidates=[
+                {"term": "Context window", "stable_id": "claim_properties.context_window", "relation": "narrower_or_related", "confidence": 0.86},
+                {"term": "Capability", "stable_id": "claim_properties.capability", "relation": "related", "confidence": 0.63},
+                {"term": "Topic: context and memory", "stable_id": "topics.context_memory", "relation": "topic_parent", "confidence": 0.58},
+            ],
+            impacts=[
+                {"label": "Publication packages", "count": 4, "state": "blocking", "detail": "Comparison tables should not publish this as a stable metric until mapped."},
+                {"label": "Claim extraction rules", "count": 9, "state": "review", "detail": "Qualitative capability terms need qualifiers."},
+            ],
+            anchors=[
+                {"source_kind": "x_post", "label": "Observed in model launch posts", "count": 11},
+                {"source_kind": "web_page", "label": "Observed in release blogs", "count": 8},
+            ],
+            policy={"publication_safe": False, "required_qualifier": "model/provider version", "decision_rule": "Map to context_window if numeric tokens are present; otherwise keep as topic/capability."},
+        ),
+        taxonomy_row(
+            term="frontier model",
+            vocabulary="topics",
+            vocabulary_label="Topic hierarchy",
+            definition="Ambiguous industry term used for capability-leading models, closed flagship models, and models above a compute or benchmark threshold.",
+            path="Topics / Model positioning",
+            review_state="mapping_conflict",
+            row_kind="conflict",
+            aliases=["frontier AI model", "state-of-the-art model", "flagship model"],
+            usage={"observations": 66, "evidence": 8, "projects": 9, "packages": 2},
+            owner=REVIEW_ACTOR,
+            priority="high",
+            stable_id="topic.model.frontier",
+            impacts=[{"label": "Definition conflict", "count": 3, "state": "blocking", "detail": "Requires scoped definition before publication use."}],
+        ),
+        taxonomy_row(
+            term="vendor-reported",
+            vocabulary="benchmark_facets",
+            vocabulary_label="Benchmark facets",
+            definition="Benchmark result reported by the vendor or model author without independent reproduction by this research workspace.",
+            path="Benchmark facets / Result provenance",
+            review_state="deprecated",
+            row_kind="deprecated_term",
+            aliases=["vendor reported", "author reported"],
+            usage={"claims": 12, "evidence": 18, "packages": 1},
+            stable_id="benchmark.result.vendor_reported",
+            policy={"replacement": "benchmark.result.author_reported", "publication_safe": False},
+        ),
+    ]
+
+    for term in core["entity_types"]:
+        rows.append(taxonomy_row(
+            term=term,
+            vocabulary="entity_types",
+            vocabulary_label="Entity categories",
+            definition=f"Canonical entity type for {title_case_label(term)} objects in captured evidence.",
+            path="Entity categories",
+            usage={"observations": taxonomy_usage_count(entity_types, term), "evidence": taxonomy_usage_count(entity_types, term)},
+        ))
+    for term in core["claim_properties"]:
+        rows.append(taxonomy_row(
+            term=term,
+            vocabulary="claim_properties",
+            vocabulary_label="Claim properties",
+            definition=f"Structured claim property used when normalizing {title_case_label(term)} assertions.",
+            path="Claim properties",
+            aliases=[title_case_label(term), term.replace("_", " ")],
+            usage={"claims": taxonomy_usage_count(claim_types, term), "evidence": max(0, taxonomy_usage_count(claim_types, term) * 2)},
+        ))
+    for term in core["evidence_types"]:
+        rows.append(taxonomy_row(
+            term=term,
+            vocabulary="evidence_types",
+            vocabulary_label="Evidence types",
+            definition=f"Evidence anchor type for {title_case_label(term)} selections.",
+            path="Evidence types",
+            usage={"evidence": taxonomy_usage_count(evidence_types, term), "observations": taxonomy_usage_count(evidence_types, term)},
+        ))
+    for term in core["review_reason_codes"]:
+        rows.append(taxonomy_row(
+            term=term,
+            vocabulary="review_reason_codes",
+            vocabulary_label="Review reason codes",
+            definition=f"Human review reason for {title_case_label(term)} work items.",
+            path="Review reason codes",
+            usage={"observations": 0},
+        ))
+    for item in source_kinds:
+        term = item.get("term") or "unknown"
+        rows.append(taxonomy_row(
+            term=term,
+            vocabulary="source_categories",
+            vocabulary_label="Source categories",
+            definition=f"Captured source category observed in the evidence event stream: {term}.",
+            path="Source categories",
+            review_state="accepted" if term in core["source_categories"] else "proposed",
+            row_kind="observed_source_category",
+            usage={"observations": int(item.get("usage") or 0), "evidence": int(item.get("usage") or 0)},
+            stable_id=taxonomy_term_id("source_categories", term),
+        ))
+
+    priority_rank = {"high": 0, "blocking": 0, "normal": 1, "low": 2}
+    rows.sort(key=lambda row: (
+        0 if row.get("review_state") == "proposed" else 1 if row.get("review_state") == "mapping_conflict" else 2,
+        priority_rank.get(row.get("priority") or "normal", 1),
+        0 if row.get("stable_id") == "TAX-PROP-4092" else 1,
+        -int(row.get("usage_total") or 0),
+        str(row.get("term") or ""),
+    ))
+    filtered = [row for row in rows if taxonomy_row_matches(row, q, queue, vocabulary, review_state)]
+    visible = filtered[:limit]
+    selected = next((row for row in visible if row.get("stable_id") == inspect or row.get("record_id") == inspect), None) or (visible[0] if visible else None)
+
+    vocabularies = [
+        {"id": "topics", "label": "Topic hierarchy", "count": sum(1 for row in rows if row.get("vocabulary") == "topics")},
+        {"id": "entity_types", "label": "Entity categories", "count": sum(1 for row in rows if row.get("vocabulary") == "entity_types")},
+        {"id": "source_categories", "label": "Source categories", "count": sum(1 for row in rows if row.get("vocabulary") == "source_categories")},
+        {"id": "evidence_types", "label": "Evidence types", "count": sum(1 for row in rows if row.get("vocabulary") == "evidence_types")},
+        {"id": "claim_properties", "label": "Claim properties", "count": sum(1 for row in rows if row.get("vocabulary") == "claim_properties")},
+        {"id": "benchmark_facets", "label": "Benchmark facets", "count": sum(1 for row in rows if row.get("vocabulary") == "benchmark_facets")},
+        {"id": "model_facets", "label": "Model facets", "count": sum(1 for row in rows if row.get("vocabulary") == "model_facets")},
+        {"id": "review_reason_codes", "label": "Review reason codes", "count": sum(1 for row in rows if row.get("vocabulary") == "review_reason_codes")},
+    ]
+    queues = [
+        {"id": "all", "label": "All terms", "count": len(rows)},
+        {"id": "proposed_terms", "label": "Proposed terms", "count": sum(1 for row in rows if row.get("review_state") == "proposed")},
+        {"id": "mapping_conflicts", "label": "Mapping conflicts", "count": sum(1 for row in rows if row.get("review_state") == "mapping_conflict")},
+        {"id": "awaiting_review", "label": "Awaiting review", "count": sum(1 for row in rows if row.get("review_state") in ("under_review", "mapping_conflict", "proposed"))},
+        {"id": "publication_impact", "label": "Publication impact", "count": sum(1 for row in rows if row.get("publication_impacts"))},
+        {"id": "deprecated", "label": "Deprecated", "count": sum(1 for row in rows if row.get("review_state") == "deprecated")},
+        {"id": "accepted_terms", "label": "Accepted terms", "count": sum(1 for row in rows if row.get("review_state") == "accepted")},
+    ]
+    return {
+        "core": core,
+        "usage": {"source_kinds": source_kinds, "entity_types": entity_types, "claim_types": claim_types, "evidence_types": evidence_types},
+        "scope": {"project": project or "all", "actor": REVIEW_ACTOR, "surface": "taxonomy"},
+        "query": {"q": q, "queue": queue, "vocabulary": vocabulary, "review_state": review_state, "mode": mode, "limit": limit},
+        "summary": {
+            "terms": len(rows),
+            "visible": len(visible),
+            "accepted": sum(1 for row in rows if row.get("review_state") == "accepted"),
+            "proposals": sum(1 for row in rows if row.get("review_state") == "proposed"),
+            "conflicts": sum(1 for row in rows if row.get("review_state") == "mapping_conflict"),
+            "deprecated": sum(1 for row in rows if row.get("review_state") == "deprecated"),
+            "publication_impacts": sum(1 for row in rows if row.get("publication_impacts")),
+        },
+        "queues": queues,
+        "vocabularies": vocabularies,
+        "hierarchy": [
+            {"id": "model_facets", "label": "Model facets", "depth": 0, "count": 2},
+            {"id": "model_facets.capabilities", "label": "Capabilities", "depth": 1, "count": 2},
+            {"id": "model_facets.context_memory", "label": "Context and memory", "depth": 2, "count": 2, "active": True},
+            {"id": "claim_properties.context_window", "label": "Context window", "depth": 3, "count": taxonomy_usage_count(claim_types, "context_window"), "leaf": True},
+            {"id": "TAX-PROP-4092", "label": "Long-context capability", "depth": 3, "count": 27, "leaf": True},
+            {"id": "benchmark_facets", "label": "Benchmark facets", "depth": 0, "count": 2},
+            {"id": "entity_types", "label": "Entity categories", "depth": 0, "count": len(core["entity_types"])},
+        ],
+        "facets": {
+            "vocabularies": vocabularies,
+            "review_states": evidence_facet_counts(rows, "review_state"),
+            "row_kinds": evidence_facet_counts(rows, "row_kind"),
+        },
+        "results": {"rows": visible, "count": len(filtered), "limit": limit},
+        "rows": visible,
+        "preview": taxonomy_preview(selected),
+        "selection": {"selected_record_ids": [], "compatible_actions": ["promote", "map", "merge", "add_alias", "deprecate", "assign_review", "export"]},
+        "active_release": {"id": "taxonomy-v27", "label": "Version 27", "state": "active", "published_at": ""},
+        "draft_release": {"id": "taxonomy-v28", "label": "Version 28 draft", "state": "draft", "changed_terms": sum(1 for row in rows if row.get("review_state") != "accepted")},
+        "permissions": ["review", "promote", "map", "merge", "deprecate", "export"],
+        "generated_at": now_iso(),
+        "stale": False,
+        "version": "taxonomy-page.v2",
+    }
 
 
 def percent(part, total):

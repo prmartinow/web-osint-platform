@@ -17,11 +17,14 @@
   <main class="research-shell">
     <aside class="workspace-rail" aria-label="Research workspace">
       <div class="brand-lockup">
-        <span class="brand-mark">W</span>
+        <span class="brand-mark">T</span>
         <div>
-          <strong>Web OSINT</strong>
+          <strong>TRACE</strong>
           <span>Research</span>
         </div>
+        <button id="sidebarToggle" class="rail-toggle" type="button" title="Close sidebar" aria-label="Close sidebar" aria-expanded="true">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h16v14H4z"></path><path d="M9 5v14"></path><path d="m15 9-3 3 3 3"></path></svg>
+        </button>
       </div>
       <nav class="primary-nav" aria-label="Primary research navigation">
         <button class="nav-item active" data-route="home"><span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="m3 11 9-8 9 8"></path><path d="M5 10v10h14V10"></path><path d="M9 20v-6h6v6"></path></svg></span><span class="nav-label">Home</span></button>
@@ -48,7 +51,7 @@
     <section class="research-home">
       <header class="home-topbar">
         <div class="project-picker">
-          <span>Project</span>
+          <span id="projectScopeLabel">Project</span>
           <strong id="projectPickerLabel">Open-weight frontier models</strong>
         </div>
         <label class="global-search">
@@ -56,6 +59,28 @@
           <input id="searchInput" type="search" placeholder="Search sources, claims, entities...">
         </label>
         <div class="top-actions">
+          <button id="newNoteButton" class="secondary top-action" type="button">New note</button>
+          <button id="captureTopButton" class="top-action primary-action" type="button">Capture source</button>
+          <button id="themeSwitch" class="theme-switch" role="switch" aria-checked="false" title="Toggle theme">
+            <span class="sun"></span><span class="moon"></span><span class="knob"></span>
+          </button>
+          <span class="user-avatar" aria-label="Current user">PR</span>
+        </div>
+      </header>
+
+      <nav class="project-nav" aria-label="Project navigation">
+        <button class="pnav-item active" data-route="home">Home</button>
+        <button class="pnav-item" data-route="inbox">Inbox <span id="pnavInboxCount" class="count">0</span></button>
+        <button class="pnav-item" data-route="projects">Projects</button>
+        <button class="pnav-item" data-route="library">Library</button>
+        <button class="pnav-item" data-route="evidence">Evidence</button>
+        <button class="pnav-item" data-route="entities">Entities</button>
+        <button class="pnav-item" data-route="claims">Claims</button>
+        <button class="pnav-item" data-route="reviews">Reviews</button>
+        <button class="pnav-item" data-route="publishing">Publishing</button>
+        <button class="pnav-item" data-route="taxonomy">Taxonomy</button>
+        <span class="pnav-spacer"></span>
+        <div class="pnav-actions">
           <select id="projectSelect"><option value="">All projects</option></select>
           <select id="limitSelect">
             <option value="40">40</option>
@@ -65,11 +90,8 @@
           </select>
           <button id="datalabCase" class="secondary">Datalab case</button>
           <button id="refreshButton">Refresh</button>
-          <button id="themeSwitch" class="theme-switch" role="switch" aria-checked="false" title="Toggle theme">
-            <span class="sun"></span><span class="moon"></span><span class="knob"></span>
-          </button>
         </div>
-      </header>
+      </nav>
 
       <section class="brief-hero" data-home-section="brief">
         <div class="hero-copy">

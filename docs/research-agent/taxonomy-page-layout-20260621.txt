@@ -1,0 +1,5 @@
+248px global navigation
+└─ 72px top bar
+   └─ 94px page header
+   └─ 78px search and taxonomy summary
+   └─ 300px vocabulary tree | flexible ledger | 430px detail panel

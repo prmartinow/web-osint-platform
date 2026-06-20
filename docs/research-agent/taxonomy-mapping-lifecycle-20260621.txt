@@ -1,0 +1,4 @@
+suggested → needs_mapping → under_review → mapped
+                              ↘ rejected
+suggested → conflict
+mapped → superseded

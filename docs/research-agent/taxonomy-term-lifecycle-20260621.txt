@@ -1,0 +1,5 @@
+draft → proposed → under_review → accepted
+                    ↘ rejected
+
+accepted → deprecated
+accepted → merged

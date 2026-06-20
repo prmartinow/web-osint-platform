@@ -1,0 +1,8 @@
+J / K   Navigate records
+Space   Toggle selection
+M       Resolve mapping
+P       Open promotion review
+R       Reject with reason
+E       Edit proposal
+O       Open usage and anchors
+H       Open history

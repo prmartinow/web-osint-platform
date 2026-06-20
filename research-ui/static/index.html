@@ -24,12 +24,16 @@
         </div>
       </div>
       <nav class="primary-nav" aria-label="Primary research navigation">
-        <button class="nav-item active" data-home-focus="brief">Home</button>
-        <button class="nav-item" data-home-focus="inbox">Inbox <span id="navInboxCount">0</span></button>
-        <button class="nav-item" data-home-focus="sources">Sources</button>
-        <button class="nav-item" data-home-focus="review">Review</button>
-        <button class="nav-item" data-home-focus="publishing">Publishing</button>
-        <button class="nav-item" data-home-focus="taxonomy">Taxonomy</button>
+        <button class="nav-item active" data-route="home">Home</button>
+        <button class="nav-item" data-route="inbox">Inbox <span id="navInboxCount">0</span></button>
+        <button class="nav-item" data-route="projects">Projects</button>
+        <button class="nav-item" data-route="library">Library</button>
+        <button class="nav-item" data-route="evidence">Evidence</button>
+        <button class="nav-item" data-route="entities">Entities</button>
+        <button class="nav-item" data-route="claims">Claims</button>
+        <button class="nav-item" data-route="reviews">Reviews</button>
+        <button class="nav-item" data-route="publishing">Publishing</button>
+        <button class="nav-item" data-route="taxonomy">Taxonomy</button>
       </nav>
       <section class="active-project">
         <h2>Active Project</h2>
@@ -132,6 +136,8 @@
         </aside>
       </section>
 
+      <section id="routePage" class="route-page hidden" aria-live="polite"></section>
+
       <section id="inbox" class="inbox panel" data-home-section="inbox">
         <div class="section-head">
           <div>
@@ -177,6 +183,7 @@
           <button class="tab" data-tab="enrichment">Enrichment</button>
           <button class="tab" data-tab="related">Related</button>
           <button class="tab" data-tab="review">Review</button>
+          <button class="tab" data-tab="provenance">Provenance</button>
           <button class="tab" data-tab="raw">Raw</button>
         </nav>
         <div id="tab-normalized" class="tab-pane active"></div>
@@ -185,6 +192,7 @@
         <div id="tab-enrichment" class="tab-pane"></div>
         <div id="tab-related" class="tab-pane"></div>
         <div id="tab-review" class="tab-pane"></div>
+        <div id="tab-provenance" class="tab-pane"></div>
         <div id="tab-raw" class="tab-pane"></div>
       </div>
     </section>

@@ -451,6 +451,338 @@ def facets():
     return {"totals": totals, "source_kinds": source_kinds, "projects": projects, "domains": domains, "queues": queues}
 
 
+def review_counts():
+    return ch_data(
+        """
+        SELECT
+          (SELECT count() FROM evidence_selections FINAL) AS selections,
+          (SELECT count() FROM review_annotations FINAL) AS annotations,
+          (SELECT count() FROM proposed_facts FINAL) AS proposed_facts,
+          (SELECT count() FROM entity_links FINAL) AS entity_links,
+          (SELECT count() FROM claim_records FINAL) AS claim_records,
+          (SELECT count() FROM research_review_events) AS review_events
+        """,
+        fallback=[{}],
+    )[0]
+
+
+def project_rows():
+    rows = ch_data(
+        """
+        SELECT
+          source_project AS project_id,
+          if(source_project = '', '(unassigned)', source_project) AS name,
+          uniqExact(evidence_id) AS sources,
+          count() AS evidence_rows,
+          countIf(source_kind IN ('x_post', 'x_account', 'x_page')) AS x_sources,
+          countIf(source_kind IN ('web_page', 'search_result', 'google_search_page')) AS web_sources,
+          countIf(source_kind = 'media') AS media_sources,
+          countIf(source_kind = 'user_input') AS manual_sources,
+          countIf(has_ocr = 1) AS ocr_rows,
+          countIf(length(text) >= 120) AS extracted_rows,
+          min(captured_at) AS first_capture,
+          max(ingested_at) AS last_activity
+        FROM evidence_events
+        GROUP BY source_project
+        ORDER BY last_activity DESC, sources DESC
+        LIMIT 100
+        """,
+        fallback=[],
+    )
+    for row in rows:
+        row["phase"] = "evidence review"
+        row["question"] = "Collect and validate source-linked evidence"
+        row["completion_percent"] = percent(row.get("extracted_rows"), row.get("evidence_rows"))
+    return {
+        "rows": rows,
+        "object_states": {
+            "project": ["active", "paused", "archived"],
+            "capture": ["pending", "capturing", "complete", "partial", "failed", "superseded"],
+            "evidence": ["draft", "proposed", "accepted", "rejected", "superseded"],
+            "claim": ["proposed", "under_review", "accepted", "disputed", "rejected", "superseded"],
+        },
+    }
+
+
+def library_search(params):
+    limit = sql_int(params.get("limit", ["80"])[0], 80)
+    q = (params.get("q", [""])[0] or "").strip()
+    kind = (params.get("kind", [""])[0] or "").strip()
+    project = (params.get("project", [""])[0] or "").strip()
+    mode = (params.get("mode", ["hybrid"])[0] or "hybrid").strip()
+    clauses = ["1 = 1"]
+    match_explanation = "Recent source"
+    if q:
+        like = sql_string(q)
+        clauses.append(
+            "("
+            f"positionCaseInsensitive(title, {like}) > 0 OR "
+            f"positionCaseInsensitive(text, {like}) > 0 OR "
+            f"positionCaseInsensitive(canonical_url, {like}) > 0 OR "
+            f"positionCaseInsensitive(author_handle, {like}) > 0 OR "
+            f"positionCaseInsensitive(domain, {like}) > 0 OR "
+            f"positionCaseInsensitive(evidence_id, {like}) > 0"
+            ")"
+        )
+        match_explanation = f"Matched query: {q}"
+    if kind:
+        clauses.append(f"source_kind = {sql_string(kind)}")
+    if project:
+        clauses.append(f"source_project = {sql_string(project)}")
+    where = " AND ".join(clauses)
+    rows = ch_data(
+        f"""
+        SELECT
+          evidence_id,
+          argMax(source_kind, ingested_at) AS source_kind,
+          argMax(source_project, ingested_at) AS source_project,
+          argMax(canonical_url, ingested_at) AS canonical_url,
+          argMax(author_handle, ingested_at) AS author_handle,
+          argMax(domain, ingested_at) AS domain,
+          argMax(title, ingested_at) AS title,
+          substring(argMax(text, ingested_at), 1, 500) AS snippet,
+          length(argMax(text, ingested_at)) AS text_chars,
+          max(has_media) AS has_media,
+          max(has_ocr) AS has_ocr,
+          max(captured_at) AS captured_at,
+          max(ingested_at) AS last_ingested_at,
+          count() AS observations
+        FROM evidence_events
+        WHERE {where}
+        GROUP BY evidence_id
+        ORDER BY last_ingested_at DESC
+        LIMIT {limit}
+        """,
+        fallback=[],
+    )
+    for row in rows:
+        row["source_label"] = source_kind_label(row.get("source_kind"))
+        row["review_hint"] = review_hint(row)
+        row["match_explanation"] = match_explanation
+    return {"mode": mode, "rows": rows, "facets": facets()}
+
+
+def evidence_ledger(params):
+    limit = sql_int(params.get("limit", ["120"])[0], 120)
+    selections = ch_data(
+        f"""
+        SELECT
+          selection_id, source_evidence_id, document_id, block_id, selection_kind,
+          quote, status, note, actor, created_at, updated_at
+        FROM evidence_selections FINAL
+        ORDER BY updated_at DESC
+        LIMIT {limit}
+        """,
+        fallback=[],
+    )
+    proposed = ch_data(
+        f"""
+        SELECT
+          proposed_fact_id, source_evidence_id, evidence_selection_id, fact_type,
+          field_path, raw_value, normalized_value, unit, evidence_quote, status,
+          note, actor, created_at, updated_at
+        FROM proposed_facts FINAL
+        ORDER BY updated_at DESC
+        LIMIT {limit}
+        """,
+        fallback=[],
+    )
+    recent = ch_data(
+        f"""
+        SELECT
+          evidence_id,
+          argMax(source_kind, ingested_at) AS source_kind,
+          argMax(source_project, ingested_at) AS source_project,
+          argMax(canonical_url, ingested_at) AS canonical_url,
+          argMax(title, ingested_at) AS title,
+          substring(argMax(text, ingested_at), 1, 300) AS snippet,
+          max(has_media) AS has_media,
+          max(has_ocr) AS has_ocr,
+          max(ingested_at) AS last_ingested_at
+        FROM evidence_events
+        GROUP BY evidence_id
+        ORDER BY (has_media + has_ocr) DESC, last_ingested_at DESC
+        LIMIT {limit}
+        """,
+        fallback=[],
+    )
+    for row in recent:
+        row["source_label"] = source_kind_label(row.get("source_kind"))
+    return {
+        "summary": {
+            "selections": len(selections),
+            "proposed_facts": len(proposed),
+            "recent_sources": len(recent),
+        },
+        "selections": selections,
+        "proposed_facts": proposed,
+        "recent_sources": recent,
+    }
+
+
+def entity_directory(params):
+    limit = sql_int(params.get("limit", ["120"])[0], 120)
+    curated = ch_data(
+        f"""
+        SELECT
+          entity_link_id, source_evidence_id, evidence_selection_id, mention_text,
+          entity_type, canonical_entity_id, canonical_name, status, note,
+          actor, created_at, updated_at
+        FROM entity_links FINAL
+        ORDER BY updated_at DESC
+        LIMIT {limit}
+        """,
+        fallback=[],
+    )
+    extracted = ch_data(
+        """
+        SELECT
+          entity,
+          count() AS mentions,
+          uniqExact(evidence_id) AS sources,
+          max(ingested_at) AS last_seen
+        FROM
+        (
+          SELECT arrayJoin(entities) AS entity, evidence_id, ingested_at
+          FROM evidence_events
+        )
+        WHERE entity != ''
+        GROUP BY entity
+        ORDER BY mentions DESC, last_seen DESC
+        LIMIT 120
+        """,
+        fallback=[],
+    )
+    type_counts = ch_data(
+        """
+        SELECT entity_type, count() AS rows
+        FROM entity_links FINAL
+        GROUP BY entity_type
+        ORDER BY rows DESC, entity_type ASC
+        """,
+        fallback=[],
+    )
+    return {"curated": curated, "extracted": extracted, "type_counts": type_counts}
+
+
+def claims_ledger(params):
+    limit = sql_int(params.get("limit", ["120"])[0], 120)
+    claims = ch_data(
+        f"""
+        SELECT
+          claim_id, source_evidence_id, evidence_selection_id, claim_text,
+          claim_type, evidence_relation, qualifier_json, status, note,
+          actor, created_at, updated_at
+        FROM claim_records FINAL
+        ORDER BY updated_at DESC
+        LIMIT {limit}
+        """,
+        fallback=[],
+    )
+    type_counts = ch_data(
+        """
+        SELECT claim_type, evidence_relation, status, count() AS rows
+        FROM claim_records FINAL
+        GROUP BY claim_type, evidence_relation, status
+        ORDER BY rows DESC, claim_type ASC
+        """,
+        fallback=[],
+    )
+    possible_conflicts = ch_data(
+        """
+        SELECT
+          claim_type,
+          count() AS rows,
+          uniqExact(source_evidence_id) AS sources
+        FROM claim_records FINAL
+        GROUP BY claim_type
+        HAVING rows > 1
+        ORDER BY rows DESC
+        LIMIT 20
+        """,
+        fallback=[],
+    )
+    return {"claims": claims, "type_counts": type_counts, "possible_conflicts": possible_conflicts}
+
+
+def reviews_read_model(params):
+    limit = sql_int(params.get("limit", ["120"])[0], 120)
+    counts = review_counts()
+    events = ch_data(
+        f"""
+        SELECT
+          event_id, event_type, project, source_evidence_id, subject_type,
+          subject_id, actor, created_at, payload_json
+        FROM research_review_events
+        ORDER BY created_at DESC
+        LIMIT {limit}
+        """,
+        fallback=[],
+    )
+    queue = [
+        {"id": "new_captures", "label": "New captures", "count": int(facets().get("totals", {}).get("unique_evidence") or 0), "reason": "Needs triage"},
+        {"id": "entity_candidates", "label": "Entity candidates", "count": int(counts.get("entity_links") or 0), "reason": "Resolve or merge"},
+        {"id": "proposed_evidence", "label": "Proposed evidence", "count": int(counts.get("selections") or 0), "reason": "Accept, correct, or reject"},
+        {"id": "proposed_claims", "label": "Proposed claims", "count": int(counts.get("claim_records") or 0), "reason": "Review wording and evidence relation"},
+        {"id": "proposed_facts", "label": "Proposed facts", "count": int(counts.get("proposed_facts") or 0), "reason": "Validate value and qualifiers"},
+    ]
+    return {"counts": counts, "queue": queue, "events": events}
+
+
+def publishing_read_model(params):
+    counts = review_counts()
+    coverage = home_summary().get("coverage", {})
+    checks = [
+        {"id": "source_anchors", "label": "Source anchors exist", "state": "pass" if int(counts.get("selections") or 0) else "blocked"},
+        {"id": "claims_reviewed", "label": "Claim records ready for review", "state": "pass" if int(counts.get("claim_records") or 0) else "needs_work"},
+        {"id": "facts_reviewed", "label": "Proposed facts are visible", "state": "pass" if int(counts.get("proposed_facts") or 0) else "needs_work"},
+        {"id": "coverage", "label": "Coverage gaps reviewed", "state": "needs_work" if int(coverage.get("gaps") or 0) else "pass"},
+        {"id": "snapshot", "label": "Publication snapshot", "state": "not_started"},
+    ]
+    return {
+        "bundles": [],
+        "checks": checks,
+        "snapshot_policy": "Publishing must consume an approved frozen snapshot, not mutable live records.",
+    }
+
+
+def taxonomy_read_model(params):
+    source_kinds = ch_data(
+        """
+        SELECT source_kind AS term, count() AS usage
+        FROM evidence_events
+        GROUP BY source_kind
+        ORDER BY usage DESC
+        """,
+        fallback=[],
+    )
+    entity_types = ch_data(
+        """
+        SELECT entity_type AS term, count() AS usage
+        FROM entity_links FINAL
+        GROUP BY entity_type
+        ORDER BY usage DESC
+        """,
+        fallback=[],
+    )
+    claim_types = ch_data(
+        """
+        SELECT claim_type AS term, count() AS usage
+        FROM claim_records FINAL
+        GROUP BY claim_type
+        ORDER BY usage DESC
+        """,
+        fallback=[],
+    )
+    core = {
+        "entity_types": ["account", "person", "lab", "company", "model", "repository", "paper", "benchmark", "hardware", "tool", "topic"],
+        "claim_properties": ["release_claim", "benchmark_result", "capability", "license", "architecture", "hardware_cost", "workflow"],
+        "evidence_types": ["source_quote", "table_cell", "image_region", "video_timecode", "repo_line", "manual_note"],
+        "review_reason_codes": ["needs_source", "needs_entity_resolution", "contradiction", "stale", "unsupported", "publication_blocker"],
+    }
+    return {"core": core, "usage": {"source_kinds": source_kinds, "entity_types": entity_types, "claim_types": claim_types}}
+
+
 def percent(part, total):
     try:
         part = float(part or 0)
@@ -1180,6 +1512,22 @@ class ResearchUiHandler(BaseHTTPRequestHandler):
                 return self.send_json(facets())
             if parsed.path == "/api/inbox":
                 return self.send_json(inbox(params))
+            if parsed.path == "/api/projects":
+                return self.send_json(project_rows())
+            if parsed.path == "/api/library":
+                return self.send_json(library_search(params))
+            if parsed.path == "/api/evidence":
+                return self.send_json(evidence_ledger(params))
+            if parsed.path == "/api/entities":
+                return self.send_json(entity_directory(params))
+            if parsed.path == "/api/claims":
+                return self.send_json(claims_ledger(params))
+            if parsed.path == "/api/reviews":
+                return self.send_json(reviews_read_model(params))
+            if parsed.path == "/api/publishing":
+                return self.send_json(publishing_read_model(params))
+            if parsed.path == "/api/taxonomy":
+                return self.send_json(taxonomy_read_model(params))
             if parsed.path == "/api/source":
                 return self.send_json(source_detail(params))
             if parsed.path == "/api/source/review":

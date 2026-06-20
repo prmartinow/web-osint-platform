@@ -1,4 +1,5 @@
 const state = {
+  route: 'home',
   queue: 'all',
   kind: '',
   project: '',
@@ -42,6 +43,19 @@ function progressBar(percent) {
   const safe = Math.max(0, Math.min(100, Number(percent || 0)));
   return `<span class="bar"><span style="width:${safe}%"></span></span>`;
 }
+
+const routeConfig = {
+  home: { title: 'Research brief', endpoint: '/api/home' },
+  inbox: { title: 'Inbox', endpoint: '/api/inbox' },
+  projects: { title: 'Projects', endpoint: '/api/projects' },
+  library: { title: 'Source Library', endpoint: '/api/library' },
+  evidence: { title: 'Evidence Ledger', endpoint: '/api/evidence' },
+  entities: { title: 'Entity Directory', endpoint: '/api/entities' },
+  claims: { title: 'Claims Ledger', endpoint: '/api/claims' },
+  reviews: { title: 'Reviews', endpoint: '/api/reviews' },
+  publishing: { title: 'Publishing', endpoint: '/api/publishing' },
+  taxonomy: { title: 'Taxonomy', endpoint: '/api/taxonomy' },
+};
 
 async function fetchJson(url) {
   const response = await fetch(url, { cache: 'no-store' });
@@ -231,6 +245,343 @@ async function loadHome() {
   }
 }
 
+function pageHeader(title, subtitle, actions = '') {
+  return `
+    <header class="page-header">
+      <div>
+        <div class="breadcrumb">Research UI / ${escapeHtml(title)}</div>
+        <h1>${escapeHtml(title)}</h1>
+        <p>${escapeHtml(subtitle || '')}</p>
+      </div>
+      <div class="page-actions">${actions}</div>
+    </header>
+  `;
+}
+
+function metricCards(items) {
+  return `<div class="metric-grid">${items.map((item) => `
+    <article class="metric-card panel">
+      <span>${escapeHtml(item.label)}</span>
+      <strong>${escapeHtml(item.value ?? 0)}</strong>
+      ${item.hint ? `<em>${escapeHtml(item.hint)}</em>` : ''}
+    </article>
+  `).join('')}</div>`;
+}
+
+function sourceButton(row, extra = '') {
+  return `
+    <button class="object-row" data-id="${escapeHtml(row.evidence_id || row.source_evidence_id || '')}">
+      <span class="source-glyph">${escapeHtml(sourceGlyph(row.source_kind))}</span>
+      <span class="object-main">
+        <strong>${escapeHtml(row.title || row.canonical_url || row.evidence_id || row.source_evidence_id || '(untitled)')}</strong>
+        <em>${escapeHtml([row.source_label || row.source_kind, row.source_project, row.domain, fmtDate(row.last_ingested_at || row.updated_at)].filter(Boolean).join(' · '))}</em>
+        ${row.snippet ? `<p>${escapeHtml(row.snippet)}</p>` : ''}
+      </span>
+      <span class="object-side">${extra}</span>
+    </button>
+  `;
+}
+
+function bindObjectRows() {
+  document.querySelectorAll('.object-row[data-id]').forEach((button) => {
+    const id = button.dataset.id;
+    if (!id) return;
+    button.addEventListener('click', () => selectSource(id));
+  });
+}
+
+function renderProjectsPage(data) {
+  const rows = data.rows || [];
+  $('routePage').innerHTML = `
+    ${pageHeader('Projects', 'Project-scoped research boundaries, source counts, coverage phase, and activity.')}
+    ${metricCards([
+      { label: 'Projects', value: rows.length },
+      { label: 'Sources', value: rows.reduce((sum, row) => sum + Number(row.sources || 0), 0) },
+      { label: 'Evidence rows', value: rows.reduce((sum, row) => sum + Number(row.evidence_rows || 0), 0) },
+    ])}
+    <section class="panel page-panel">
+      <div class="panel-title-row"><h2>Project List</h2><span class="status-badge">source-backed</span></div>
+      <div class="dense-list">${rows.map((row) => `
+        <article class="project-row">
+          <div>
+            <h3>${escapeHtml(row.name)}</h3>
+            <p>${escapeHtml(row.question)}</p>
+            <div class="tag-line">
+              <span class="pill">${escapeHtml(row.phase)}</span>
+              <span class="pill">${escapeHtml(row.sources)} sources</span>
+              <span class="pill">${escapeHtml(row.x_sources)} X</span>
+              <span class="pill">${escapeHtml(row.web_sources)} web</span>
+              <span class="pill">${escapeHtml(row.manual_sources)} manual</span>
+            </div>
+          </div>
+          <div class="row-progress">
+            ${progressBar(row.completion_percent)}
+            <strong>${escapeHtml(row.completion_percent)}%</strong>
+            <em>${escapeHtml(fmtDate(row.last_activity))}</em>
+          </div>
+        </article>
+      `).join('') || '<p class="muted padded">No projects found.</p>'}</div>
+    </section>
+  `;
+}
+
+function renderLibraryPage(data) {
+  const rows = data.rows || [];
+  $('routePage').innerHTML = `
+    ${pageHeader('Source Library', 'Search the captured corpus by source, exact text, URL, author, domain, and project.')}
+    ${metricCards([
+      { label: 'Results', value: rows.length, hint: data.mode || 'hybrid' },
+      { label: 'Source types', value: (data.facets?.source_kinds || []).length },
+      { label: 'Domains', value: (data.facets?.domains || []).length },
+    ])}
+    <section class="panel page-panel">
+      <div class="panel-title-row"><h2>Corpus Results</h2><span class="status-badge info">exact + metadata now</span></div>
+      <div class="dense-list">${rows.map((row) => sourceButton(row, `
+        <span class="status-badge">${escapeHtml(row.review_hint || 'triage')}</span>
+        ${row.has_ocr ? '<span class="status-badge ok">OCR</span>' : ''}
+      `)).join('') || '<p class="muted padded">No library results.</p>'}</div>
+    </section>
+  `;
+  bindObjectRows();
+}
+
+function renderEvidencePage(data) {
+  const selections = data.selections || [];
+  const facts = data.proposed_facts || [];
+  const recent = data.recent_sources || [];
+  $('routePage').innerHTML = `
+    ${pageHeader('Evidence Ledger', 'Anchored selections, proposed facts, and high-value captured sources.')}
+    ${metricCards([
+      { label: 'Selections', value: selections.length },
+      { label: 'Proposed facts', value: facts.length },
+      { label: 'Recent sources', value: recent.length },
+    ])}
+    <section class="page-two-col">
+      <div class="panel page-panel">
+        <div class="panel-title-row"><h2>Anchored Evidence</h2><span class="status-badge">reviewable</span></div>
+        ${selections.map((row) => `
+          <article class="review-item">
+            <div class="tag-line"><span class="pill">${escapeHtml(row.status)}</span><span class="pill">${escapeHtml(row.selection_kind)}</span><span class="pill">${escapeHtml(row.block_id)}</span></div>
+            <p>${escapeHtml(row.quote)}</p>
+            <button class="secondary object-link" data-id="${escapeHtml(row.source_evidence_id)}">Open source</button>
+          </article>
+        `).join('') || '<p class="muted padded">No anchored evidence selections yet.</p>'}
+      </div>
+      <div class="panel page-panel">
+        <div class="panel-title-row"><h2>Proposed Facts</h2><span class="status-badge warn">not canonical</span></div>
+        ${facts.map((row) => `
+          <article class="review-item">
+            <div class="tag-line"><span class="pill">${escapeHtml(row.status)}</span><span class="pill">${escapeHtml(row.fact_type)}</span><span class="pill">${escapeHtml(row.field_path)}</span></div>
+            <p><strong>${escapeHtml(row.normalized_value || row.raw_value)}</strong>${row.unit ? ` ${escapeHtml(row.unit)}` : ''}</p>
+            <button class="secondary object-link" data-id="${escapeHtml(row.source_evidence_id)}">Open source</button>
+          </article>
+        `).join('') || '<p class="muted padded">No proposed facts yet.</p>'}
+      </div>
+    </section>
+    <section class="panel page-panel">
+      <div class="panel-title-row"><h2>Recent Evidence Sources</h2><span class="status-badge info">source trail</span></div>
+      <div class="dense-list">${recent.map((row) => sourceButton(row)).join('')}</div>
+    </section>
+  `;
+  document.querySelectorAll('.object-link[data-id]').forEach((button) => button.addEventListener('click', () => selectSource(button.dataset.id)));
+  bindObjectRows();
+}
+
+function renderEntitiesPage(data) {
+  const curated = data.curated || [];
+  const extracted = data.extracted || [];
+  $('routePage').innerHTML = `
+    ${pageHeader('Entity Directory', 'Candidate and curated entities with source-backed mentions.')}
+    ${metricCards([
+      { label: 'Curated links', value: curated.length },
+      { label: 'Extracted entities', value: extracted.length },
+      { label: 'Entity types', value: (data.type_counts || []).length },
+    ])}
+    <section class="page-two-col">
+      <div class="panel page-panel">
+        <div class="panel-title-row"><h2>Curated Entity Links</h2><span class="status-badge">human layer</span></div>
+        ${curated.map((row) => `
+          <article class="review-item">
+            <div class="tag-line"><span class="pill">${escapeHtml(row.status)}</span><span class="pill">${escapeHtml(row.entity_type)}</span></div>
+            <p><strong>${escapeHtml(row.canonical_name || row.canonical_entity_id || row.mention_text)}</strong></p>
+            <p class="muted">${escapeHtml(row.mention_text || '')}</p>
+            <button class="secondary object-link" data-id="${escapeHtml(row.source_evidence_id)}">Open source</button>
+          </article>
+        `).join('') || '<p class="muted padded">No curated entity links yet.</p>'}
+      </div>
+      <div class="panel page-panel">
+        <div class="panel-title-row"><h2>Extracted Mentions</h2><span class="status-badge warn">machine / parser layer</span></div>
+        <div class="chip-cloud">${extracted.map((row) => `
+          <span class="entity-chip"><strong>${escapeHtml(row.entity)}</strong><em>${escapeHtml(row.sources)} sources · ${escapeHtml(row.mentions)} mentions</em></span>
+        `).join('') || '<p class="muted padded">No extracted entity array values yet.</p>'}</div>
+      </div>
+    </section>
+  `;
+  document.querySelectorAll('.object-link[data-id]').forEach((button) => button.addEventListener('click', () => selectSource(button.dataset.id)));
+}
+
+function renderClaimsPage(data) {
+  const claims = data.claims || [];
+  $('routePage').innerHTML = `
+    ${pageHeader('Claims Ledger', 'Draft and proposed assertions remain contestable until reviewed against evidence.')}
+    ${metricCards([
+      { label: 'Claim stubs', value: claims.length },
+      { label: 'Claim groups', value: (data.type_counts || []).length },
+      { label: 'Possible conflicts', value: (data.possible_conflicts || []).length },
+    ])}
+    <section class="panel page-panel">
+      <div class="panel-title-row"><h2>Claims</h2><span class="status-badge warn">not published</span></div>
+      ${claims.map((row) => `
+        <article class="review-item">
+          <div class="tag-line"><span class="pill">${escapeHtml(row.status)}</span><span class="pill">${escapeHtml(row.claim_type)}</span><span class="pill">${escapeHtml(row.evidence_relation)}</span></div>
+          <p><strong>${escapeHtml(row.claim_text)}</strong></p>
+          ${row.note ? `<p class="muted">${escapeHtml(row.note)}</p>` : ''}
+          <button class="secondary object-link" data-id="${escapeHtml(row.source_evidence_id)}">Open evidence source</button>
+        </article>
+      `).join('') || '<p class="muted padded">No claim stubs yet.</p>'}
+    </section>
+  `;
+  document.querySelectorAll('.object-link[data-id]').forEach((button) => button.addEventListener('click', () => selectSource(button.dataset.id)));
+}
+
+function renderReviewsPage(data) {
+  const queue = data.queue || [];
+  const events = data.events || [];
+  $('routePage').innerHTML = `
+    ${pageHeader('Reviews', 'Formal decisions, save-and-next queues, and review-event history.')}
+    ${metricCards([
+      { label: 'Review events', value: data.counts?.review_events || 0 },
+      { label: 'Annotations', value: data.counts?.annotations || 0 },
+      { label: 'Open queues', value: queue.filter((item) => Number(item.count || 0) > 0).length },
+    ])}
+    <section class="page-two-col">
+      <div class="panel page-panel">
+        <div class="panel-title-row"><h2>Review Queues</h2><span class="status-badge info">decision work</span></div>
+        ${queue.map((item) => `
+          <article class="queue-card">
+            <strong>${escapeHtml(item.label)}</strong>
+            <span>${escapeHtml(item.count)}</span>
+            <p>${escapeHtml(item.reason)}</p>
+          </article>
+        `).join('')}
+      </div>
+      <div class="panel page-panel">
+        <div class="panel-title-row"><h2>Recent Events</h2><span class="status-badge">append-only</span></div>
+        ${events.map((row) => `
+          <article class="review-item compact">
+            <div class="tag-line"><span class="pill">${escapeHtml(row.event_type)}</span><span class="pill">${escapeHtml(row.subject_type)}</span></div>
+            <p>${escapeHtml(row.source_evidence_id)}</p>
+            <div class="muted">${escapeHtml(fmtDate(row.created_at))} · ${escapeHtml(row.actor)}</div>
+          </article>
+        `).join('') || '<p class="muted padded">No review events yet.</p>'}
+      </div>
+    </section>
+  `;
+}
+
+function renderPublishingPage(data) {
+  const checks = data.checks || [];
+  $('routePage').innerHTML = `
+    ${pageHeader('Publishing', 'Frozen snapshots and approval gates before public website reuse.')}
+    ${metricCards([
+      { label: 'Bundles', value: (data.bundles || []).length },
+      { label: 'Checks', value: checks.length },
+      { label: 'Blocked', value: checks.filter((item) => item.state === 'blocked').length },
+    ])}
+    <section class="panel page-panel">
+      <div class="panel-title-row"><h2>Publication Checks</h2><span class="status-badge warn">snapshot not active yet</span></div>
+      ${checks.map((item) => `
+        <article class="check-row">
+          <span class="status-badge ${item.state === 'pass' ? 'ok' : item.state === 'blocked' ? 'danger' : 'warn'}">${escapeHtml(item.state)}</span>
+          <strong>${escapeHtml(item.label)}</strong>
+        </article>
+      `).join('')}
+      <p class="muted padded">${escapeHtml(data.snapshot_policy || '')}</p>
+    </section>
+  `;
+}
+
+function renderTaxonomyPage(data) {
+  const core = data.core || {};
+  const usage = data.usage || {};
+  const group = (title, terms, used = []) => `
+    <section class="panel page-panel">
+      <div class="panel-title-row"><h2>${escapeHtml(title)}</h2><span class="status-badge">controlled terms</span></div>
+      <div class="chip-cloud">${(terms || []).map((term) => {
+        const hit = (used || []).find((row) => row.term === term);
+        return `<span class="entity-chip"><strong>${escapeHtml(term)}</strong><em>${escapeHtml(hit?.usage ?? 0)} uses</em></span>`;
+      }).join('')}</div>
+    </section>
+  `;
+  $('routePage').innerHTML = `
+    ${pageHeader('Taxonomy', 'Governed labels for entities, evidence, claim properties, and review reasons.')}
+    <section class="page-two-col">
+      ${group('Entity types', core.entity_types, usage.entity_types)}
+      ${group('Claim properties', core.claim_properties, usage.claim_types)}
+      ${group('Evidence types', core.evidence_types, [])}
+      ${group('Review reason codes', core.review_reason_codes, [])}
+    </section>
+  `;
+}
+
+function renderRoutePage(route, data) {
+  if (route === 'projects') return renderProjectsPage(data);
+  if (route === 'library') return renderLibraryPage(data);
+  if (route === 'evidence') return renderEvidencePage(data);
+  if (route === 'entities') return renderEntitiesPage(data);
+  if (route === 'claims') return renderClaimsPage(data);
+  if (route === 'reviews') return renderReviewsPage(data);
+  if (route === 'publishing') return renderPublishingPage(data);
+  if (route === 'taxonomy') return renderTaxonomyPage(data);
+}
+
+function routeQuery() {
+  const params = new URLSearchParams({ limit: state.limit });
+  if (state.q) params.set('q', state.q);
+  if (state.kind) params.set('kind', state.kind);
+  if (state.project) params.set('project', state.project);
+  return params.toString();
+}
+
+function updateRouteVisibility() {
+  const route = state.route;
+  const showHome = route === 'home';
+  const showInbox = route === 'home' || route === 'inbox';
+  document.querySelector('.brief-hero')?.classList.toggle('hidden', !showHome);
+  document.querySelector('.brief-grid')?.classList.toggle('hidden', !showHome);
+  document.querySelector('.home-grid')?.classList.toggle('hidden', !showHome);
+  $('inbox')?.classList.toggle('hidden', !showInbox);
+  $('routePage')?.classList.toggle('hidden', showHome || route === 'inbox');
+  document.querySelectorAll('[data-route]').forEach((button) => button.classList.toggle('active', button.dataset.route === route));
+}
+
+async function loadRoutePage() {
+  updateRouteVisibility();
+  if (state.route === 'home') {
+    await loadHome();
+    return;
+  }
+  if (state.route === 'inbox') {
+    await loadInbox();
+    return;
+  }
+  const config = routeConfig[state.route];
+  if (!config) return;
+  $('routePage').innerHTML = `${pageHeader(config.title, 'Loading route read model...')}<div class="empty-state panel"><h2>Loading</h2><p>Building the ${escapeHtml(config.title)} view.</p></div>`;
+  try {
+    const data = await fetchJson(`${config.endpoint}?${routeQuery()}`);
+    renderRoutePage(state.route, data);
+  } catch (error) {
+    $('routePage').innerHTML = `${pageHeader(config.title, 'Could not load this read model.')}<div class="empty-state panel"><h2>${escapeHtml(config.title)} error</h2><p>${escapeHtml(error.message)}</p></div>`;
+  }
+}
+
+function setRoute(route, push = true) {
+  state.route = routeConfig[route] ? route : 'home';
+  if (push) history.replaceState(null, '', `#${state.route}`);
+  loadRoutePage();
+}
+
 function renderInbox(rows) {
   state.rows = rows;
   if (!rows.length) {
@@ -287,21 +638,90 @@ function renderKv(items) {
 function renderNormalized(source) {
   const latest = source.latest || {};
   const links = (latest.links || []).map((link) => `<a href="${escapeHtml(link)}" target="_blank" rel="noreferrer">${escapeHtml(link)}</a>`).join('<br>');
+  const raw = latest.raw || {};
   $('tab-normalized').innerHTML = `
-    ${renderKv([
-      ['Evidence ID', latest.evidence_id],
-      ['Collector run', latest.collector_run_id],
-      ['Capture method', latest.capture_method],
-      ['Project', latest.source_project],
-      ['Author / domain', [latest.author_handle ? '@' + latest.author_handle : '', latest.domain].filter(Boolean).join(' · ')],
-      ['Captured', fmtDate(latest.captured_at)],
-      ['Ingested', fmtDate(latest.ingested_at)],
-      ['Topics', (latest.topics || []).join(', ')],
-      ['Entities', (latest.entities || []).join(', ')],
-    ])}
-    ${links ? `<h3>Links</h3><p>${links}</p>` : ''}
-    <h3>Normalized text</h3>
-    <div class="source-text">${escapeHtml(latest.text || '(no extracted text)')}</div>
+    <div class="source-summary-grid">
+      <section class="card">
+        <h3>Source identity</h3>
+        ${renderKv([
+          ['Evidence ID', latest.evidence_id],
+          ['Collector run', latest.collector_run_id],
+          ['Capture method', latest.capture_method],
+          ['Project', latest.source_project],
+          ['Author / domain', [latest.author_handle ? '@' + latest.author_handle : '', latest.domain].filter(Boolean).join(' · ')],
+          ['Captured', fmtDate(latest.captured_at)],
+          ['Ingested', fmtDate(latest.ingested_at)],
+          ['Topics', (latest.topics || []).join(', ')],
+          ['Entities', (latest.entities || []).join(', ')],
+        ])}
+        ${links ? `<h3>Links</h3><p>${links}</p>` : ''}
+      </section>
+      <section class="card">
+        <h3>Capture state</h3>
+        ${renderKv([
+          ['Source kind', latest.source_kind],
+          ['Has media', latest.has_media ? 'yes' : 'no'],
+          ['Has OCR', latest.has_ocr ? 'yes' : 'no'],
+          ['Raw fields', Object.keys(raw).length],
+          ['Artifacts', (latest.artifact_paths || []).length],
+        ])}
+      </section>
+    </div>
+    <div class="side-by-side">
+      <section class="source-pane">
+        <div class="pane-title"><h3>Original / capture metadata</h3><span class="status-badge">immutable layer</span></div>
+        <div class="source-text compact">${escapeHtml(JSON.stringify({
+          url: latest.canonical_url,
+          source_kind: latest.source_kind,
+          author_handle: latest.author_handle,
+          posted_at: latest.posted_at,
+          captured_at: latest.captured_at,
+          collector_run_id: latest.collector_run_id,
+          artifact_paths: (latest.artifact_paths || []).map((item) => item.path),
+        }, null, 2))}</div>
+      </section>
+      <section class="source-pane">
+        <div class="pane-title"><h3>Normalized text</h3><span class="status-badge warn">derived layer</span></div>
+        <div class="source-text">${escapeHtml(latest.text || '(no extracted text)')}</div>
+      </section>
+    </div>
+  `;
+}
+
+function renderProvenance(source) {
+  const latest = source.latest || {};
+  const raw = latest.raw || {};
+  const review = source.review || {};
+  const artifacts = latest.artifact_paths || [];
+  const steps = [
+    { label: 'Captured source', value: latest.canonical_url || latest.evidence_id, meta: fmtDate(latest.captured_at) },
+    { label: 'Collector run', value: latest.collector_run_id || '(unknown)', meta: latest.capture_method || '' },
+    { label: 'Normalized evidence row', value: latest.evidence_id || '', meta: fmtDate(latest.ingested_at) },
+    { label: 'Artifacts', value: `${artifacts.length} local artifact(s)`, meta: artifacts.map((item) => item.path).slice(0, 3).join(' · ') },
+    { label: 'Machine observations', value: `${(source.annotations || []).length} semantic · ${(source.ocr || []).length} OCR · ${(source.vl || []).length} VL`, meta: 'review before promotion' },
+    { label: 'Human review events', value: `${review.counts?.events || 0} event(s)`, meta: 'append-only JSONL + ClickHouse projection' },
+  ];
+  $('tab-provenance').innerHTML = `
+    <div class="provenance-stack">
+      ${steps.map((step, index) => `
+        <article class="provenance-step">
+          <span>${String(index + 1).padStart(2, '0')}</span>
+          <div>
+            <h3>${escapeHtml(step.label)}</h3>
+            <p>${escapeHtml(step.value)}</p>
+            ${step.meta ? `<em>${escapeHtml(step.meta)}</em>` : ''}
+          </div>
+        </article>
+      `).join('')}
+    </div>
+    <section class="card">
+      <h3>Raw capture hints</h3>
+      <pre>${escapeHtml(JSON.stringify({
+        raw_keys: Object.keys(raw),
+        content_representations: raw.content_representations || {},
+        omitted_content: raw.omitted_content || raw.omissions || [],
+      }, null, 2))}</pre>
+    </section>
   `;
 }
 
@@ -930,6 +1350,7 @@ async function selectSource(id) {
     renderRelated(source);
     renderRaw(source);
     renderReview(source);
+    renderProvenance(source);
     document.querySelectorAll('.row').forEach((row) => row.classList.toggle('active', row.dataset.id === id));
   } catch (error) {
     $('sourceTitle').textContent = 'Source error';
@@ -947,6 +1368,7 @@ function wireEvents() {
     loadHome();
     loadFacets();
     loadInbox();
+    loadRoutePage();
     if (state.selectedId) selectSource(state.selectedId);
   });
   $('datalabCase').addEventListener('click', () => {
@@ -958,13 +1380,14 @@ function wireEvents() {
     $('projectSelect').value = '';
     loadFacets();
     loadInbox();
+    setRoute('inbox');
   });
   $('captureSourceButton').addEventListener('click', () => {
-    document.querySelector('[data-home-section="inbox"]')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    setRoute('inbox');
   });
   $('openInboxLink').addEventListener('click', (event) => {
     event.preventDefault();
-    document.querySelector('[data-home-section="inbox"]')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    setRoute('inbox');
   });
   $('allSourcesButton').addEventListener('click', () => {
     state.queue = 'all';
@@ -973,39 +1396,47 @@ function wireEvents() {
     $('searchInput').value = '';
     loadFacets();
     loadInbox();
-    document.querySelector('[data-home-section="inbox"]')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    setRoute('library');
   });
-  document.querySelectorAll('[data-home-focus]').forEach((button) => {
+  document.querySelectorAll('[data-route]').forEach((button) => {
     button.addEventListener('click', () => {
-      document.querySelectorAll('[data-home-focus]').forEach((item) => item.classList.toggle('active', item === button));
-      const focus = button.dataset.homeFocus || 'brief';
-      const target = document.querySelector(`[data-home-section="${focus}"]`) || document.querySelector('[data-home-section="brief"]');
-      target?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      setRoute(button.dataset.route || 'home');
     });
   });
   $('searchInput').addEventListener('input', () => {
     state.q = $('searchInput').value.trim();
     clearTimeout(window.__inboxTimer);
-    window.__inboxTimer = setTimeout(loadInbox, 250);
+    window.__inboxTimer = setTimeout(() => {
+      if (state.route === 'home' || state.route === 'inbox') loadInbox();
+      else loadRoutePage();
+    }, 250);
   });
   $('projectSelect').addEventListener('change', () => {
     state.project = $('projectSelect').value;
     loadInbox();
+    if (state.route !== 'home' && state.route !== 'inbox') loadRoutePage();
   });
   $('limitSelect').addEventListener('change', () => {
     state.limit = $('limitSelect').value;
     loadInbox();
+    if (state.route !== 'home' && state.route !== 'inbox') loadRoutePage();
   });
   document.querySelectorAll('.tab').forEach((tab) => {
     tab.addEventListener('click', () => activateTab(tab.dataset.tab));
+  });
+  window.addEventListener('hashchange', () => {
+    const route = (location.hash || '').replace(/^#/, '');
+    setRoute(route, false);
   });
 }
 
 async function init() {
   wireEvents();
+  state.route = routeConfig[(location.hash || '').replace(/^#/, '')] ? (location.hash || '').replace(/^#/, '') : 'home';
   await loadHome();
   await loadFacets();
   await loadInbox();
+  await loadRoutePage();
 }
 
 init().catch((error) => {

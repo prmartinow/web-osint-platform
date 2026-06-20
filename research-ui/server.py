@@ -2059,6 +2059,7 @@ def home_summary():
           (SELECT count() FROM evidence_selections FINAL) AS selections,
           (SELECT count() FROM review_annotations FINAL) AS annotations,
           (SELECT count() FROM proposed_facts FINAL) AS proposed_facts,
+          (SELECT count() FROM normalized_corrections FINAL) AS normalized_corrections,
           (SELECT count() FROM entity_links FINAL) AS entity_links,
           (SELECT count() FROM claim_records FINAL) AS claim_records,
           (SELECT count() FROM research_review_events) AS review_events
@@ -2086,7 +2087,7 @@ def home_summary():
         ORDER BY
           (has_media + has_ocr + least(observations, 3)) DESC,
           last_ingested_at DESC
-        LIMIT 4
+        LIMIT 12
         """,
         fallback=[],
     )
@@ -2123,10 +2124,9 @@ def home_summary():
     blockers = max(0, gaps // 3)
     queue = [
         {"label": "New captures", "count": unique, "hint": "triage evidence"},
-        {"label": "Evidence selections", "count": int(review_counts.get("selections") or 0), "hint": "anchors ready"},
-        {"label": "Proposed facts", "count": proposed_facts, "hint": "needs validation"},
-        {"label": "Corrections", "count": normalized_corrections, "hint": "versioned overlays"},
-        {"label": "Claim stubs", "count": claim_records, "hint": "review wording"},
+        {"label": "Entity matches", "count": int(review_counts.get("entity_links") or 0), "hint": "resolve names"},
+        {"label": "Contradictions", "count": claim_records, "hint": "claim checks"},
+        {"label": "Assigned reviews", "count": int(review_counts.get("review_events") or 0), "hint": "decision work"},
     ]
     return {
         "active_project": {
@@ -2139,16 +2139,16 @@ def home_summary():
             "question": "What evidence supports recent capability and efficiency claims?",
             "scope": "Scope: announcements, model cards, papers, repositories, independent benchmarks, and source-linked social evidence.",
             "stats": [
-                {"label": "sources", "value": unique},
-                {"label": "review records", "value": review_total},
-                {"label": "proposed facts", "value": proposed_facts},
-                {"label": "claim stubs", "value": claim_records},
+                {"label": "sources", "value": unique, "route": "library"},
+                {"label": "review records", "value": review_total, "route": "reviews"},
+                {"label": "proposed facts", "value": proposed_facts, "route": "evidence"},
+                {"label": "claim stubs", "value": claim_records, "route": "claims"},
             ],
             "workflow": [
-                {"label": "Capture", "percent": capture_score},
-                {"label": "Triage", "percent": percent(unique, max(unique + gaps, 1))},
-                {"label": "Claims", "percent": percent(claim_records, max(claim_records + blockers + 1, 1))},
-                {"label": "Review", "percent": review_score},
+                {"label": "Capture", "percent": capture_score, "route": "library"},
+                {"label": "Triage", "percent": percent(unique, max(unique + gaps, 1)), "route": "inbox"},
+                {"label": "Claims", "percent": percent(claim_records, max(claim_records + blockers + 1, 1)), "route": "claims"},
+                {"label": "Review", "percent": review_score, "route": "reviews"},
             ],
         },
         "queue": queue,
@@ -2161,9 +2161,9 @@ def home_summary():
             "blockers": blockers,
         },
         "open_questions": [
-            "Are reported scores reproducible?",
-            "Which release uses the revised license?",
-            "What hardware underlies the cost claims?",
+            {"text": "Are reported scores reproducible?", "owner": "unassigned", "blocked": True},
+            {"text": "Which release uses the revised license?", "owner": "unassigned", "blocked": False},
+            {"text": "What hardware underlies the cost claims?", "owner": "unassigned", "blocked": False},
         ],
     }
 

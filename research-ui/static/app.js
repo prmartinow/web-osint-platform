@@ -13,6 +13,8 @@ const state = {
   currentSource: null,
   currentDoc: null,
   selectedBlock: null,
+  homeEvidenceKind: '',
+  inboxPreviewTab: 'preview',
   projectPhase: '',
   projectOwner: '',
   libraryMode: 'hybrid',
@@ -23,6 +25,7 @@ const state = {
   libraryIncludeArchived: false,
   librarySelectedId: '',
   librarySelectedIds: new Set(),
+  libraryPreviewTab: 'overview',
 };
 
 const $ = (id) => document.getElementById(id);
@@ -177,6 +180,34 @@ function routeHash() {
 
 function replaceRouteHash() {
   history.replaceState(null, '', routeHash());
+}
+
+function sourceKindForCoverage(key) {
+  if (key === 'x') return 'x_post';
+  if (key === 'web') return 'web_page';
+  if (key === 'papers') return 'user_input';
+  if (key === 'media') return 'media';
+  return '';
+}
+
+function openInboxQueue(queue = 'all', q = '') {
+  state.queue = queue;
+  state.q = q;
+  state.previewTaskKey = '';
+  syncInboxSearchInputs(q);
+  setRoute('inbox');
+}
+
+function openLibraryView({ q = '', kind = '', project = state.project || '', scope = 'corpus', mode = 'hybrid' } = {}) {
+  state.q = q;
+  state.kind = kind;
+  state.project = project;
+  state.libraryScope = scope;
+  state.libraryMode = mode;
+  state.librarySelectedId = '';
+  syncInboxSearchInputs(q);
+  if ($('projectSelect')) $('projectSelect').value = project;
+  setRoute('library');
 }
 
 async function fetchJson(url) {
@@ -337,16 +368,16 @@ function renderHome(data) {
   $('activeQuestionScope').textContent = brief.scope || '';
 
   $('briefStats').innerHTML = (brief.stats || []).map((item) => `
-    <span class="stat-chip"><strong>${escapeHtml(item.value ?? 0)}</strong>${escapeHtml(item.label || '')}</span>
+    <button type="button" class="stat-chip stat-action" data-home-route="${escapeHtml(item.route || 'library')}"><strong>${escapeHtml(item.value ?? 0)}</strong>${escapeHtml(item.label || '')}</button>
   `).join('');
 
   const workflow = brief.workflow || [];
   const workflowHtml = workflow.map((item) => `
-    <div class="workflow-row">
+    <button type="button" class="workflow-row" data-home-route="${escapeHtml(item.route || 'inbox')}" title="${escapeHtml(item.label || '')}: ${escapeHtml(item.percent ?? 0)}%">
       <span>${escapeHtml(item.label || '')}</span>
       ${progressBar(item.percent)}
       <strong>${escapeHtml(item.percent ?? 0)}%</strong>
-    </div>
+    </button>
   `).join('');
   if (workflowHtml) {
     $('briefStats').insertAdjacentHTML('beforeend', `<div class="workflow-stack">${workflowHtml}</div>`);
@@ -360,7 +391,17 @@ function renderHome(data) {
     </button>
   `).join('');
 
-  $('signalRows').innerHTML = (data.recent_evidence || []).length ? (data.recent_evidence || []).map((row) => `
+  const evidenceRows = data.recent_evidence || [];
+  const sourceOptions = [...new Map(evidenceRows.map((row) => [row.source_kind || '', row.source_label || sourceLabelFor(row)])).entries()]
+    .filter(([id]) => id)
+    .sort((a, b) => a[1].localeCompare(b[1]));
+  if ($('homeSourceFilter')) {
+    $('homeSourceFilter').innerHTML = '<option value="">All source types</option>' + sourceOptions.map(([id, label]) => (
+      `<option value="${escapeHtml(id)}" ${state.homeEvidenceKind === id ? 'selected' : ''}>${escapeHtml(label)}</option>`
+    )).join('');
+  }
+  const visibleEvidenceRows = evidenceRows.filter((row) => !state.homeEvidenceKind || row.source_kind === state.homeEvidenceKind).slice(0, 6);
+  $('signalRows').innerHTML = visibleEvidenceRows.length ? visibleEvidenceRows.map((row) => `
     <button class="signal-row" data-id="${escapeHtml(row.evidence_id)}">
       <span class="source-glyph">${escapeHtml(sourceGlyph(row.source_kind))}</span>
       <span class="signal-main">
@@ -373,12 +414,12 @@ function renderHome(data) {
         <span class="status-badge">${escapeHtml(row.review_hint || 'triage')}</span>
       </span>
     </button>
-  `).join('') : '<p class="muted padded">No evidence has landed yet.</p>';
+  `).join('') : '<p class="muted padded">No evidence has landed for this source filter yet.</p>';
 
   const contradictions = data.contradictions || [];
   $('contradictionCount').textContent = `${contradictions.length} open`;
   $('contradictionList').innerHTML = contradictions.length ? contradictions.map((item) => `
-    <button class="compact-row">
+    <button class="compact-row" data-home-route="claims">
       <strong>${escapeHtml(item.title)}</strong>
       <span>${escapeHtml(item.detail || '')}</span>
       <em>${escapeHtml(item.sources ?? 0)} sources</em>
@@ -394,7 +435,10 @@ function renderHome(data) {
       <tbody>${coverageRows.map((row) => `
         <tr>
           <td>${escapeHtml(row.topic)}</td>
-          ${['x', 'web', 'papers', 'media'].map((key) => `<td><span class="dot-scale count-${Math.min(5, Number(row[key] || 0))}"></span></td>`).join('')}
+          ${['x', 'web', 'papers', 'media'].map((key) => {
+            const count = Number(row[key] || 0);
+            return `<td><button type="button" class="coverage-cell" data-coverage-topic="${escapeHtml(row.topic)}" data-coverage-kind="${escapeHtml(key)}" aria-label="${escapeHtml(row.topic)} ${key}: ${count} source${count === 1 ? '' : 's'}"><span class="dot-scale count-${Math.min(5, count)}"></span><strong>${escapeHtml(count)}</strong></button></td>`;
+          }).join('')}
         </tr>
       `).join('')}</tbody>
     </table>
@@ -409,30 +453,66 @@ function renderHome(data) {
     <div class="tag-line">${publication.blockers ? `<span class="status-badge danger">${escapeHtml(publication.blockers)} blockers</span>` : '<span class="status-badge ok">No blockers recorded</span>'}</div>
   `;
 
-  $('openQuestions').innerHTML = (data.open_questions || []).map((question, index) => `
-    <button class="compact-row">
+  $('openQuestions').innerHTML = (data.open_questions || []).map((question, index) => {
+    const text = typeof question === 'string' ? question : question.text || question.question || '';
+    const owner = typeof question === 'string' ? 'unassigned' : question.owner || 'unassigned';
+    const blocked = typeof question !== 'string' && question.blocked;
+    return `
+    <article class="compact-row question-card">
       <span class="question-number">${String(index + 1).padStart(2, '0')}</span>
-      <strong>${escapeHtml(question)}</strong>
-    </button>
-  `).join('');
+      <strong>${escapeHtml(text)}</strong>
+      <em>${escapeHtml(owner)}${blocked ? ' · blocked' : ''}</em>
+      <div class="question-actions">
+        <button type="button" class="text-button" data-question-route="projects">Open</button>
+        <button type="button" class="text-button" data-question-route="library" data-question-text="${escapeHtml(text)}">Find evidence</button>
+        <button type="button" class="text-button" data-question-route="inbox" data-question-text="${escapeHtml(text)}">Assign</button>
+      </div>
+    </article>
+  `;
+  }).join('');
 
   document.querySelectorAll('.signal-row[data-id]').forEach((button) => {
     button.addEventListener('click', () => selectSource(button.dataset.id));
   });
   const queueRoutes = {
     'New captures': 'source_triage',
-    'Evidence selections': 'selection_review',
-    'Proposed facts': 'fact_review',
-    'Corrections': 'correction_review',
-    'Claim stubs': 'claim_review',
+    'Entity matches': 'entity_resolution',
+    'Contradictions': 'claim_review',
+    'Assigned reviews': 'needs_review',
   };
   document.querySelectorAll('[data-queue-jump]').forEach((button) => {
     button.addEventListener('click', () => {
-      state.queue = queueRoutes[button.dataset.queueJump] || 'all';
-      state.previewTaskKey = '';
-      setRoute('inbox');
+      openInboxQueue(queueRoutes[button.dataset.queueJump] || 'all');
     });
   });
+  document.querySelectorAll('[data-home-route]').forEach((button) => {
+    button.addEventListener('click', () => setRoute(button.dataset.homeRoute || 'home'));
+  });
+  document.querySelectorAll('[data-coverage-kind]').forEach((button) => {
+    button.addEventListener('click', () => {
+      openLibraryView({
+        q: button.dataset.coverageTopic || '',
+        kind: sourceKindForCoverage(button.dataset.coverageKind || ''),
+        scope: 'corpus',
+        mode: 'hybrid',
+      });
+    });
+  });
+  document.querySelectorAll('[data-question-route]').forEach((button) => {
+    button.addEventListener('click', () => {
+      const route = button.dataset.questionRoute || 'projects';
+      const text = button.dataset.questionText || '';
+      if (route === 'library') return openLibraryView({ q: text, mode: 'hybrid' });
+      if (route === 'inbox') return openInboxQueue('needs_review', text);
+      return setRoute(route);
+    });
+  });
+  if ($('homeSourceFilter')) {
+    $('homeSourceFilter').onchange = () => {
+      state.homeEvidenceKind = $('homeSourceFilter').value;
+      renderHome(state.home);
+    };
+  }
 }
 
 async function loadHome() {
@@ -799,7 +879,13 @@ function renderProjectsPage(data) {
               <label><span>Exclusion criteria</span><textarea data-brief-list="exclusion_criteria">${escapeHtml(briefLines(brief.exclusion_criteria))}</textarea></label>
             </div>
             <div class="brief-editor-section">
-              <div class="panel-title-row"><h2>Open Questions</h2><span class="status-badge warn">${escapeHtml((brief.open_questions || []).length)} active</span></div>
+              <div class="panel-title-row">
+                <h2>Open Questions</h2>
+                <div class="title-action-group">
+                  <span class="status-badge warn">${escapeHtml((brief.open_questions || []).length)} active</span>
+                  <button id="projectAddQuestion" type="button" class="secondary">Add question</button>
+                </div>
+              </div>
               <textarea data-brief-list="open_questions">${escapeHtml(briefLines(brief.open_questions))}</textarea>
               ${renderQuestionMoveControls(brief.open_questions || [])}
             </div>
@@ -891,6 +977,15 @@ function renderProjectsPage(data) {
       moveTextareaLine('[data-brief-list="open_questions"]', index, delta);
     });
   });
+  $('projectAddQuestion')?.addEventListener('click', () => {
+    const textarea = document.querySelector('[data-brief-list="open_questions"]');
+    if (!textarea || !activeRow) return;
+    const lines = splitLines(textarea.value);
+    lines.push('New open question');
+    textarea.value = lines.join('\n');
+    textarea.focus();
+    textarea.dispatchEvent(new Event('input', { bubbles: true }));
+  });
   $('projectBriefPreviewButton')?.addEventListener('click', () => {
     if (!activeRow) return;
     const payload = projectBriefPayload(activeRow);
@@ -937,6 +1032,12 @@ function renderLibraryPage(data) {
     <section class="library-shell">
       <aside class="panel library-facet-panel">
         <div class="panel-title-row"><h2>Scope</h2><span class="status-badge">${escapeHtml(query.mode || state.libraryMode)}</span></div>
+        <label class="library-control"><span>Search scope</span>
+          <select id="libraryScope">
+            <option value="corpus" ${(query.scope || state.libraryScope) === 'corpus' ? 'selected' : ''}>Entire corpus</option>
+            <option value="project" ${(query.scope || state.libraryScope) === 'project' || state.project ? 'selected' : ''}>Current project</option>
+          </select>
+        </label>
         <label class="library-control"><span>Search mode</span>
           <div class="segmented-control" id="libraryModeButtons">
             ${['exact', 'semantic', 'hybrid'].map((mode) => `<button type="button" data-library-mode="${mode}" class="${(query.mode || state.libraryMode) === mode ? 'active' : ''}">${escapeHtml(titleCase(mode))}</button>`).join('')}
@@ -969,7 +1070,7 @@ function renderLibraryPage(data) {
       </aside>
       <section class="panel library-results-panel">
         <div class="library-search-strip">
-          <label><span>Corpus search</span><input id="librarySearchInput" type="search" value="${escapeHtml(query.text ?? state.q)}" placeholder="Search titles, URLs, handles, extracted text, OCR, claims, or ids"></label>
+          <label><span>${(state.libraryScope === 'project' || state.project) ? 'Project search' : 'Corpus search'}</span><input id="librarySearchInput" type="search" value="${escapeHtml(query.text ?? state.q)}" placeholder="Search titles, URLs, handles, extracted text, OCR, claims, or ids"></label>
           <button id="libraryClearFilters" class="secondary" type="button">Clear</button>
         </div>
         <div class="library-explanation">
@@ -1065,6 +1166,10 @@ function renderLibraryPreview(preview) {
   const counts = preview.counts || {};
   const artifacts = preview.artifacts || [];
   const review = preview.review || {};
+  const captures = preview.captures || [];
+  const activeTab = ['overview', 'captures', 'artifacts', 'research'].includes(state.libraryPreviewTab) ? state.libraryPreviewTab : 'overview';
+  const tabButton = (id, label) => `<button type="button" data-library-preview-tab="${id}" class="${activeTab === id ? 'active' : ''}">${label}</button>`;
+  const sectionClass = (id) => `library-preview-section ${activeTab === id ? 'active' : ''}`;
   return `
     <div class="library-preview-head">
       <span class="source-glyph">${escapeHtml(sourceGlyph(source.source_kind))}</span>
@@ -1073,45 +1178,72 @@ function renderLibraryPreview(preview) {
         <p>${escapeHtml([source_kind_labelClient(source.source_kind), source.author_handle ? '@' + source.author_handle : source.domain, fmtDate(source.captured_at)].filter(Boolean).join(' · '))}</p>
       </div>
     </div>
-    <div class="library-layer-stack">
-      ${libraryLayerRow('Source record', source.evidence_id || '', 'Mutable logical identity; groups captures and research links.')}
-      ${libraryLayerRow('Immutable captures', counts.captures || 0, 'Frozen observations with timestamps, hashes, and collection context.')}
-      ${libraryLayerRow('Normalized extraction', source.text ? `${String(source.text).length} chars` : 'missing', 'Parsed text, OCR, transcript, VL output, and proposed structure remain observations.')}
-      ${libraryLayerRow('Artifact manifest', counts.artifacts || 0, 'DOM, screenshots, PDFs, media, OCR/VL files, source bundles, or repo files.')}
-      ${libraryLayerRow('Curated research', `${counts.evidence || 0} evidence · ${counts.claims || 0} claims`, 'Human-selected evidence and claim records with anchors.')}
-    </div>
-    <section class="preview-card">
-      <h4>Discovery trail</h4>
-      <p>${source.source_kind === 'google_search_page' || source.source_kind === 'search_result' ? 'This record is discovery provenance. The opened captured page should become the substantive source unless the search result itself is being studied.' : 'This record can be used as a substantive source if its capture and normalized extraction are sufficient.'}</p>
-      ${source.canonical_url ? `<a href="${escapeHtml(source.canonical_url)}" target="_blank" rel="noreferrer">${escapeHtml(source.canonical_url)}</a>` : ''}
-    </section>
-    <section class="preview-card">
-      <h4>Current capture</h4>
-      <div class="source-trail">
-        <span><strong>Captured</strong>${escapeHtml(fmtDate(source.captured_at) || 'unknown')}</span>
-        <span><strong>Ingested</strong>${escapeHtml(fmtDate(source.ingested_at) || 'unknown')}</span>
-        <span><strong>Collector</strong>${escapeHtml(source.collector_run_id || 'unknown')}</span>
-        <span><strong>Project</strong>${escapeHtml(source.source_project || '(unassigned)')}</span>
+    <nav class="library-preview-tabs" aria-label="Source preview layers">
+      ${tabButton('overview', 'Overview')}
+      ${tabButton('captures', 'Captures')}
+      ${tabButton('artifacts', 'Artifacts')}
+      ${tabButton('research', 'Research')}
+    </nav>
+    <section class="${sectionClass('overview')}" data-library-preview-section="overview">
+      <div class="library-layer-stack">
+        ${libraryLayerRow('Source record', source.evidence_id || '', 'Mutable logical identity; groups captures and research links.')}
+        ${libraryLayerRow('Immutable captures', counts.captures || 0, 'Frozen observations with timestamps, hashes, and collection context.')}
+        ${libraryLayerRow('Normalized extraction', source.text ? `${String(source.text).length} chars` : 'missing', 'Parsed text, OCR, transcript, VL output, and proposed structure remain observations.')}
+        ${libraryLayerRow('Artifact manifest', counts.artifacts || 0, 'DOM, screenshots, PDFs, media, OCR/VL files, source bundles, or repo files.')}
+        ${libraryLayerRow('Curated research', `${counts.evidence || 0} evidence · ${counts.claims || 0} claims`, 'Human-selected evidence and claim records with anchors.')}
       </div>
+      <section class="preview-card">
+        <h4>Discovery trail</h4>
+        <p>${source.source_kind === 'google_search_page' || source.source_kind === 'search_result' ? 'This record is discovery provenance. The opened captured page should become the substantive source unless the search result itself is being studied.' : 'This record can be used as a substantive source if its capture and normalized extraction are sufficient.'}</p>
+        ${source.canonical_url ? `<a href="${escapeHtml(source.canonical_url)}" target="_blank" rel="noreferrer">${escapeHtml(source.canonical_url)}</a>` : ''}
+      </section>
     </section>
-    <section class="preview-card">
-      <h4>Artifacts</h4>
-      ${artifacts.length ? `<div class="artifact-link-list">${artifacts.slice(0, 6).map((item) => `<a href="${escapeHtml(item.url || '#')}" target="_blank" rel="noreferrer">${escapeHtml(item.path || item.url)}</a>`).join('')}</div>` : '<p>No artifact paths are linked to this source yet.</p>'}
-      <div class="tag-line">
-        <span class="pill">${escapeHtml(counts.ocr || 0)} OCR</span>
-        <span class="pill">${escapeHtml(counts.vl || 0)} VL</span>
-        <span class="pill">${escapeHtml(counts.annotations || 0)} annotations</span>
-      </div>
+    <section class="${sectionClass('captures')}" data-library-preview-section="captures">
+      <section class="preview-card">
+        <h4>Current capture</h4>
+        <div class="source-trail">
+          <span><strong>Captured</strong>${escapeHtml(fmtDate(source.captured_at) || 'unknown')}</span>
+          <span><strong>Ingested</strong>${escapeHtml(fmtDate(source.ingested_at) || 'unknown')}</span>
+          <span><strong>Collector</strong>${escapeHtml(source.collector_run_id || 'unknown')}</span>
+          <span><strong>Project</strong>${escapeHtml(source.source_project || '(unassigned)')}</span>
+        </div>
+      </section>
+      <section class="preview-card">
+        <h4>Capture history</h4>
+        <div class="library-capture-list">
+          ${captures.length ? captures.slice(0, 8).map((capture, index) => `
+            <div class="library-capture-row">
+              <span>${String(index + 1).padStart(2, '0')}</span>
+              <strong>${escapeHtml(fmtDate(capture.ingested_at || capture.captured_at) || 'unknown')}</strong>
+              <em>${escapeHtml(capture.collector_run_id || capture.capture_method || 'capture')}</em>
+            </div>
+          `).join('') : '<p>No immutable capture rows are linked yet.</p>'}
+        </div>
+      </section>
     </section>
-    <section class="preview-card">
-      <h4>Review objects</h4>
-      <div class="source-trail">
-        <span><strong>Evidence</strong>${escapeHtml(counts.evidence || 0)}</span>
-        <span><strong>Claims</strong>${escapeHtml(counts.claims || 0)}</span>
-        <span><strong>Entities</strong>${escapeHtml(counts.entities || 0)}</span>
-        <span><strong>Facts</strong>${escapeHtml((review.proposed_facts || []).length)}</span>
-      </div>
+    <section class="${sectionClass('artifacts')}" data-library-preview-section="artifacts">
+      <section class="preview-card">
+        <h4>Artifact manifest</h4>
+        ${artifacts.length ? `<div class="artifact-link-list">${artifacts.slice(0, 10).map((item) => `<a href="${escapeHtml(item.url || '#')}" target="_blank" rel="noreferrer">${escapeHtml(item.path || item.url)}</a>`).join('')}</div>` : '<p>No artifact paths are linked to this source yet.</p>'}
+        <div class="tag-line">
+          <span class="pill">${escapeHtml(counts.ocr || 0)} OCR</span>
+          <span class="pill">${escapeHtml(counts.vl || 0)} VL</span>
+          <span class="pill">${escapeHtml(counts.annotations || 0)} annotations</span>
+        </div>
+      </section>
     </section>
+    <section class="${sectionClass('research')}" data-library-preview-section="research">
+      <section class="preview-card">
+        <h4>Review objects</h4>
+        <div class="source-trail">
+          <span><strong>Evidence</strong>${escapeHtml(counts.evidence || 0)}</span>
+          <span><strong>Claims</strong>${escapeHtml(counts.claims || 0)}</span>
+          <span><strong>Entities</strong>${escapeHtml(counts.entities || 0)}</span>
+          <span><strong>Facts</strong>${escapeHtml((review.proposed_facts || []).length)}</span>
+        </div>
+      </section>
+    </section>
+    <div id="libraryPreviewActionStatus" class="review-status muted"></div>
     <div class="library-preview-actions">
       <button class="secondary" type="button" data-library-preview-action="assign_review">Assign review</button>
       <button class="secondary" type="button" data-library-preview-action="archive">Archive</button>
@@ -1160,6 +1292,11 @@ function wireLibraryEvents(data) {
       state.libraryMode = button.dataset.libraryMode || 'hybrid';
       reload();
     });
+  });
+  $('libraryScope')?.addEventListener('change', () => {
+    state.libraryScope = $('libraryScope').value || 'corpus';
+    if (state.libraryScope === 'corpus') state.project = '';
+    reload();
   });
   $('librarySourceKind')?.addEventListener('change', () => {
     state.kind = $('librarySourceKind').value;
@@ -1221,6 +1358,15 @@ function wireLibraryEvents(data) {
   document.querySelectorAll('[data-library-action], [data-library-preview-action]').forEach((button) => {
     button.addEventListener('click', async () => applyLibraryAction(button.dataset.libraryAction || button.dataset.libraryPreviewAction));
   });
+  document.querySelectorAll('[data-library-preview-tab]').forEach((button) => {
+    button.addEventListener('click', () => {
+      state.libraryPreviewTab = button.dataset.libraryPreviewTab || 'overview';
+      document.querySelectorAll('[data-library-preview-tab]').forEach((tab) => tab.classList.toggle('active', tab === button));
+      document.querySelectorAll('[data-library-preview-section]').forEach((section) => {
+        section.classList.toggle('active', section.dataset.libraryPreviewSection === state.libraryPreviewTab);
+      });
+    });
+  });
   $('libraryOpenSelected')?.addEventListener('click', () => applyLibraryAction('open_workbench'));
   $('libraryImportSource')?.addEventListener('click', () => {
     const status = $('libraryActionStatus');
@@ -1249,7 +1395,7 @@ function wireLibraryEvents(data) {
 async function applyLibraryAction(action) {
   const ids = Array.from(state.librarySelectedIds || []);
   if (!ids.length && state.librarySelectedId) ids.push(state.librarySelectedId);
-  const status = $('libraryActionStatus');
+  const status = $('libraryActionStatus') || $('libraryPreviewActionStatus');
   if (!ids.length) {
     if (status) status.textContent = 'Select at least one source record.';
     return;
@@ -1623,6 +1769,9 @@ function renderInboxPreview(row) {
   const sourceTitle = titleFor(row);
   const originalText = row.snippet || row.canonical_url || row.evidence_id || '';
   const candidateText = row.object_text || row.task_reason || row.snippet || '';
+  const activeTab = ['preview', 'proposed', 'metadata', 'activity'].includes(state.inboxPreviewTab) ? state.inboxPreviewTab : 'preview';
+  const previewTab = (id, label) => `<button class="${activeTab === id ? 'active' : ''}" type="button" data-preview-tab="${id}">${label}</button>`;
+  const previewSectionClass = (id) => `preview-card preview-section ${activeTab === id ? 'active' : ''}`;
   $('inboxPreview').className = 'task-preview';
   $('inboxPreview').innerHTML = `
     <div class="preview-topline">
@@ -1646,13 +1795,13 @@ function renderInboxPreview(row) {
     </section>
 
     <nav class="preview-tabs" aria-label="Task preview sections">
-      <button class="active" type="button">Original source</button>
-      <button type="button">Normalized</button>
-      <button type="button">Artifacts</button>
-      <button type="button">Provenance</button>
+      ${previewTab('preview', 'Preview')}
+      ${previewTab('proposed', 'Proposed change')}
+      ${previewTab('metadata', 'Metadata')}
+      ${previewTab('activity', 'Activity')}
     </nav>
 
-    <section class="preview-card source-card">
+    <section class="${previewSectionClass('preview')} source-card" data-preview-section="preview">
       <div class="source-card-head">
         <span class="source-glyph">${escapeHtml(sourceGlyph(row.source_kind))}</span>
         <div>
@@ -1664,7 +1813,7 @@ function renderInboxPreview(row) {
       <p>${escapeHtml(originalText || 'No source preview text available yet.')}</p>
     </section>
 
-    <section class="preview-card normalized-card">
+    <section class="${previewSectionClass('proposed')} normalized-card" data-preview-section="proposed">
       <h4>Proposed normalized work item</h4>
       <p>${escapeHtml(candidateText || 'No derived candidate text is available for this task yet.')}</p>
       <div class="tag-line">
@@ -1675,13 +1824,29 @@ function renderInboxPreview(row) {
       </div>
     </section>
 
-    <section class="preview-card">
-      <h4>Source trail</h4>
+    <section class="${previewSectionClass('metadata')}" data-preview-section="metadata">
+      <h4>Metadata and artifacts</h4>
       <div class="source-trail">
         <span><strong>Source</strong>${escapeHtml(sourceId || 'unknown')}</span>
         <span><strong>Task</strong>${escapeHtml(row.task_id || taskKeyFor(row))}</span>
         <span><strong>State</strong>${escapeHtml(titleCase(row.task_state || 'open'))}</span>
         <span><strong>Updated</strong>${escapeHtml(fmtDate(row.task_updated_at || row.last_ingested_at) || 'unknown')}</span>
+      </div>
+      <div class="tag-line preview-artifact-flags">
+        ${row.has_media ? '<span class="pill ok">media attached</span>' : '<span class="pill">no media flag</span>'}
+        ${row.has_ocr ? '<span class="pill ok">OCR available</span>' : '<span class="pill">no OCR flag</span>'}
+        <span class="pill">${escapeHtml(row.text_chars || 0)} text chars</span>
+        <span class="pill">${escapeHtml(row.observations || 0)} observations</span>
+      </div>
+    </section>
+
+    <section class="${previewSectionClass('activity')}" data-preview-section="activity">
+      <h4>Activity</h4>
+      <div class="source-trail">
+        <span><strong>Review type</strong>${escapeHtml(taskTypeLabel(row))}</span>
+        <span><strong>Priority</strong>${escapeHtml(row.task_priority || 'normal')}</span>
+        <span><strong>Owner</strong>web-osint-user</span>
+        <span><strong>Next action</strong>Accept, edit, reject, defer, assign, or archive.</span>
       </div>
     </section>
 
@@ -1693,6 +1858,7 @@ function renderInboxPreview(row) {
       <button class="secondary" data-preview-action="assign">Assign</button>
       <button class="secondary" data-preview-action="defer">Defer</button>
       <button class="secondary" data-preview-action="reject">Reject</button>
+      <button class="secondary danger-button" data-preview-action="archive">Archive</button>
       <button class="secondary" data-preview-action="edit">Edit proposal</button>
       <button data-preview-action="open">Open workbench</button>
       <button data-preview-action="accept">Accept & next</button>
@@ -1721,12 +1887,22 @@ function renderInboxPreview(row) {
       }
     });
   });
+  document.querySelectorAll('[data-preview-tab]').forEach((button) => {
+    button.addEventListener('click', () => {
+      state.inboxPreviewTab = button.dataset.previewTab || 'preview';
+      document.querySelectorAll('[data-preview-tab]').forEach((tab) => tab.classList.toggle('active', tab === button));
+      document.querySelectorAll('[data-preview-section]').forEach((section) => {
+        section.classList.toggle('active', section.dataset.previewSection === state.inboxPreviewTab);
+      });
+    });
+  });
 }
 
 function previewDecisionForAction(action) {
   if (action === 'accept') return 'accepted';
   if (action === 'reject') return 'rejected';
   if (action === 'defer') return 'deferred';
+  if (action === 'archive') return 'archived';
   return action || 'updated';
 }
 
@@ -1735,6 +1911,7 @@ function reviewStatusForPreviewAction(row, action) {
   if (action === 'accept') return acceptStatusByObject[objectType] || 'accepted';
   if (action === 'reject') return rejectStatusByObject[objectType] || 'rejected';
   if (action === 'defer') return deferStatusByObject[objectType] || 'open';
+  if (action === 'archive') return 'superseded';
   return '';
 }
 
@@ -2815,8 +2992,9 @@ function wireEvents() {
   });
   $('allSourcesButton').addEventListener('click', () => {
     state.queue = 'all';
-    state.kind = '';
+    state.kind = state.homeEvidenceKind || '';
     state.q = '';
+    state.libraryScope = 'corpus';
     syncInboxSearchInputs('');
     loadFacets();
     loadInbox();

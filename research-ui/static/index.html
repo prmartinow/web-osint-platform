@@ -102,7 +102,12 @@
         <section class="panel evidence-signals" data-home-section="sources">
           <div class="panel-title-row">
             <h2>Recent high-value evidence</h2>
-            <button class="text-button" id="allSourcesButton">All sources</button>
+            <div class="title-action-group">
+              <select id="homeSourceFilter" aria-label="Filter recent high-value evidence by source type">
+                <option value="">All source types</option>
+              </select>
+              <button class="text-button" id="allSourcesButton">All sources</button>
+            </div>
           </div>
           <div id="signalRows" class="signal-rows"></div>
         </section>
@@ -123,14 +128,14 @@
         <aside class="panel mini-panel" data-home-section="publishing">
           <div class="panel-title-row">
             <h2>Publication readiness</h2>
-            <a href="#review">Open review</a>
+            <a href="#reviews">Open review</a>
           </div>
           <div id="publishReadiness"></div>
         </aside>
         <aside class="panel mini-panel open-questions">
           <div class="panel-title-row">
             <h2>Open questions</h2>
-            <a href="#brief">View brief</a>
+            <a href="#projects">View brief</a>
           </div>
           <div id="openQuestions" class="compact-list numbered"></div>
         </aside>
@@ -194,8 +199,11 @@
             <div class="bulk-toolbar">
               <label><input id="inboxSelectAll" type="checkbox"> Select visible</label>
               <span id="inboxVisibleCount" class="muted">0 tasks</span>
+              <button class="secondary" data-bulk-action="accept">Accept</button>
+              <button class="secondary" data-bulk-action="reject">Reject</button>
               <button class="secondary" data-bulk-action="defer">Defer</button>
               <button class="secondary" data-bulk-action="assign">Assign</button>
+              <button class="secondary danger-button" data-bulk-action="archive">Archive</button>
             </div>
             <div id="inboxRows" class="inbox-rows task-stream"></div>
           </section>

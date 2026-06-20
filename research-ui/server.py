@@ -832,9 +832,9 @@ def review_object_rows():
                   proposed_fact_id AS object_id, source_evidence_id,
                   fact_type AS object_kind,
                   concat(field_path, ' ', raw_value, ' ', normalized_value) AS object_text,
-                  status, updated_at
+                  source_anchor_json, note, actor, created_at, status, updated_at
                 FROM proposed_facts FINAL
-                WHERE lower(status) NOT IN ('accepted', 'rejected', 'superseded', 'published')
+                WHERE lower(status) NOT IN ('accepted', 'approved', 'rejected', 'superseded', 'published')
                 ORDER BY updated_at DESC
                 LIMIT 200
             """,
@@ -851,9 +851,9 @@ def review_object_rows():
                   correction_id AS object_id, source_evidence_id,
                   correction_kind AS object_kind,
                   concat(original_text, ' -> ', corrected_text) AS object_text,
-                  status, updated_at
+                  source_anchor_json, note, actor, created_at, status, updated_at
                 FROM normalized_corrections FINAL
-                WHERE lower(status) NOT IN ('accepted', 'rejected', 'superseded', 'published')
+                WHERE lower(status) NOT IN ('accepted', 'approved', 'rejected', 'superseded', 'published')
                 ORDER BY updated_at DESC
                 LIMIT 200
             """,
@@ -870,9 +870,9 @@ def review_object_rows():
                   entity_link_id AS object_id, source_evidence_id,
                   entity_type AS object_kind,
                   concat(mention_text, ' ', canonical_name, ' ', canonical_entity_id) AS object_text,
-                  status, updated_at
+                  source_anchor_json, note, actor, created_at, status, updated_at
                 FROM entity_links FINAL
-                WHERE lower(status) NOT IN ('accepted', 'resolved', 'merged', 'rejected', 'superseded', 'published')
+                WHERE lower(status) NOT IN ('accepted', 'approved', 'resolved', 'merged', 'rejected', 'superseded', 'published')
                 ORDER BY updated_at DESC
                 LIMIT 200
             """,
@@ -889,9 +889,9 @@ def review_object_rows():
                   claim_id AS object_id, source_evidence_id,
                   claim_type AS object_kind,
                   claim_text AS object_text,
-                  status, updated_at
+                  source_anchor_json, note, actor, created_at, status, updated_at
                 FROM claim_records FINAL
-                WHERE lower(status) NOT IN ('accepted', 'rejected', 'superseded', 'published')
+                WHERE lower(status) NOT IN ('accepted', 'approved', 'rejected', 'superseded', 'published')
                 ORDER BY updated_at DESC
                 LIMIT 200
             """,
@@ -908,9 +908,9 @@ def review_object_rows():
                   selection_id AS object_id, source_evidence_id,
                   selection_kind AS object_kind,
                   quote AS object_text,
-                  status, updated_at
+                  source_anchor_json, note, actor, created_at, status, updated_at
                 FROM evidence_selections FINAL
-                WHERE lower(status) NOT IN ('accepted', 'rejected', 'archived', 'superseded', 'published')
+                WHERE lower(status) NOT IN ('accepted', 'approved', 'rejected', 'archived', 'superseded', 'published')
                 ORDER BY updated_at DESC
                 LIMIT 200
             """,
@@ -927,9 +927,9 @@ def review_object_rows():
                   annotation_id AS object_id, source_evidence_id,
                   annotation_type AS object_kind,
                   body AS object_text,
-                  status, updated_at
+                  source_anchor_json, '' AS note, actor, created_at, status, updated_at
                 FROM review_annotations FINAL
-                WHERE lower(status) NOT IN ('closed', 'accepted', 'rejected', 'archived', 'superseded', 'published')
+                WHERE lower(status) NOT IN ('closed', 'accepted', 'approved', 'rejected', 'archived', 'superseded', 'published')
                 ORDER BY updated_at DESC
                 LIMIT 200
             """,
@@ -2924,29 +2924,325 @@ def claims_ledger(params):
     }
 
 
+REVIEW_QUEUE_LABELS = [
+    ("all", "All review tasks"),
+    ("assigned_to_me", "Assigned to me"),
+    ("open", "Open"),
+    ("in_progress", "In progress"),
+    ("changes_requested", "Changes requested"),
+    ("deferred", "Deferred"),
+    ("blocked", "Blocked"),
+    ("publication_blockers", "Publication blockers"),
+    ("returned_work", "Returned work"),
+    ("evidence", "Evidence"),
+    ("facts", "Facts"),
+    ("corrections", "Corrections"),
+    ("entities", "Entities"),
+    ("claims", "Claims"),
+    ("annotations", "Annotations"),
+    ("publication", "Publication"),
+]
+
+
+def review_decision_state(status):
+    value = str(status or "").lower()
+    if value in ("assigned", "in_progress", "approved", "rejected", "changes_requested", "deferred", "blocked", "open"):
+        return value
+    if value in ("accepted", "resolved", "matched", "created", "merged", "published"):
+        return "approved"
+    if value in ("draft", "proposed", "candidate", "smoke_test", "merge_review", "under_review", ""):
+        return "open"
+    return value
+
+
+def review_object_group(object_type):
+    return {
+        "evidence_selection": "evidence",
+        "proposed_fact": "facts",
+        "normalized_correction": "corrections",
+        "entity_link": "entities",
+        "claim_stub": "claims",
+        "annotation": "annotations",
+        "publication_readiness_check": "publication",
+        "publication_snapshot": "publication",
+    }.get(object_type or "", "evidence")
+
+
+def review_epistemic_layer(object_type):
+    return {
+        "evidence_selection": "curated_object",
+        "annotation": "curated_object",
+        "normalized_correction": "machine_observation",
+        "proposed_fact": "machine_observation",
+        "entity_link": "curated_object",
+        "claim_stub": "curated_object",
+        "publication_readiness_check": "publication_snapshot",
+        "publication_snapshot": "publication_snapshot",
+    }.get(object_type or "", "derived_observation")
+
+
+def review_priority_for(row):
+    state = review_decision_state(row.get("status"))
+    object_type = row.get("object_type") or ""
+    text = str(row.get("object_text") or "")
+    if state == "blocked":
+        return "blocking"
+    if object_type in ("claim_stub", "proposed_fact", "publication_readiness_check"):
+        return "high"
+    if object_type == "normalized_correction" and len(text) > 240:
+        return "high"
+    return "normal"
+
+
+def review_anchor_summary(row, source):
+    anchor = parse_raw_json(row.get("source_anchor_json", ""))
+    if isinstance(anchor, dict):
+        label = first_nonempty(anchor.get("label"), anchor.get("selector"), anchor.get("dom_path"), anchor.get("artifact_path"), anchor.get("kind"))
+        if label:
+            return compact_text(label, 180)
+    return compact_text(first_nonempty(row.get("object_text"), source.get("title"), row.get("source_evidence_id")), 180)
+
+
+def review_task_id(row):
+    return f"review:{row.get('object_type')}:{row.get('object_id')}"
+
+
+def make_review_task_row(row, source_map):
+    source = source_for_ledger_row(source_map, row.get("source_evidence_id") or "")
+    state = review_decision_state(row.get("status"))
+    priority = review_priority_for(row)
+    object_type = row.get("object_type") or ""
+    group = review_object_group(object_type)
+    blockers = int(priority == "blocking") + int(group in ("claims", "facts", "publication") and state not in ("approved", "deferred"))
+    permitted = ["approve", "reject", "request_changes", "defer", "assign", "edit_proposal", "open_source", "history"]
+    if state in ("approved", "rejected", "deferred", "changes_requested", "blocked"):
+        permitted.append("reopen")
+    return {
+        **source,
+        "task_id": review_task_id(row),
+        "row_kind": "formal_review_task",
+        "object_type": object_type,
+        "object_id": row.get("object_id") or "",
+        "object_kind": row.get("object_kind") or object_type,
+        "object_text": row.get("object_text") or "",
+        "object_version": compact_text(first_nonempty(row.get("updated_at"), row.get("created_at"), row.get("object_id")), 120),
+        "epistemic_layer": review_epistemic_layer(object_type),
+        "source_anchor_summary": review_anchor_summary(row, source),
+        "decision_state": state,
+        "raw_status": row.get("status") or "",
+        "assignment": row.get("actor") or REVIEW_ACTOR,
+        "assignee": row.get("actor") or REVIEW_ACTOR,
+        "priority": priority,
+        "reason_codes": [row.get("task_type") or group, row.get("object_kind") or object_type],
+        "review_reason": row.get("reason") or "Formal decision required before this object can move downstream.",
+        "blocker_count": blockers,
+        "linked_conflicts": int(group == "claims" and state not in ("approved", "deferred")),
+        "publication_impact": "blocks publication" if blockers else "no immediate publication block",
+        "permitted_actions": permitted,
+        "optimistic_version": compact_text(first_nonempty(row.get("updated_at"), row.get("created_at"), row.get("object_id")), 120),
+        "created_at": row.get("created_at") or "",
+        "updated_at": row.get("updated_at") or "",
+        "note": row.get("note") or "",
+        "source_anchor": parse_raw_json(row.get("source_anchor_json", "")),
+    }
+
+
+def make_publication_review_rows(checks):
+    rows = []
+    now = now_iso()
+    for check in checks:
+        state = "approved" if check.get("state") == "pass" else ("blocked" if check.get("state") == "blocked" else "open")
+        rows.append({
+            "task_type": "publication",
+            "object_type": "publication_readiness_check",
+            "object_id": check.get("id") or make_id("publication_check"),
+            "object_kind": check.get("state") or "readiness",
+            "object_text": check.get("label") or "",
+            "source_evidence_id": "",
+            "source_anchor_json": json_text({"kind": "publication_check", "check_id": check.get("id")}),
+            "note": check.get("label") or "",
+            "actor": REVIEW_ACTOR,
+            "created_at": now,
+            "updated_at": now,
+            "status": state,
+            "label": "Review publication readiness",
+            "reason": "A publication gate needs a formal decision before snapshot/export.",
+        })
+    return rows
+
+
+def review_queue_match(row, queue):
+    if not queue or queue == "all":
+        return True
+    state = row.get("decision_state") or "open"
+    group = review_object_group(row.get("object_type"))
+    if queue == "assigned_to_me":
+        return row.get("assignee") in (REVIEW_ACTOR, "", None)
+    if queue in ("open", "in_progress", "changes_requested", "deferred", "blocked"):
+        return state == queue
+    if queue == "publication_blockers":
+        return int(row.get("blocker_count") or 0) > 0
+    if queue == "returned_work":
+        return state in ("changes_requested", "rejected")
+    if queue in ("evidence", "facts", "corrections", "entities", "claims", "annotations", "publication"):
+        return group == queue
+    return True
+
+
+def review_queue_counts(rows):
+    return [
+        {"id": queue_id, "label": label, "count": sum(1 for row in rows if review_queue_match(row, queue_id))}
+        for queue_id, label in REVIEW_QUEUE_LABELS
+    ]
+
+
+def review_row_matches(row, q, queue, type_filter, decision_state, priority, layer, project):
+    if not review_queue_match(row, queue):
+        return False
+    if type_filter and type_filter != row.get("object_type"):
+        return False
+    if decision_state and decision_state != row.get("decision_state"):
+        return False
+    if priority and priority != row.get("priority"):
+        return False
+    if layer and layer != row.get("epistemic_layer"):
+        return False
+    if project and project != row.get("source_project"):
+        return False
+    if q:
+        haystack = " ".join(str(row.get(key) or "") for key in (
+            "task_id", "object_type", "object_kind", "object_text", "source_anchor_summary",
+            "decision_state", "priority", "assignee", "review_reason", "title", "canonical_url",
+            "author_handle", "domain", "publication_impact",
+        ))
+        if q.lower() not in haystack.lower():
+            return False
+    return True
+
+
+def review_preview(row, events_by_subject, source_map):
+    if not row:
+        return {}
+    source = source_for_ledger_row(source_map, row.get("source_evidence_id") or row.get("evidence_id") or "")
+    events = events_by_subject.get(row.get("object_id"), []) + events_by_subject.get(row.get("task_id"), [])
+    before_after = {
+        "before": compact_text(row.get("raw_status") or "not reviewed", 240),
+        "after": compact_text(row.get("decision_state") or "open", 240),
+        "proposal": compact_text(row.get("object_text") or "", 1200),
+    }
+    return {
+        "row": row,
+        "source": source,
+        "checklist": [
+            {"label": "Object version checked", "state": "required", "detail": row.get("object_version") or ""},
+            {"label": "Exact source anchor checked", "state": "required", "detail": row.get("source_anchor_summary") or ""},
+            {"label": "Adjacent objects remain separate", "state": "required", "detail": "Decision applies only to this object/version."},
+            {"label": "Publication impact checked", "state": "required", "detail": row.get("publication_impact") or ""},
+        ],
+        "source_anchor": row.get("source_anchor") or {},
+        "artifact_manifest": [
+            {"label": "Source", "value": source.get("title") or row.get("source_evidence_id") or "No source", "meta": source.get("source_label") or ""},
+            {"label": "Anchor", "value": row.get("source_anchor_summary") or "", "meta": "exact anchor summary"},
+            {"label": "Capture", "value": source.get("captured_at") or source.get("last_ingested_at") or "", "meta": source.get("evidence_id") or ""},
+        ],
+        "proposed_change": before_after,
+        "adjacent_objects": [
+            {"label": "Evidence", "detail": "Approving a proposed fact does not approve selected evidence."},
+            {"label": "Claim", "detail": "Approving evidence does not approve linked claims."},
+            {"label": "Publication", "detail": "No live decision mutates a frozen snapshot."},
+        ],
+        "provenance": [
+            {"label": "Immutable capture", "value": source.get("title") or row.get("source_evidence_id") or "No source", "meta": source.get("captured_at") or ""},
+            {"label": "Derived observation", "value": row.get("object_kind") or row.get("object_type") or "", "meta": row.get("epistemic_layer") or ""},
+            {"label": "Curated object", "value": row.get("object_text") or "", "meta": row.get("object_version") or ""},
+            {"label": "Review decision", "value": row.get("decision_state") or "", "meta": row.get("assignee") or ""},
+        ],
+        "history": events[:40],
+    }
+
+
 def reviews_read_model(params):
     limit = sql_int(params.get("limit", ["120"])[0], 120)
-    counts = review_counts()
+    q = (params.get("q", [""])[0] or "").strip()
+    queue = (params.get("queue", ["all"])[0] or "all").strip()
+    type_filter = (params.get("type", [""])[0] or "").strip()
+    decision_state = (params.get("decision_state", [""])[0] or "").strip()
+    priority = (params.get("priority", [""])[0] or "").strip()
+    layer = (params.get("layer", [""])[0] or "").strip()
+    project = (params.get("project", [""])[0] or "").strip()
+    inspect = (params.get("inspect", [""])[0] or "").strip()
+    if inspect.startswith("review:"):
+        inspect = inspect.removeprefix("review:")
+
+    publication_checks = publishing_read_model({}).get("checks", [])
+    raw_rows = review_object_rows() + make_publication_review_rows(publication_checks)
+    source_ids = [row.get("source_evidence_id") for row in raw_rows]
+    source_map = hydrate_source_rows(source_ids)
+    rows = [make_review_task_row(row, source_map) for row in raw_rows]
+    rows.sort(key=lambda row: str(row.get("updated_at") or row.get("created_at") or ""), reverse=True)
+
     events = ch_data(
         f"""
         SELECT
           event_id, event_type, project, source_evidence_id, subject_type,
-          subject_id, actor, created_at, payload_json
+          subject_id, actor, created_at, payload_json, source_anchor_json
         FROM research_review_events
         ORDER BY created_at DESC
-        LIMIT {limit}
+        LIMIT {max(limit * 4, 200)}
         """,
         fallback=[],
     )
-    queue = [
-        {"id": "new_captures", "label": "New captures", "count": int(facets().get("totals", {}).get("unique_evidence") or 0), "reason": "Needs triage"},
-        {"id": "entity_candidates", "label": "Entity candidates", "count": int(counts.get("entity_links") or 0), "reason": "Resolve or merge"},
-        {"id": "proposed_evidence", "label": "Proposed evidence", "count": int(counts.get("selections") or 0), "reason": "Accept, correct, or reject"},
-        {"id": "proposed_claims", "label": "Proposed claims", "count": int(counts.get("claim_records") or 0), "reason": "Review wording and evidence relation"},
-        {"id": "proposed_facts", "label": "Proposed facts", "count": int(counts.get("proposed_facts") or 0), "reason": "Validate value and qualifiers"},
-        {"id": "normalized_corrections", "label": "Normalized corrections", "count": int(counts.get("normalized_corrections") or 0), "reason": "Review corrected extraction overlays"},
-    ]
-    return {"counts": counts, "queue": queue, "events": events}
+    events_by_subject = {}
+    for event in events:
+        if event.get("subject_id"):
+            events_by_subject.setdefault(event.get("subject_id"), []).append(event)
+        if event.get("source_evidence_id"):
+            events_by_subject.setdefault(event.get("source_evidence_id"), []).append(event)
+
+    filtered = [row for row in rows if review_row_matches(row, q, queue, type_filter, decision_state, priority, layer, project)]
+    visible = filtered[:limit]
+    selected = next((row for row in visible if row.get("task_id") == inspect), None) or (visible[0] if visible else None)
+    return {
+        "scope": {"project": project or "all", "actor": REVIEW_ACTOR, "surface": "formal_reviews"},
+        "query": {
+            "q": q,
+            "queue": queue,
+            "type": type_filter,
+            "decision_state": decision_state,
+            "priority": priority,
+            "layer": layer,
+            "project": project,
+            "limit": limit,
+        },
+        "summary": {
+            "tasks": len(rows),
+            "visible": len(filtered),
+            "open": sum(1 for row in rows if row.get("decision_state") == "open"),
+            "assigned": sum(1 for row in rows if row.get("decision_state") == "assigned"),
+            "blockers": sum(int(row.get("blocker_count") or 0) for row in rows),
+            "publication": sum(1 for row in rows if review_object_group(row.get("object_type")) == "publication"),
+        },
+        "queues": review_queue_counts(rows),
+        "facets": {
+            "object_types": evidence_facet_counts(rows, "object_type"),
+            "decision_states": evidence_facet_counts(rows, "decision_state"),
+            "priorities": evidence_facet_counts(rows, "priority"),
+            "epistemic_layers": evidence_facet_counts(rows, "epistemic_layer"),
+            "projects": evidence_facet_counts(rows, "source_project"),
+        },
+        "results": {"rows": visible, "count": len(filtered), "limit": limit},
+        "rows": visible,
+        "preview": review_preview(selected, events_by_subject, source_map),
+        "selection": {
+            "selected_task_id": selected.get("task_id") if selected else "",
+            "selected_task_ids": [],
+            "compatible_bulk_actions": ["approve", "reject", "request_changes", "defer", "assign"],
+        },
+        "permissions": ["review", "assign", "request_changes", "reopen", "open_source"],
+        "generated_at": now_iso(),
+        "stale": False,
+        "version": "reviews-page.v2",
+    }
 
 
 def publishing_read_model(params):

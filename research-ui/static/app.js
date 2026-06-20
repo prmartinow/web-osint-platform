@@ -53,6 +53,15 @@ const state = {
   claimSelectedIds: new Set(),
   claimPreviewTab: 'review',
   claimRows: [],
+  reviewQueue: 'all',
+  reviewType: '',
+  reviewDecisionState: '',
+  reviewPriority: '',
+  reviewLayer: '',
+  reviewSelectedId: '',
+  reviewSelectedIds: new Set(),
+  reviewPreviewTab: 'review',
+  reviewRows: [],
 };
 
 const $ = (id) => document.getElementById(id);
@@ -219,6 +228,18 @@ function applyHashParams() {
     const inspect = params.get('inspect') || '';
     state.claimSelectedId = inspect.startsWith('claim:') ? inspect.slice(6) : inspect;
   }
+  if (route === 'reviews') {
+    state.q = params.get('q') || state.q || '';
+    state.project = params.get('project') || state.project || '';
+    state.reviewQueue = params.get('queue') || 'all';
+    state.reviewType = params.get('type') || '';
+    state.reviewDecisionState = params.get('decision_state') || '';
+    state.reviewPriority = params.get('priority') || '';
+    state.reviewLayer = params.get('layer') || '';
+    state.reviewPreviewTab = params.get('tab') || 'review';
+    const inspect = params.get('inspect') || '';
+    state.reviewSelectedId = inspect.startsWith('review:') ? inspect.slice(7) : inspect;
+  }
 }
 
 function routeHash() {
@@ -260,6 +281,20 @@ function routeHash() {
     if (state.claimSelectedId) params.set('inspect', `claim:${state.claimSelectedId}`);
     const query = params.toString();
     return `#claims${query ? '?' + query : ''}`;
+  }
+  if (state.route === 'reviews') {
+    const params = new URLSearchParams();
+    if (state.q) params.set('q', state.q);
+    if (state.project) params.set('project', state.project);
+    if (state.reviewQueue && state.reviewQueue !== 'all') params.set('queue', state.reviewQueue);
+    if (state.reviewType) params.set('type', state.reviewType);
+    if (state.reviewDecisionState) params.set('decision_state', state.reviewDecisionState);
+    if (state.reviewPriority) params.set('priority', state.reviewPriority);
+    if (state.reviewLayer) params.set('layer', state.reviewLayer);
+    if (state.reviewSelectedId) params.set('inspect', `review:${state.reviewSelectedId}`);
+    if (state.reviewPreviewTab && state.reviewPreviewTab !== 'review') params.set('tab', state.reviewPreviewTab);
+    const query = params.toString();
+    return `#reviews${query ? '?' + query : ''}`;
   }
   if (state.route !== 'library') return `#${state.route}`;
   const params = new URLSearchParams();
@@ -3062,39 +3097,502 @@ function bindClaimPage(data) {
   bindClaimKeyboard();
 }
 
-function renderReviewsPage(data) {
-  const queue = data.queue || [];
-  const events = data.events || [];
-  $('routePage').innerHTML = `
-    ${pageHeader('Reviews', 'Formal decisions, save-and-next queues, and review-event history.')}
-    ${metricCards([
-      { label: 'Review events', value: data.counts?.review_events || 0 },
-      { label: 'Annotations', value: data.counts?.annotations || 0 },
-      { label: 'Open queues', value: queue.filter((item) => Number(item.count || 0) > 0).length },
-    ])}
-    <section class="page-two-col">
-      <div class="panel page-panel">
-        <div class="panel-title-row"><h2>Review Queues</h2><span class="status-badge info">decision work</span></div>
-        ${queue.map((item) => `
-          <article class="queue-card">
-            <strong>${escapeHtml(item.label)}</strong>
-            <span>${escapeHtml(item.count)}</span>
-            <p>${escapeHtml(item.reason)}</p>
-          </article>
+function reviewTaskKey(row) {
+  return row.task_id || [row.object_type, row.object_id].filter(Boolean).join(':');
+}
+
+function reviewGlyph(row) {
+  const type = row.object_type || '';
+  const stateValue = row.decision_state || '';
+  if (stateValue === 'blocked') return '!';
+  if (stateValue === 'approved') return 'A';
+  if (stateValue === 'rejected') return 'R';
+  if (type.includes('claim')) return 'C';
+  if (type.includes('entity')) return 'E';
+  if (type.includes('fact')) return 'F';
+  if (type.includes('publication')) return 'P';
+  return 'V';
+}
+
+function reviewQueueGroup(items) {
+  const queues = items || [];
+  return `
+    <section class="review-facet-group">
+      <h3>Formal queues</h3>
+      <div class="facet-list compact">
+        ${queues.map((item) => `
+          <button class="facet ${state.reviewQueue === item.id ? 'active' : ''}" type="button" data-review-queue="${escapeHtml(item.id)}">
+            <span>${escapeHtml(item.label || item.id)}</span><strong>${escapeHtml(item.count || 0)}</strong>
+          </button>
         `).join('')}
-      </div>
-      <div class="panel page-panel">
-        <div class="panel-title-row"><h2>Recent Events</h2><span class="status-badge">append-only</span></div>
-        ${events.map((row) => `
-          <article class="review-item compact">
-            <div class="tag-line"><span class="pill">${escapeHtml(row.event_type)}</span><span class="pill">${escapeHtml(row.subject_type)}</span></div>
-            <p>${escapeHtml(row.source_evidence_id)}</p>
-            <div class="muted">${escapeHtml(fmtDate(row.created_at))} · ${escapeHtml(row.actor)}</div>
-          </article>
-        `).join('') || '<p class="muted padded">No review events yet.</p>'}
       </div>
     </section>
   `;
+}
+
+function reviewFacetGroup(title, items, activeValue, filterName) {
+  const options = items || [];
+  return `
+    <section class="review-facet-group">
+      <h3>${escapeHtml(title)}</h3>
+      <button class="facet ${activeValue ? '' : 'active'}" type="button" data-review-filter="${escapeHtml(filterName)}" data-filter-value="">
+        <span>All ${escapeHtml(title.toLowerCase())}</span><strong>${escapeHtml(options.reduce((sum, item) => sum + Number(item.count || 0), 0))}</strong>
+      </button>
+      <div class="facet-list compact">
+        ${options.map((item) => `
+          <button class="facet ${activeValue === item.id ? 'active' : ''}" type="button" data-review-filter="${escapeHtml(filterName)}" data-filter-value="${escapeHtml(item.id)}">
+            <span>${escapeHtml(item.label || item.id)}</span><strong>${escapeHtml(item.count || 0)}</strong>
+          </button>
+        `).join('')}
+      </div>
+    </section>
+  `;
+}
+
+function renderReviewPreview(data) {
+  const preview = data.preview || {};
+  const row = preview.row || null;
+  if (!row) {
+    return `
+      <div class="empty-state">
+        <h2>Decision Panel</h2>
+        <p>Select a review task to inspect object boundaries, exact source anchors, proposed changes, provenance, and durable history.</p>
+      </div>
+    `;
+  }
+  const activeTab = ['review', 'source', 'proposed', 'provenance', 'history'].includes(state.reviewPreviewTab) ? state.reviewPreviewTab : 'review';
+  const tab = (id, label) => `<button class="${activeTab === id ? 'active' : ''}" type="button" data-review-preview-tab="${id}">${label}</button>`;
+  const sectionClass = (id) => `review-preview-section ${activeTab === id ? 'active' : ''}`;
+  const proposed = preview.proposed_change || {};
+  return `
+    <div class="review-preview-head">
+      <span class="source-glyph">${escapeHtml(reviewGlyph(row))}</span>
+      <div>
+        <h2>${escapeHtml(row.object_kind || row.object_type || 'Review task')}</h2>
+        <p>${escapeHtml([row.decision_state, row.priority, row.epistemic_layer].filter(Boolean).join(' · '))}</p>
+      </div>
+    </div>
+    <nav class="review-preview-tabs" aria-label="Review preview sections">
+      ${tab('review', 'Review')}
+      ${tab('source', 'Source')}
+      ${tab('proposed', 'Proposed change')}
+      ${tab('provenance', 'Provenance')}
+      ${tab('history', 'History')}
+    </nav>
+    <section class="${sectionClass('review')}" data-review-preview-section="review">
+      <div class="review-layer-stack">
+        <div><span>Decision scope</span><strong>${escapeHtml(row.object_type || '')} / ${escapeHtml(row.object_id || '')}</strong></div>
+        <div><span>Object version</span><strong>${escapeHtml(row.object_version || '')}</strong></div>
+        <div><span>Boundary</span><strong>Approving this task decides only this object version. Linked evidence, facts, claims, and publication snapshots remain separately reviewable.</strong></div>
+        <div><span>Publication impact</span><strong>${escapeHtml(row.publication_impact || '')}</strong></div>
+      </div>
+      <article class="review-preview-card">
+        <h4>Checklist</h4>
+        ${(preview.checklist || []).map((item) => `<p><strong>${escapeHtml(item.label || '')}</strong><br>${escapeHtml(item.detail || item.state || '')}</p>`).join('')}
+      </article>
+      <label class="preview-note">Reviewer comment
+        <input id="reviewDecisionNote" placeholder="Reason, blocker, requested change, or source-anchor concern">
+      </label>
+    </section>
+    <section class="${sectionClass('source')}" data-review-preview-section="source">
+      <article class="review-preview-card">
+        <h4>Immutable source and anchor</h4>
+        ${(preview.artifact_manifest || []).map((item) => `<p><strong>${escapeHtml(item.label || '')}</strong><br>${escapeHtml(item.value || '')}${item.meta ? `<br><em>${escapeHtml(item.meta)}</em>` : ''}</p>`).join('')}
+      </article>
+      ${preview.source?.canonical_url ? `<p><a href="${escapeHtml(preview.source.canonical_url)}" target="_blank" rel="noreferrer">${escapeHtml(preview.source.canonical_url)}</a></p>` : ''}
+    </section>
+    <section class="${sectionClass('proposed')}" data-review-preview-section="proposed">
+      <div class="review-diff-pair">
+        <article class="review-preview-card"><h4>Before</h4><p>${escapeHtml(proposed.before || '')}</p></article>
+        <article class="review-preview-card"><h4>After</h4><p>${escapeHtml(proposed.after || '')}</p></article>
+      </div>
+      <article class="review-preview-card">
+        <h4>Proposal text</h4>
+        <p>${escapeHtml(proposed.proposal || row.object_text || '')}</p>
+      </article>
+      <article class="review-preview-card">
+        <h4>Adjacent objects not decided here</h4>
+        ${(preview.adjacent_objects || []).map((item) => `<p><strong>${escapeHtml(item.label || '')}</strong><br>${escapeHtml(item.detail || '')}</p>`).join('')}
+      </article>
+    </section>
+    <section class="${sectionClass('provenance')}" data-review-preview-section="provenance">
+      <div class="review-provenance-stack">
+        ${(preview.provenance || []).map((step, index) => `
+          <article>
+            <span>${String(index + 1).padStart(2, '0')}</span>
+            <div><strong>${escapeHtml(step.label)}</strong><p>${escapeHtml(step.value)}</p>${step.meta ? `<em>${escapeHtml(step.meta)}</em>` : ''}</div>
+          </article>
+        `).join('')}
+      </div>
+    </section>
+    <section class="${sectionClass('history')}" data-review-preview-section="history">
+      <article class="review-preview-card">
+        <h4>Durable review events (${(preview.history || []).length})</h4>
+        ${(preview.history || []).map((item) => `<p><strong>${escapeHtml(item.event_type || '')}</strong><br>${escapeHtml(fmtDate(item.created_at))} · ${escapeHtml(item.actor || '')}</p>`).join('') || '<p class="muted">No review-event history for this object yet.</p>'}
+      </article>
+    </section>
+    <div id="reviewActionStatus" class="review-status muted"></div>
+    <div class="review-preview-actions">
+      <button class="secondary" data-review-action="defer">Defer</button>
+      <button class="secondary" data-review-action="reject">Reject</button>
+      <button class="secondary" data-review-action="request_changes">Request changes</button>
+      <button class="secondary" data-review-action="assign">Assign</button>
+      <button class="secondary" data-review-action="edit_proposal">Edit proposal</button>
+      <button class="secondary" data-review-action="history">History</button>
+      <button class="secondary" data-review-action="reopen">Reopen</button>
+      <button class="secondary" data-review-action="open_source">Open source</button>
+      <button data-review-action="approve">Approve & next</button>
+    </div>
+  `;
+}
+
+function renderReviewsPage(data) {
+  const rows = data.rows || data.results?.rows || [];
+  state.reviewRows = rows;
+  if (!state.reviewSelectedId || !rows.some((row) => reviewTaskKey(row) === state.reviewSelectedId)) {
+    state.reviewSelectedId = data.selection?.selected_task_id || (rows[0] ? reviewTaskKey(rows[0]) : '');
+  }
+  const summary = data.summary || {};
+  const facets = data.facets || {};
+  const selectedId = state.reviewSelectedId;
+  $('routePage').innerHTML = `
+    ${pageHeader('Reviews', 'Formal decision surface for version-bound human decisions across capture, observation, curated object, and publication layers.')}
+    ${metricCards([
+      { label: 'Visible tasks', value: summary.visible ?? rows.length },
+      { label: 'Open', value: summary.open ?? 0 },
+      { label: 'Assigned', value: summary.assigned ?? 0 },
+      { label: 'Blockers', value: summary.blockers ?? 0 },
+      { label: 'Publication gates', value: summary.publication ?? 0 },
+    ])}
+    <section class="review-shell">
+      <aside class="panel review-filter-panel">
+        ${reviewQueueGroup(data.queues)}
+        ${reviewFacetGroup('Object type', facets.object_types, state.reviewType, 'type')}
+        ${reviewFacetGroup('Decision state', facets.decision_states, state.reviewDecisionState, 'decision_state')}
+        ${reviewFacetGroup('Priority', facets.priorities, state.reviewPriority, 'priority')}
+        ${reviewFacetGroup('Epistemic layer', facets.epistemic_layers, state.reviewLayer, 'layer')}
+      </aside>
+      <section class="panel review-ledger-panel">
+        <div class="review-search-strip">
+          <label><span>Review search</span><input id="reviewSearchInput" value="${escapeHtml(state.q)}" placeholder="Search review tasks, anchors, sources, claims, facts, or blockers"></label>
+          <button class="secondary" id="reviewClearFilters">Clear</button>
+        </div>
+        <div class="review-explanation">
+          <span class="status-badge info">${escapeHtml(titleCase(state.reviewQueue || 'all'))}</span>
+          <p>Tasks are formal decisions. Inbox triage stays separate; save-and-next advances only after the durable event succeeds.</p>
+        </div>
+        <div class="review-bulk-toolbar">
+          <label><input type="checkbox" id="reviewSelectAll"> Select visible</label>
+          ${['approve', 'reject', 'request_changes', 'defer', 'assign'].map((action) => `<button class="secondary" data-review-bulk-action="${action}">${escapeHtml(titleCase(action))}</button>`).join('')}
+          <span id="reviewBulkStatus" class="muted"></span>
+        </div>
+        <div class="review-results-list">
+          ${rows.length ? rows.map((row) => {
+            const rowKey = reviewTaskKey(row);
+            const selected = rowKey === selectedId;
+            return `
+              <article class="review-row ${selected ? 'active' : ''}" data-review-task-id="${escapeHtml(rowKey)}" data-source-id="${escapeHtml(row.source_evidence_id || row.evidence_id || '')}" data-object-type="${escapeHtml(row.object_type || '')}">
+                <input class="review-check" type="checkbox" aria-label="Select review task" ${state.reviewSelectedIds.has(rowKey) ? 'checked' : ''}>
+                <span class="source-glyph">${escapeHtml(reviewGlyph(row))}</span>
+                <div class="review-row-main">
+                  <div class="review-title-line">
+                    <strong>${escapeHtml(row.object_text || row.object_kind || row.object_type || 'Review task')}</strong>
+                    ${row.blocker_count ? `<span class="pill warn">${escapeHtml(row.blocker_count)} blocker${Number(row.blocker_count) === 1 ? '' : 's'}</span>` : ''}
+                  </div>
+                  <p>${escapeHtml(row.source_anchor_summary || row.review_reason || '')}</p>
+                  <div class="row-meta">
+                    <span class="pill">${escapeHtml(row.object_type || 'object')}</span>
+                    <span class="pill">${escapeHtml(row.decision_state || 'open')}</span>
+                    <span class="pill">${escapeHtml(row.priority || 'normal')}</span>
+                    <span class="pill">${escapeHtml(row.epistemic_layer || 'layer')}</span>
+                    ${row.assignee ? `<span class="pill">${escapeHtml(row.assignee)}</span>` : ''}
+                    ${row.source_label ? `<span class="pill">${escapeHtml(row.source_label)}</span>` : ''}
+                    ${row.domain ? `<span class="pill">${escapeHtml(row.domain)}</span>` : ''}
+                  </div>
+                </div>
+                <div class="review-row-counts">
+                  <strong>${escapeHtml(row.linked_conflicts || 0)}</strong><em>conflicts</em>
+                  <strong>${escapeHtml(row.blocker_count || 0)}</strong><em>blockers</em>
+                  <strong>${escapeHtml(fmtDate(row.updated_at || row.created_at) || '')}</strong><em>updated</em>
+                </div>
+              </article>
+            `;
+          }).join('') : '<div class="empty-state"><h2>No review tasks</h2><p>Try another queue or filter.</p></div>'}
+        </div>
+      </section>
+      <aside class="panel review-preview-panel">
+        ${renderReviewPreview(data)}
+      </aside>
+    </section>
+  `;
+  bindReviewPage(data);
+}
+
+function reviewStatusForAction(row, action) {
+  if (action === 'approve') return 'approved';
+  if (action === 'reject') return 'rejected';
+  if (action === 'request_changes') return 'changes_requested';
+  if (action === 'defer') return 'deferred';
+  if (action === 'assign') return 'assigned';
+  if (action === 'reopen') return 'open';
+  return row.decision_state || 'open';
+}
+
+function reviewEventTypeForAction(action) {
+  return {
+    approve: 'review.decision.approved',
+    reject: 'review.decision.rejected',
+    request_changes: 'review.decision.changes_requested',
+    defer: 'review.decision.deferred',
+    assign: 'review.assignment.recorded',
+    edit_proposal: 'review.proposal_edit.requested',
+    open_source: 'review.source_opened',
+    reopen: 'review.reopened',
+    history: 'review.history.opened',
+  }[action] || 'review.action.recorded';
+}
+
+function reviewAnchorForRow(row, action) {
+  return {
+    kind: 'reviews_task_row',
+    task_id: reviewTaskKey(row),
+    source_evidence_id: row.source_evidence_id || row.evidence_id || '',
+    object_type: row.object_type || '',
+    object_id: row.object_id || '',
+    object_version: row.object_version || '',
+    action,
+  };
+}
+
+async function persistReviewAction(row, action, note = '') {
+  if (!row) return;
+  if (action === 'open_source') {
+    const sourceId = row.source_evidence_id || row.evidence_id || '';
+    if (sourceId) await selectSource(sourceId);
+    return;
+  }
+  const supported = ['evidence_selection', 'annotation', 'proposed_fact', 'normalized_correction', 'entity_link', 'claim_stub'].includes(row.object_type || '');
+  if (supported && ['approve', 'reject', 'request_changes', 'defer', 'assign', 'reopen'].includes(action)) {
+    await postJson('/api/review-state', {
+      source_evidence_id: row.source_evidence_id || row.evidence_id || '',
+      source_project: row.source_project || '',
+      project: row.source_project || state.project || '',
+      subject_type: row.object_type || '',
+      subject_id: row.object_id || '',
+      status: reviewStatusForAction(row, action),
+      note,
+      source_anchor: reviewAnchorForRow(row, action),
+      idempotency_key: `${reviewTaskKey(row)}:${action}:${Date.now()}`,
+    });
+    return;
+  }
+  await postJson('/api/review/events', {
+    event_type: reviewEventTypeForAction(action),
+    source_evidence_id: row.source_evidence_id || row.evidence_id || '',
+    source_project: row.source_project || '',
+    project: row.source_project || state.project || '',
+    subject_type: row.object_type || 'review_task',
+    subject_id: row.object_id || reviewTaskKey(row),
+    action,
+    status: reviewStatusForAction(row, action),
+    note,
+    source_anchor: reviewAnchorForRow(row, action),
+    idempotency_key: `${reviewTaskKey(row)}:${action}:${Date.now()}`,
+  });
+}
+
+function nextReviewSelectionAfter(row) {
+  const rows = state.reviewRows || [];
+  const index = rows.findIndex((item) => reviewTaskKey(item) === reviewTaskKey(row));
+  const next = rows[index + 1] || rows[index - 1] || null;
+  return next ? reviewTaskKey(next) : '';
+}
+
+async function applyReviewAction(row, action) {
+  const status = $('reviewActionStatus') || $('reviewBulkStatus');
+  const note = $('reviewDecisionNote')?.value || '';
+  if (!row) {
+    if (status) status.textContent = 'Select a review task first.';
+    return;
+  }
+  if (action === 'history') {
+    state.reviewPreviewTab = 'history';
+    replaceRouteHash();
+    loadRoutePage();
+    return;
+  }
+  if (status) status.textContent = `${titleCase(action)}...`;
+  await persistReviewAction(row, action, note);
+  if (['approve', 'reject', 'request_changes', 'defer'].includes(action)) {
+    state.reviewSelectedId = nextReviewSelectionAfter(row);
+  }
+  state.reviewSelectedIds.clear();
+  if (status) status.textContent = `${titleCase(action)} recorded.`;
+  replaceRouteHash();
+  await loadRoutePage();
+}
+
+async function applyBulkReviewAction(action) {
+  const status = $('reviewBulkStatus');
+  const selectedIds = Array.from(document.querySelectorAll('.review-row .review-check:checked'))
+    .map((checkbox) => checkbox.closest('.review-row')?.dataset.reviewTaskId)
+    .filter(Boolean);
+  const selectedRows = state.reviewRows.filter((row) => selectedIds.includes(reviewTaskKey(row)));
+  if (!selectedRows.length) {
+    if (status) status.textContent = 'Select at least one review task.';
+    return;
+  }
+  if (status) status.textContent = `${titleCase(action)} ${selectedRows.length} review task${selectedRows.length === 1 ? '' : 's'}...`;
+  for (const row of selectedRows) {
+    await persistReviewAction(row, action, `Bulk ${titleCase(action)} from Reviews`);
+  }
+  state.reviewSelectedIds.clear();
+  if (status) status.textContent = `${titleCase(action)} recorded for ${selectedRows.length}.`;
+  await loadRoutePage();
+}
+
+function moveReviewSelection(delta) {
+  if (state.route !== 'reviews') return;
+  const rows = state.reviewRows || [];
+  if (!rows.length) return;
+  const current = rows.findIndex((row) => reviewTaskKey(row) === state.reviewSelectedId);
+  const nextIndex = Math.max(0, Math.min(rows.length - 1, (current >= 0 ? current : 0) + delta));
+  state.reviewSelectedId = reviewTaskKey(rows[nextIndex]);
+  replaceRouteHash();
+  loadRoutePage();
+}
+
+function bindReviewKeyboard() {
+  if (window.__webOsintReviewKeyboardBound) return;
+  window.__webOsintReviewKeyboardBound = true;
+  window.addEventListener('keydown', async (event) => {
+    if (state.route !== 'reviews') return;
+    const active = document.activeElement;
+    if (active && ['INPUT', 'TEXTAREA', 'SELECT', 'BUTTON'].includes(active.tagName)) return;
+    const key = event.key.toLowerCase();
+    if (key === 'j') {
+      event.preventDefault();
+      moveReviewSelection(1);
+    } else if (key === 'k') {
+      event.preventDefault();
+      moveReviewSelection(-1);
+    } else if (['a', 'r', 'x', 'd', 'e', 'o', 'h'].includes(key)) {
+      event.preventDefault();
+      const row = state.reviewRows.find((item) => reviewTaskKey(item) === state.reviewSelectedId);
+      const action = key === 'a' ? 'approve' : key === 'r' ? 'reject' : key === 'x' ? 'request_changes' : key === 'd' ? 'defer' : key === 'e' ? 'edit_proposal' : key === 'o' ? 'open_source' : 'history';
+      try {
+        await applyReviewAction(row, action);
+      } catch (error) {
+        const status = $('reviewActionStatus') || $('reviewBulkStatus');
+        if (status) status.textContent = error.message;
+      }
+    }
+  });
+}
+
+function bindReviewPage(data) {
+  document.querySelectorAll('[data-review-queue]').forEach((button) => {
+    button.addEventListener('click', () => {
+      state.reviewQueue = button.dataset.reviewQueue || 'all';
+      state.reviewSelectedId = '';
+      replaceRouteHash();
+      loadRoutePage();
+    });
+  });
+  document.querySelectorAll('[data-review-filter]').forEach((button) => {
+    button.addEventListener('click', () => {
+      const filter = button.dataset.reviewFilter;
+      const value = button.dataset.filterValue || '';
+      if (filter === 'type') state.reviewType = value;
+      if (filter === 'decision_state') state.reviewDecisionState = value;
+      if (filter === 'priority') state.reviewPriority = value;
+      if (filter === 'layer') state.reviewLayer = value;
+      state.reviewSelectedId = '';
+      replaceRouteHash();
+      loadRoutePage();
+    });
+  });
+  $('reviewSearchInput')?.addEventListener('input', () => {
+    state.q = $('reviewSearchInput').value.trim();
+    clearTimeout(window.__reviewSearchTimer);
+    window.__reviewSearchTimer = setTimeout(() => {
+      state.reviewSelectedId = '';
+      replaceRouteHash();
+      loadRoutePage();
+    }, 250);
+  });
+  $('reviewClearFilters')?.addEventListener('click', () => {
+    state.q = '';
+    state.project = '';
+    state.reviewQueue = 'all';
+    state.reviewType = '';
+    state.reviewDecisionState = '';
+    state.reviewPriority = '';
+    state.reviewLayer = '';
+    state.reviewSelectedId = '';
+    state.reviewSelectedIds.clear();
+    replaceRouteHash();
+    loadRoutePage();
+  });
+  $('reviewSelectAll')?.addEventListener('change', () => {
+    const checked = $('reviewSelectAll').checked;
+    state.reviewSelectedIds.clear();
+    document.querySelectorAll('.review-row').forEach((row) => {
+      const id = row.dataset.reviewTaskId || '';
+      const checkbox = row.querySelector('.review-check');
+      if (checkbox) checkbox.checked = checked;
+      if (checked && id) state.reviewSelectedIds.add(id);
+    });
+  });
+  document.querySelectorAll('.review-row').forEach((row) => {
+    row.addEventListener('click', () => {
+      state.reviewSelectedId = row.dataset.reviewTaskId || '';
+      replaceRouteHash();
+      loadRoutePage();
+    });
+    row.addEventListener('dblclick', async () => {
+      if (row.dataset.sourceId) await selectSource(row.dataset.sourceId);
+    });
+    row.querySelector('.review-check')?.addEventListener('click', (event) => {
+      event.stopPropagation();
+      const id = row.dataset.reviewTaskId || '';
+      if (!id) return;
+      if (event.currentTarget.checked) state.reviewSelectedIds.add(id);
+      else state.reviewSelectedIds.delete(id);
+    });
+  });
+  document.querySelectorAll('[data-review-preview-tab]').forEach((button) => {
+    button.addEventListener('click', () => {
+      state.reviewPreviewTab = button.dataset.reviewPreviewTab || 'review';
+      replaceRouteHash();
+      document.querySelectorAll('[data-review-preview-tab]').forEach((tab) => tab.classList.toggle('active', tab === button));
+      document.querySelectorAll('[data-review-preview-section]').forEach((section) => {
+        section.classList.toggle('active', section.dataset.reviewPreviewSection === state.reviewPreviewTab);
+      });
+    });
+  });
+  document.querySelectorAll('[data-review-action]').forEach((button) => {
+    button.addEventListener('click', async () => {
+      const row = (data.rows || []).find((item) => reviewTaskKey(item) === state.reviewSelectedId) || data.preview?.row;
+      try {
+        await applyReviewAction(row, button.dataset.reviewAction || 'defer');
+      } catch (error) {
+        const status = $('reviewActionStatus');
+        if (status) status.textContent = error.message;
+      }
+    });
+  });
+  document.querySelectorAll('[data-review-bulk-action]').forEach((button) => {
+    button.addEventListener('click', async () => {
+      try {
+        await applyBulkReviewAction(button.dataset.reviewBulkAction || 'defer');
+      } catch (error) {
+        const status = $('reviewBulkStatus');
+        if (status) status.textContent = error.message;
+      }
+    });
+  });
+  bindReviewKeyboard();
 }
 
 function renderPublishingPage(data) {
@@ -3191,6 +3689,15 @@ function routeQuery() {
     if (state.claimContradictionState) params.set('contradiction_state', state.claimContradictionState);
     if (state.claimSourceKind) params.set('source_kind', state.claimSourceKind);
     if (state.claimSelectedId) params.set('inspect', `claim:${state.claimSelectedId}`);
+  }
+  if (state.route === 'reviews') {
+    if (state.reviewQueue && state.reviewQueue !== 'all') params.set('queue', state.reviewQueue);
+    if (state.reviewType) params.set('type', state.reviewType);
+    if (state.reviewDecisionState) params.set('decision_state', state.reviewDecisionState);
+    if (state.reviewPriority) params.set('priority', state.reviewPriority);
+    if (state.reviewLayer) params.set('layer', state.reviewLayer);
+    if (state.reviewSelectedId) params.set('inspect', `review:${state.reviewSelectedId}`);
+    if (state.reviewPreviewTab && state.reviewPreviewTab !== 'review') params.set('tab', state.reviewPreviewTab);
   }
   return params.toString();
 }
@@ -4561,7 +5068,7 @@ function wireEvents() {
     if ($('inboxLocalSearch') && $('inboxLocalSearch').value !== state.q) $('inboxLocalSearch').value = state.q;
     clearTimeout(window.__inboxTimer);
     window.__inboxTimer = setTimeout(() => {
-      if (state.route === 'library' || state.route === 'evidence' || state.route === 'entities' || state.route === 'claims') replaceRouteHash();
+      if (state.route === 'library' || state.route === 'evidence' || state.route === 'entities' || state.route === 'claims' || state.route === 'reviews') replaceRouteHash();
       if (state.route === 'home' || state.route === 'inbox') loadInbox();
       else loadRoutePage();
     }, 250);
@@ -4607,7 +5114,7 @@ function wireEvents() {
     state.previewTaskKey = '';
     loadInbox();
     if (state.route !== 'home' && state.route !== 'inbox') {
-      if (state.route === 'library' || state.route === 'evidence' || state.route === 'entities' || state.route === 'claims') replaceRouteHash();
+      if (state.route === 'library' || state.route === 'evidence' || state.route === 'entities' || state.route === 'claims' || state.route === 'reviews') replaceRouteHash();
       loadRoutePage();
     }
   });

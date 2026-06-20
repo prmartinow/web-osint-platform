@@ -1939,7 +1939,45 @@ def make_evidence_row(row, object_type, object_id, source_map, facts_by_selectio
     return result
 
 
-def evidence_row_matches(row, q, evidence_type, review_state, source_kind, anchor_type, project):
+EVIDENCE_QUEUE_LABELS = [
+    ("all", "All evidence"),
+    ("review_objects", "Review objects"),
+    ("source_candidates", "Source candidates"),
+    ("claim_conflicts", "Claim conflicts"),
+    ("unlinked_evidence", "Unlinked evidence"),
+    ("structured_facts", "Structured facts"),
+    ("claim_ready", "Claim-linked"),
+]
+
+
+def evidence_queue_match(row, queue):
+    if not queue or queue == "all":
+        return True
+    if queue == "review_objects":
+        return row.get("object_type") != "evidence_candidate"
+    if queue == "source_candidates":
+        return row.get("object_type") == "evidence_candidate"
+    if queue == "claim_conflicts":
+        return bool(row.get("claim_conflict"))
+    if queue == "unlinked_evidence":
+        return int(row.get("claim_count") or 0) == 0 and row.get("object_type") in ("evidence_selection", "evidence_candidate")
+    if queue == "structured_facts":
+        return row.get("object_type") == "proposed_fact" or int(row.get("fact_count") or 0) > 0
+    if queue == "claim_ready":
+        return int(row.get("claim_count") or 0) > 0
+    return True
+
+
+def evidence_queue_counts(rows):
+    return [
+        {"id": queue_id, "label": label, "count": sum(1 for row in rows if evidence_queue_match(row, queue_id))}
+        for queue_id, label in EVIDENCE_QUEUE_LABELS
+    ]
+
+
+def evidence_row_matches(row, q, queue, evidence_type, review_state, source_kind, anchor_type, project):
+    if not evidence_queue_match(row, queue):
+        return False
     if evidence_type and evidence_type not in (row.get("evidence_type"), row.get("object_type"), row.get("anchor_type")):
         return False
     if review_state and review_state != row.get("review_state"):
@@ -2007,6 +2045,7 @@ def evidence_ledger(params):
     fetch_limit = max(limit * 3, 150)
     q = (params.get("q", [""])[0] or "").strip()
     mode = (params.get("mode", ["hybrid"])[0] or "hybrid").strip()
+    queue = (params.get("queue", ["all"])[0] or "all").strip()
     evidence_type = (params.get("type", [""])[0] or params.get("kind", [""])[0] or "").strip()
     review_state = (params.get("review_state", [""])[0] or "").strip()
     source_kind = (params.get("source_kind", [""])[0] or "").strip()
@@ -2122,12 +2161,13 @@ def evidence_ledger(params):
         all_rows.append(make_evidence_row(candidate, "evidence_candidate", row.get("evidence_id"), source_map, facts_by_selection, facts_by_source, claims_by_selection, claims_by_source, corrections_by_source, annotations_by_selection, annotations_by_source, mode, q))
 
     all_rows.sort(key=lambda item: str(item.get("updated_at") or item.get("last_ingested_at") or ""), reverse=True)
-    filtered = [row for row in all_rows if evidence_row_matches(row, q, evidence_type, review_state, source_kind, anchor_type, project)]
+    filtered = [row for row in all_rows if evidence_row_matches(row, q, queue, evidence_type, review_state, source_kind, anchor_type, project)]
     rows = filtered[:limit]
     selected = next((row for row in rows if row.get("ledger_id") == inspect), None) or (rows[0] if rows else None)
     return {
         "scope": {
             "mode": mode,
+            "queue": queue,
             "q": q,
             "type": evidence_type,
             "review_state": review_state,
@@ -2144,10 +2184,11 @@ def evidence_ledger(params):
             "normalized_corrections": len(corrections),
             "annotations": len(annotations),
             "claims": len(claims),
-            "source_candidates": len(recent),
+            "source_candidates": sum(1 for row in all_rows if row.get("object_type") == "evidence_candidate"),
             "claim_conflicts": sum(1 for row in all_rows if row.get("claim_conflict")),
         },
         "facets": {
+            "queues": evidence_queue_counts(all_rows),
             "evidence_types": evidence_facet_counts(all_rows, "evidence_type"),
             "object_types": evidence_facet_counts(all_rows, "object_type"),
             "review_states": evidence_facet_counts(all_rows, "review_state"),

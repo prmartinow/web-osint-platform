@@ -27,6 +27,7 @@ const state = {
   librarySelectedIds: new Set(),
   libraryPreviewTab: 'overview',
   evidenceMode: 'hybrid',
+  evidenceQueue: 'all',
   evidenceType: '',
   evidenceReviewState: '',
   evidenceSourceKind: '',
@@ -172,6 +173,7 @@ function applyHashParams() {
     state.q = params.get('q') || state.q || '';
     state.project = params.get('project') || state.project || '';
     state.evidenceMode = params.get('mode') || state.evidenceMode || 'hybrid';
+    state.evidenceQueue = params.get('queue') || state.evidenceQueue || 'all';
     state.evidenceType = params.get('type') || '';
     state.evidenceReviewState = params.get('review_state') || '';
     state.evidenceSourceKind = params.get('source_kind') || '';
@@ -187,6 +189,7 @@ function routeHash() {
     if (state.q) params.set('q', state.q);
     if (state.project) params.set('project', state.project);
     if (state.evidenceMode && state.evidenceMode !== 'hybrid') params.set('mode', state.evidenceMode);
+    if (state.evidenceQueue && state.evidenceQueue !== 'all') params.set('queue', state.evidenceQueue);
     if (state.evidenceType) params.set('type', state.evidenceType);
     if (state.evidenceReviewState) params.set('review_state', state.evidenceReviewState);
     if (state.evidenceSourceKind) params.set('source_kind', state.evidenceSourceKind);
@@ -1491,6 +1494,22 @@ function evidenceFacetGroup(title, items, activeValue, filterName) {
   `;
 }
 
+function evidenceQueueGroup(items) {
+  const queues = items || [];
+  return `
+    <section class="evidence-facet-group evidence-queue-group">
+      <h3>Review queues</h3>
+      <div class="facet-list compact">
+        ${queues.map((item) => `
+          <button class="facet ${state.evidenceQueue === item.id ? 'active' : ''}" type="button" data-evidence-queue="${escapeHtml(item.id)}">
+            <span>${escapeHtml(item.label || item.id)}</span><strong>${escapeHtml(item.count || 0)}</strong>
+          </button>
+        `).join('')}
+      </div>
+    </section>
+  `;
+}
+
 function evidenceLayerSummary(row) {
   return `
     <div class="evidence-layer-stack">
@@ -1619,6 +1638,7 @@ function renderEvidencePreview(data) {
       <button class="secondary" data-evidence-action="reject">Reject</button>
       <button class="secondary" data-evidence-action="link_claim">Link claim</button>
       <button class="secondary" data-evidence-action="create_claim">Create claim</button>
+      <button class="secondary" data-evidence-action="classify">Classify</button>
       <button class="secondary" data-evidence-action="change_type">Change type</button>
       <button class="secondary" data-evidence-action="taxonomy">Taxonomy</button>
       <button class="secondary" data-evidence-action="export_publication">Export</button>
@@ -1652,10 +1672,11 @@ function renderEvidencePage(data) {
             ${['exact', 'semantic', 'hybrid'].map((mode) => `<button class="${state.evidenceMode === mode ? 'active' : ''}" type="button" data-evidence-mode="${mode}">${escapeHtml(titleCase(mode))}</button>`).join('')}
           </div>
         </label>
+        ${evidenceQueueGroup(facets.queues)}
         ${evidenceFacetGroup('Evidence type', facets.evidence_types, state.evidenceType, 'type')}
         ${evidenceFacetGroup('Review state', facets.review_states, state.evidenceReviewState, 'review_state')}
         ${evidenceFacetGroup('Source kind', facets.source_kinds, state.evidenceSourceKind, 'source_kind')}
-        ${evidenceFacetGroup('Anchor type', facets.anchor_types, '', 'anchor_type')}
+        ${evidenceFacetGroup('Anchor type', facets.anchor_types, state.evidenceAnchorType, 'anchor_type')}
       </aside>
 
       <section class="panel evidence-ledger-panel">
@@ -1669,7 +1690,7 @@ function renderEvidencePage(data) {
         </div>
         <div class="evidence-bulk-toolbar">
           <label><input type="checkbox" id="evidenceSelectAll"> Select visible</label>
-          ${['accept', 'reject', 'defer', 'assign_review', 'link_claim', 'create_claim', 'change_type', 'taxonomy', 'export_publication'].map((action) => `<button class="secondary" data-evidence-bulk-action="${action}">${escapeHtml(titleCase(action))}</button>`).join('')}
+          ${['accept', 'reject', 'defer', 'assign_review', 'link_claim', 'create_claim', 'classify', 'change_type', 'taxonomy', 'export_publication'].map((action) => `<button class="secondary" data-evidence-bulk-action="${action}">${escapeHtml(titleCase(action))}</button>`).join('')}
           <span id="evidenceBulkStatus" class="muted"></span>
         </div>
         <div class="evidence-results-list">
@@ -1731,6 +1752,7 @@ function evidenceEventTypeForAction(action) {
     assign_review: 'evidence.assignment.recorded',
     link_claim: 'evidence.claim_link.requested',
     create_claim: 'evidence.claim_create.requested',
+    classify: 'evidence.classification.requested',
     change_type: 'evidence.type_change.requested',
     taxonomy: 'evidence.taxonomy_label.requested',
     export_publication: 'evidence.publication_export.requested',
@@ -1877,6 +1899,14 @@ function bindEvidencePage(data) {
       loadRoutePage();
     });
   });
+  document.querySelectorAll('[data-evidence-queue]').forEach((button) => {
+    button.addEventListener('click', () => {
+      state.evidenceQueue = button.dataset.evidenceQueue || 'all';
+      state.evidenceSelectedId = '';
+      replaceRouteHash();
+      loadRoutePage();
+    });
+  });
   document.querySelectorAll('[data-evidence-filter]').forEach((button) => {
     button.addEventListener('click', () => {
       const filter = button.dataset.evidenceFilter;
@@ -1903,6 +1933,7 @@ function bindEvidencePage(data) {
     state.q = '';
     state.project = '';
     state.evidenceMode = 'hybrid';
+    state.evidenceQueue = 'all';
     state.evidenceType = '';
     state.evidenceReviewState = '';
     state.evidenceSourceKind = '';
@@ -2137,6 +2168,7 @@ function routeQuery() {
   }
   if (state.route === 'evidence') {
     params.set('mode', state.evidenceMode || 'hybrid');
+    if (state.evidenceQueue && state.evidenceQueue !== 'all') params.set('queue', state.evidenceQueue);
     if (state.evidenceType) params.set('type', state.evidenceType);
     if (state.evidenceReviewState) params.set('review_state', state.evidenceReviewState);
     if (state.evidenceSourceKind) params.set('source_kind', state.evidenceSourceKind);

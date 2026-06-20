@@ -1,0 +1,19 @@
+[Unit]
+Description=Web OSINT candidate model download progress log
+Documentation=file:/home/ops/dev/x-research/docs/DERIVED_ARCHITECTURE_IMPLEMENTATION_PLAN.md
+After=web-osint-candidate-model-downloads.service
+
+[Service]
+Type=simple
+WorkingDirectory=/home/ops/dev/x-research
+Environment=WEB_OSINT_DATA_ROOT=/mnt/data/web-osint-platform
+Environment=WEB_OSINT_MODELS_DIR=/mnt/data/web-osint-platform/models
+Environment=WEB_OSINT_MODEL_LOG_DIR=/mnt/data/web-osint-platform/logs/candidate-model-downloads
+Environment=WEB_OSINT_DOWNLOAD_PROGRESS_INTERVAL=15
+Environment=WEB_OSINT_DOWNLOAD_SERVICE=web-osint-candidate-model-downloads.service
+ExecStart=/home/ops/dev/x-research/scripts/candidate_model_download_progress.sh
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=default.target

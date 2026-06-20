@@ -451,6 +451,147 @@ def facets():
     return {"totals": totals, "source_kinds": source_kinds, "projects": projects, "domains": domains, "queues": queues}
 
 
+def percent(part, total):
+    try:
+        part = float(part or 0)
+        total = float(total or 0)
+    except (TypeError, ValueError):
+        return 0
+    if total <= 0:
+        return 0
+    return max(0, min(100, round((part / total) * 100)))
+
+
+def home_summary():
+    totals = ch_data(
+        """
+        SELECT
+          count() AS evidence_rows,
+          uniqExact(evidence_id) AS unique_evidence,
+          countIf(source_kind IN ('x_post', 'x_account', 'x_page')) AS x_rows,
+          countIf(source_kind IN ('web_page', 'search_result', 'google_search_page')) AS web_rows,
+          countIf(source_kind = 'user_input') AS manual_rows,
+          countIf(source_kind = 'media') AS media_rows,
+          countIf(has_ocr = 1) AS ocr_rows,
+          countIf(length(text) >= 120) AS extracted_rows,
+          max(ingested_at) AS last_ingested_at
+        FROM evidence_events
+        """,
+        fallback=[{}],
+    )[0]
+    review_counts = ch_data(
+        """
+        SELECT
+          (SELECT count() FROM evidence_selections FINAL) AS selections,
+          (SELECT count() FROM review_annotations FINAL) AS annotations,
+          (SELECT count() FROM proposed_facts FINAL) AS proposed_facts,
+          (SELECT count() FROM entity_links FINAL) AS entity_links,
+          (SELECT count() FROM claim_records FINAL) AS claim_records,
+          (SELECT count() FROM research_review_events) AS review_events
+        """,
+        fallback=[{}],
+    )[0]
+    recent = ch_data(
+        """
+        SELECT
+          evidence_id,
+          argMax(source_kind, ingested_at) AS source_kind,
+          argMax(source_project, ingested_at) AS source_project,
+          argMax(canonical_url, ingested_at) AS canonical_url,
+          argMax(author_handle, ingested_at) AS author_handle,
+          argMax(domain, ingested_at) AS domain,
+          argMax(title, ingested_at) AS title,
+          substring(argMax(text, ingested_at), 1, 240) AS snippet,
+          length(argMax(text, ingested_at)) AS text_chars,
+          max(has_media) AS has_media,
+          max(has_ocr) AS has_ocr,
+          count() AS observations,
+          max(ingested_at) AS last_ingested_at
+        FROM evidence_events
+        GROUP BY evidence_id
+        ORDER BY
+          (has_media + has_ocr + least(observations, 3)) DESC,
+          last_ingested_at DESC
+        LIMIT 4
+        """,
+        fallback=[],
+    )
+    for row in recent:
+        row["source_label"] = source_kind_label(row.get("source_kind"))
+        row["review_hint"] = review_hint(row)
+
+    source_counts = ch_data(
+        """
+        SELECT source_kind, uniqExact(evidence_id) AS sources
+        FROM evidence_events
+        GROUP BY source_kind
+        """,
+        fallback=[],
+    )
+    source_map = {row.get("source_kind"): int(row.get("sources") or 0) for row in source_counts}
+    review_total = sum(int(review_counts.get(key) or 0) for key in ("selections", "annotations", "proposed_facts", "entity_links", "claim_records"))
+    unique = int(totals.get("unique_evidence") or 0)
+    extracted = int(totals.get("extracted_rows") or 0)
+    ocr_rows = int(totals.get("ocr_rows") or 0)
+    media_rows = int(totals.get("media_rows") or 0)
+    capture_score = percent(extracted, int(totals.get("evidence_rows") or 0))
+    review_score = percent(review_total, max(unique, 1))
+    coverage_rows = [
+        {"topic": "Release claims", "x": source_map.get("x_post", 0), "web": source_map.get("web_page", 0), "papers": source_map.get("user_input", 0), "media": media_rows},
+        {"topic": "Benchmarks", "x": source_map.get("x_post", 0), "web": source_map.get("search_result", 0) + source_map.get("web_page", 0), "papers": source_map.get("user_input", 0), "media": ocr_rows},
+        {"topic": "Licensing", "x": source_map.get("x_account", 0), "web": source_map.get("web_page", 0), "papers": source_map.get("user_input", 0), "media": 0},
+        {"topic": "Hardware & cost", "x": source_map.get("x_post", 0), "web": source_map.get("web_page", 0), "papers": source_map.get("user_input", 0), "media": media_rows},
+    ]
+    gaps = sum(1 for row in coverage_rows for key in ("x", "web", "papers", "media") if int(row.get(key) or 0) == 0)
+    proposed_facts = int(review_counts.get("proposed_facts") or 0)
+    claim_records = int(review_counts.get("claim_records") or 0)
+    blockers = max(0, gaps // 3)
+    queue = [
+        {"label": "New captures", "count": unique, "hint": "triage evidence"},
+        {"label": "Evidence selections", "count": int(review_counts.get("selections") or 0), "hint": "anchors ready"},
+        {"label": "Proposed facts", "count": proposed_facts, "hint": "needs validation"},
+        {"label": "Claim stubs", "count": claim_records, "hint": "review wording"},
+    ]
+    return {
+        "active_project": {
+            "name": "Open-weight frontier models",
+            "description": "Release claims, model evidence, benchmark details, and source-linked review.",
+            "completion_percent": min(92, max(12, round((capture_score + review_score) / 2))),
+            "updated_at": totals.get("last_ingested_at") or "",
+        },
+        "brief": {
+            "question": "What evidence supports recent capability and efficiency claims?",
+            "scope": "Scope: announcements, model cards, papers, repositories, independent benchmarks, and source-linked social evidence.",
+            "stats": [
+                {"label": "sources", "value": unique},
+                {"label": "review records", "value": review_total},
+                {"label": "proposed facts", "value": proposed_facts},
+                {"label": "claim stubs", "value": claim_records},
+            ],
+            "workflow": [
+                {"label": "Capture", "percent": capture_score},
+                {"label": "Triage", "percent": percent(unique, max(unique + gaps, 1))},
+                {"label": "Claims", "percent": percent(claim_records, max(claim_records + blockers + 1, 1))},
+                {"label": "Review", "percent": review_score},
+            ],
+        },
+        "queue": queue,
+        "recent_evidence": recent,
+        "contradictions": [],
+        "coverage": {"rows": coverage_rows, "gaps": gaps},
+        "publication": {
+            "checks_passed": max(0, review_total - blockers),
+            "checks_total": max(review_total + gaps, 1),
+            "blockers": blockers,
+        },
+        "open_questions": [
+            "Are reported scores reproducible?",
+            "Which release uses the revised license?",
+            "What hardware underlies the cost claims?",
+        ],
+    }
+
+
 def review_state_for_source(evidence_id):
     quoted = sql_string(evidence_id)
     selections = ch_data(
@@ -1033,6 +1174,8 @@ class ResearchUiHandler(BaseHTTPRequestHandler):
                 return self.send_static("index.html")
             if parsed.path == "/healthz":
                 return self.send_json({"ok": True, "service": "research-ui"})
+            if parsed.path == "/api/home":
+                return self.send_json(home_summary())
             if parsed.path == "/api/facets":
                 return self.send_json(facets())
             if parsed.path == "/api/inbox":

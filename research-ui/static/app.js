@@ -7,6 +7,7 @@ const state = {
   selectedId: '',
   rows: [],
   facets: null,
+  home: null,
   currentSource: null,
   currentDoc: null,
   selectedBlock: null,
@@ -27,6 +28,19 @@ function fmtDate(value) {
 
 function titleFor(row) {
   return row.title || row.canonical_url || row.evidence_id || '(untitled source)';
+}
+
+function sourceGlyph(kind) {
+  if (kind === 'x_post' || kind === 'x_account' || kind === 'x_page') return 'X';
+  if (kind === 'web_page' || kind === 'search_result' || kind === 'google_search_page') return 'W';
+  if (kind === 'media') return 'M';
+  if (kind === 'user_input') return 'D';
+  return 'S';
+}
+
+function progressBar(percent) {
+  const safe = Math.max(0, Math.min(100, Number(percent || 0)));
+  return `<span class="bar"><span style="width:${safe}%"></span></span>`;
 }
 
 async function fetchJson(url) {
@@ -62,6 +76,7 @@ function renderFacets(data) {
   state.facets = data;
   const totals = data.totals || {};
   $('totals').textContent = `${totals.unique_evidence ?? 0} unique sources · ${totals.evidence_rows ?? 0} rows · last ingest ${fmtDate(totals.last_ingested_at)}`;
+  $('navInboxCount').textContent = totals.unique_evidence ?? 0;
 
   $('queueList').innerHTML = (data.queues || []).map((queue) => `
     <button class="queue ${state.queue === queue.id ? 'active' : ''}" data-queue="${escapeHtml(queue.id)}">
@@ -109,6 +124,111 @@ function renderFacets(data) {
       loadInbox();
     });
   });
+}
+
+function renderHome(data) {
+  state.home = data;
+  const project = data.active_project || {};
+  const brief = data.brief || {};
+  $('activeProjectName').textContent = project.name || 'Active research project';
+  $('projectPickerLabel').textContent = project.name || 'Active research project';
+  $('activeProjectMeta').textContent = project.description || 'Evidence workspace';
+  $('activeProjectMeter').style.width = `${Math.max(0, Math.min(100, Number(project.completion_percent || 0)))}%`;
+  $('homeUpdated').textContent = project.updated_at ? `Updated ${fmtDate(project.updated_at)}` : 'No recent ingest';
+  $('activeQuestion').textContent = brief.question || 'What evidence needs review?';
+  $('activeQuestionScope').textContent = brief.scope || '';
+
+  $('briefStats').innerHTML = (brief.stats || []).map((item) => `
+    <span class="stat-chip"><strong>${escapeHtml(item.value ?? 0)}</strong>${escapeHtml(item.label || '')}</span>
+  `).join('');
+
+  const workflow = brief.workflow || [];
+  const workflowHtml = workflow.map((item) => `
+    <div class="workflow-row">
+      <span>${escapeHtml(item.label || '')}</span>
+      ${progressBar(item.percent)}
+      <strong>${escapeHtml(item.percent ?? 0)}%</strong>
+    </div>
+  `).join('');
+  if (workflowHtml) {
+    $('briefStats').insertAdjacentHTML('beforeend', `<div class="workflow-stack">${workflowHtml}</div>`);
+  }
+
+  $('todayQueue').innerHTML = (data.queue || []).map((item) => `
+    <button class="task-row" data-queue-jump="${escapeHtml(item.label || '')}">
+      <span class="task-count">${escapeHtml(item.count ?? 0)}</span>
+      <span>${escapeHtml(item.label || '')}</span>
+      <em>${escapeHtml(item.hint || '')}</em>
+    </button>
+  `).join('');
+
+  $('signalRows').innerHTML = (data.recent_evidence || []).length ? (data.recent_evidence || []).map((row) => `
+    <button class="signal-row" data-id="${escapeHtml(row.evidence_id)}">
+      <span class="source-glyph">${escapeHtml(sourceGlyph(row.source_kind))}</span>
+      <span class="signal-main">
+        <strong>${escapeHtml(titleFor(row))}</strong>
+        <em>${escapeHtml([row.source_label, row.author_handle ? '@' + row.author_handle : row.domain, fmtDate(row.last_ingested_at)].filter(Boolean).join(' · '))}</em>
+      </span>
+      <span class="signal-tags">
+        ${row.has_ocr ? '<span class="status-badge ok">OCR</span>' : ''}
+        ${row.has_media ? '<span class="status-badge info">media</span>' : ''}
+        <span class="status-badge">${escapeHtml(row.review_hint || 'triage')}</span>
+      </span>
+    </button>
+  `).join('') : '<p class="muted padded">No evidence has landed yet.</p>';
+
+  const contradictions = data.contradictions || [];
+  $('contradictionCount').textContent = `${contradictions.length} open`;
+  $('contradictionList').innerHTML = contradictions.length ? contradictions.map((item) => `
+    <button class="compact-row">
+      <strong>${escapeHtml(item.title)}</strong>
+      <span>${escapeHtml(item.detail || '')}</span>
+      <em>${escapeHtml(item.sources ?? 0)} sources</em>
+    </button>
+  `).join('') : '<p class="muted padded">No contradiction candidates yet.</p>';
+
+  const coverage = data.coverage || {};
+  const coverageRows = coverage.rows || [];
+  $('coverageGapCount').textContent = `${coverage.gaps || 0} gaps`;
+  $('coverageMatrix').innerHTML = coverageRows.length ? `
+    <table>
+      <thead><tr><th>Where the current brief is strong and where it needs more sources</th><th>X/social</th><th>Web</th><th>Papers/docs</th><th>Media</th></tr></thead>
+      <tbody>${coverageRows.map((row) => `
+        <tr>
+          <td>${escapeHtml(row.topic)}</td>
+          ${['x', 'web', 'papers', 'media'].map((key) => `<td><span class="dot-scale count-${Math.min(5, Number(row[key] || 0))}"></span></td>`).join('')}
+        </tr>
+      `).join('')}</tbody>
+    </table>
+  ` : '<p class="muted padded">Coverage appears after captures are indexed.</p>';
+
+  const publication = data.publication || {};
+  const checks = Number(publication.checks_passed || 0);
+  const total = Number(publication.checks_total || 1);
+  $('publishReadiness').innerHTML = `
+    <p><strong>${checks} of ${total}</strong> checks passed</p>
+    ${progressBar(total ? Math.round((checks / total) * 100) : 0)}
+    <div class="tag-line">${publication.blockers ? `<span class="status-badge danger">${escapeHtml(publication.blockers)} blockers</span>` : '<span class="status-badge ok">No blockers recorded</span>'}</div>
+  `;
+
+  $('openQuestions').innerHTML = (data.open_questions || []).map((question, index) => `
+    <button class="compact-row">
+      <span class="question-number">${String(index + 1).padStart(2, '0')}</span>
+      <strong>${escapeHtml(question)}</strong>
+    </button>
+  `).join('');
+
+  document.querySelectorAll('.signal-row[data-id]').forEach((button) => {
+    button.addEventListener('click', () => selectSource(button.dataset.id));
+  });
+}
+
+async function loadHome() {
+  try {
+    renderHome(await fetchJson('/api/home'));
+  } catch (error) {
+    $('homeUpdated').textContent = `Home summary error: ${error.message}`;
+  }
 }
 
 function renderInbox(rows) {
@@ -790,6 +910,7 @@ function renderRaw(source) {
 async function selectSource(id) {
   if (state.selectedId !== id) state.selectedBlock = null;
   state.selectedId = id;
+  document.body.classList.add('has-source');
   $('sourceEmpty').classList.add('hidden');
   $('sourceView').classList.remove('hidden');
   $('sourceTitle').textContent = 'Loading source...';
@@ -823,6 +944,7 @@ function wireEvents() {
   setTheme(document.documentElement.dataset.theme || 'dark');
 
   $('refreshButton').addEventListener('click', () => {
+    loadHome();
     loadFacets();
     loadInbox();
     if (state.selectedId) selectSource(state.selectedId);
@@ -836,6 +958,30 @@ function wireEvents() {
     $('projectSelect').value = '';
     loadFacets();
     loadInbox();
+  });
+  $('captureSourceButton').addEventListener('click', () => {
+    document.querySelector('[data-home-section="inbox"]')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  });
+  $('openInboxLink').addEventListener('click', (event) => {
+    event.preventDefault();
+    document.querySelector('[data-home-section="inbox"]')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  });
+  $('allSourcesButton').addEventListener('click', () => {
+    state.queue = 'all';
+    state.kind = '';
+    state.q = '';
+    $('searchInput').value = '';
+    loadFacets();
+    loadInbox();
+    document.querySelector('[data-home-section="inbox"]')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  });
+  document.querySelectorAll('[data-home-focus]').forEach((button) => {
+    button.addEventListener('click', () => {
+      document.querySelectorAll('[data-home-focus]').forEach((item) => item.classList.toggle('active', item === button));
+      const focus = button.dataset.homeFocus || 'brief';
+      const target = document.querySelector(`[data-home-section="${focus}"]`) || document.querySelector('[data-home-section="brief"]');
+      target?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    });
   });
   $('searchInput').addEventListener('input', () => {
     state.q = $('searchInput').value.trim();
@@ -857,6 +1003,7 @@ function wireEvents() {
 
 async function init() {
   wireEvents();
+  await loadHome();
   await loadFacets();
   await loadInbox();
 }

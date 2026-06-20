@@ -14,44 +14,44 @@
   <link rel="stylesheet" href="/styles.css">
 </head>
 <body>
-  <header class="topbar">
-    <div>
-      <h1>Web OSINT Research UI</h1>
-      <p>Inbox-driven evidence review, source inspection, normalized content, and provenance.</p>
-    </div>
-    <div class="top-actions">
-      <button id="datalabCase" class="secondary">Datalab case</button>
-      <button id="refreshButton">Refresh</button>
-      <button id="themeSwitch" class="theme-switch" role="switch" aria-checked="false" title="Toggle theme">
-        <span class="sun"></span><span class="moon"></span><span class="knob"></span>
-      </button>
-    </div>
-  </header>
-
   <main class="research-shell">
-    <aside class="queues">
-      <section class="panel">
-        <h2>Queues</h2>
-        <div id="queueList" class="queue-list"></div>
+    <aside class="workspace-rail" aria-label="Research workspace">
+      <div class="brand-lockup">
+        <span class="brand-mark">W</span>
+        <div>
+          <strong>Web OSINT</strong>
+          <span>Research</span>
+        </div>
+      </div>
+      <nav class="primary-nav" aria-label="Primary research navigation">
+        <button class="nav-item active" data-home-focus="brief">Home</button>
+        <button class="nav-item" data-home-focus="inbox">Inbox <span id="navInboxCount">0</span></button>
+        <button class="nav-item" data-home-focus="sources">Sources</button>
+        <button class="nav-item" data-home-focus="review">Review</button>
+        <button class="nav-item" data-home-focus="publishing">Publishing</button>
+        <button class="nav-item" data-home-focus="taxonomy">Taxonomy</button>
+      </nav>
+      <section class="active-project">
+        <h2>Active Project</h2>
+        <strong id="activeProjectName">Open-weight frontier models</strong>
+        <span id="activeProjectMeta">Loading evidence signals</span>
+        <div class="mini-meter"><span id="activeProjectMeter"></span></div>
       </section>
-      <section class="panel">
-        <h2>Source Types</h2>
-        <div id="kindList" class="facet-list"></div>
-      </section>
-      <section class="panel">
-        <h2>Domains</h2>
-        <div id="domainList" class="facet-list compact"></div>
-      </section>
+      <button id="captureSourceButton" class="capture-button">+ Capture source</button>
+      <p class="rail-note">Evidence workspace · internal</p>
     </aside>
 
-    <section class="inbox panel">
-      <div class="section-head">
-        <div>
-          <h2>Inbox</h2>
-          <div id="totals" class="muted">Loading...</div>
+    <section class="research-home">
+      <header class="home-topbar">
+        <div class="project-picker">
+          <span>Project</span>
+          <strong id="projectPickerLabel">Open-weight frontier models</strong>
         </div>
-        <div class="filters">
-          <input id="searchInput" type="search" placeholder="Search sources, handles, URLs, text">
+        <label class="global-search">
+          <span class="sr-only">Search sources, claims, entities</span>
+          <input id="searchInput" type="search" placeholder="Search sources, claims, entities...">
+        </label>
+        <div class="top-actions">
           <select id="projectSelect"><option value="">All projects</option></select>
           <select id="limitSelect">
             <option value="40">40</option>
@@ -59,9 +59,101 @@
             <option value="150">150</option>
             <option value="200">200</option>
           </select>
+          <button id="datalabCase" class="secondary">Datalab case</button>
+          <button id="refreshButton">Refresh</button>
+          <button id="themeSwitch" class="theme-switch" role="switch" aria-checked="false" title="Toggle theme">
+            <span class="sun"></span><span class="moon"></span><span class="knob"></span>
+          </button>
         </div>
-      </div>
-      <div id="inboxRows" class="inbox-rows"></div>
+      </header>
+
+      <section class="brief-hero" data-home-section="brief">
+        <div class="hero-copy">
+          <div class="breadcrumb">Home / Active project</div>
+          <h1>Research brief</h1>
+          <p>The first screen prioritizes evidence work, unresolved questions, review state, and publish readiness.</p>
+        </div>
+        <div id="homeUpdated" class="freshness-pill">Loading...</div>
+      </section>
+
+      <section class="brief-grid">
+        <article class="brief-question panel">
+          <div>
+            <h2>Active research question</h2>
+            <h3 id="activeQuestion">What evidence supports recent capability and efficiency claims?</h3>
+            <p id="activeQuestionScope">Scope: announcements, model cards, papers, repositories, independent benchmarks, and source-linked social evidence.</p>
+          </div>
+          <div id="briefStats" class="brief-stats"></div>
+        </article>
+        <aside class="panel mini-panel">
+          <div class="panel-title-row">
+            <h2>Today’s Queue</h2>
+            <a href="#inbox" id="openInboxLink">Open inbox</a>
+          </div>
+          <div id="todayQueue" class="task-list"></div>
+        </aside>
+      </section>
+
+      <section class="home-grid">
+        <section class="panel evidence-signals" data-home-section="sources">
+          <div class="panel-title-row">
+            <h2>Recent high-value evidence</h2>
+            <button class="text-button" id="allSourcesButton">All sources</button>
+          </div>
+          <div id="signalRows" class="signal-rows"></div>
+        </section>
+        <aside class="panel mini-panel" data-home-section="review">
+          <div class="panel-title-row">
+            <h2>Contradictions</h2>
+            <span id="contradictionCount" class="status-badge danger">0 open</span>
+          </div>
+          <div id="contradictionList" class="compact-list"></div>
+        </aside>
+        <section class="panel coverage-panel">
+          <div class="panel-title-row">
+            <h2>Evidence coverage</h2>
+            <span id="coverageGapCount" class="status-badge warn">0 gaps</span>
+          </div>
+          <div id="coverageMatrix" class="coverage-matrix"></div>
+        </section>
+        <aside class="panel mini-panel" data-home-section="publishing">
+          <div class="panel-title-row">
+            <h2>Publication readiness</h2>
+            <a href="#review">Open review</a>
+          </div>
+          <div id="publishReadiness"></div>
+        </aside>
+        <aside class="panel mini-panel open-questions">
+          <div class="panel-title-row">
+            <h2>Open questions</h2>
+            <a href="#brief">View brief</a>
+          </div>
+          <div id="openQuestions" class="compact-list numbered"></div>
+        </aside>
+      </section>
+
+      <section id="inbox" class="inbox panel" data-home-section="inbox">
+        <div class="section-head">
+          <div>
+            <h2>Inbox</h2>
+            <div id="totals" class="muted">Loading...</div>
+          </div>
+          <div class="filters">
+            <div id="queueList" class="queue-list inline"></div>
+          </div>
+        </div>
+        <div class="source-filter-grid">
+          <section>
+            <h2>Source Types</h2>
+            <div id="kindList" class="facet-list horizontal"></div>
+          </section>
+          <section>
+            <h2>Domains</h2>
+            <div id="domainList" class="facet-list horizontal compact"></div>
+          </section>
+        </div>
+        <div id="inboxRows" class="inbox-rows"></div>
+      </section>
     </section>
 
     <section class="workbench panel">

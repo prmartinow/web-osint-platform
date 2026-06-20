@@ -1,0 +1,23 @@
+# repo_id	local_subdir	purpose
+datalab-to/lift	datalab-to/lift	structured document extraction candidate
+datalab-to/chandra-ocr-2	datalab-to/chandra-ocr-2	document OCR/layout fallback candidate
+PaddlePaddle/PaddleOCR-VL-1.6	PaddlePaddle/PaddleOCR-VL-1.6	hard-case document OCR/VLM fallback
+lightonai/LightOnOCR-2-1B	lightonai/LightOnOCR-2-1B	compact visual OCR/layout fallback
+BAAI/bge-m3	BAAI/bge-m3	neural sparse and multilingual retrieval candidate
+naver/splade-v3	naver/splade-v3	neural sparse retrieval candidate
+colbert-ir/colbertv2.0	colbert-ir/colbertv2.0	late-interaction retrieval baseline
+jinaai/jina-colbert-v2	jinaai/jina-colbert-v2	late-interaction retrieval candidate
+vidore/colqwen2.5-v0.2	vidore/colqwen2.5-v0.2	visual document retrieval candidate
+vidore/colpali-v1.3-hf	vidore/colpali-v1.3-hf	visual document retrieval candidate
+urchade/gliner_large-v2.1	urchade/gliner_large-v2.1	entity span extraction candidate
+fastino/gliner2-large-v1	fastino/gliner2-large-v1	entity span extraction candidate
+knowledgator/gliclass-base-v3.0	knowledgator/gliclass-base-v3.0	flexible evidence classifier candidate
+jackboyla/glirel-large-v0	jackboyla/glirel-large-v0	relation extraction candidate
+numind/NuExtract-1.5-tiny	numind/NuExtract-1.5-tiny	CPU-friendly structured extraction candidate
+numind/NuExtract-2.0-8B	numind/NuExtract-2.0-8B	accuracy-oriented structured extraction candidate
+numind/NuExtract3	numind/NuExtract3	multimodal structured extraction candidate
+cross-encoder/nli-deberta-v3-large	cross-encoder/nli-deberta-v3-large	NLI support-refute-insufficient candidate
+lytang/MiniCheck-Flan-T5-Large	lytang/MiniCheck-Flan-T5-Large	grounded factuality candidate
+bespokelabs/Bespoke-MiniCheck-7B	bespokelabs/Bespoke-MiniCheck-7B	high-value grounded factuality candidate
+answerdotai/ModernBERT-large	answerdotai/ModernBERT-large	encoder classifier candidate
+ahmed-masry/chartgemma	ahmed-masry/chartgemma	chart/table VLM candidate

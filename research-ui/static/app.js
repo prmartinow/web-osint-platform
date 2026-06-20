@@ -26,6 +26,15 @@ const state = {
   librarySelectedId: '',
   librarySelectedIds: new Set(),
   libraryPreviewTab: 'overview',
+  evidenceMode: 'hybrid',
+  evidenceType: '',
+  evidenceReviewState: '',
+  evidenceSourceKind: '',
+  evidenceAnchorType: '',
+  evidenceSelectedId: '',
+  evidenceSelectedIds: new Set(),
+  evidencePreviewTab: 'overview',
+  evidenceRows: [],
 };
 
 const $ = (id) => document.getElementById(id);
@@ -159,9 +168,33 @@ function applyHashParams() {
     const inspect = params.get('inspect') || '';
     state.librarySelectedId = inspect.startsWith('source:') ? inspect.slice(7) : inspect;
   }
+  if (route === 'evidence') {
+    state.q = params.get('q') || state.q || '';
+    state.project = params.get('project') || state.project || '';
+    state.evidenceMode = params.get('mode') || state.evidenceMode || 'hybrid';
+    state.evidenceType = params.get('type') || '';
+    state.evidenceReviewState = params.get('review_state') || '';
+    state.evidenceSourceKind = params.get('source_kind') || '';
+    state.evidenceAnchorType = params.get('anchor_type') || '';
+    const inspect = params.get('inspect') || '';
+    state.evidenceSelectedId = inspect.startsWith('evidence:') ? inspect.slice(9) : inspect;
+  }
 }
 
 function routeHash() {
+  if (state.route === 'evidence') {
+    const params = new URLSearchParams();
+    if (state.q) params.set('q', state.q);
+    if (state.project) params.set('project', state.project);
+    if (state.evidenceMode && state.evidenceMode !== 'hybrid') params.set('mode', state.evidenceMode);
+    if (state.evidenceType) params.set('type', state.evidenceType);
+    if (state.evidenceReviewState) params.set('review_state', state.evidenceReviewState);
+    if (state.evidenceSourceKind) params.set('source_kind', state.evidenceSourceKind);
+    if (state.evidenceAnchorType) params.set('anchor_type', state.evidenceAnchorType);
+    if (state.evidenceSelectedId) params.set('inspect', `evidence:${state.evidenceSelectedId}`);
+    const query = params.toString();
+    return `#evidence${query ? '?' + query : ''}`;
+  }
   if (state.route !== 'library') return `#${state.route}`;
   const params = new URLSearchParams();
   if (state.q) params.set('q', state.q);
@@ -1421,61 +1454,522 @@ async function applyLibraryAction(action) {
   }
 }
 
-function renderEvidencePage(data) {
-  const selections = data.selections || [];
-  const facts = data.proposed_facts || [];
-  const corrections = data.normalized_corrections || [];
-  const recent = data.recent_sources || [];
-  $('routePage').innerHTML = `
-    ${pageHeader('Evidence Ledger', 'Anchored selections, proposed facts, and high-value captured sources.')}
-    ${metricCards([
-      { label: 'Selections', value: selections.length },
-      { label: 'Proposed facts', value: facts.length },
-      { label: 'Corrections', value: corrections.length },
-      { label: 'Recent sources', value: recent.length },
-    ])}
-    <section class="page-two-col">
-      <div class="panel page-panel">
-        <div class="panel-title-row"><h2>Anchored Evidence</h2><span class="status-badge">reviewable</span></div>
-        ${selections.map((row) => `
-          <article class="review-item">
-            <div class="tag-line"><span class="pill">${escapeHtml(row.status)}</span><span class="pill">${escapeHtml(row.selection_kind)}</span><span class="pill">${escapeHtml(row.block_id)}</span></div>
-            <p>${escapeHtml(row.quote)}</p>
-            <button class="secondary object-link" data-id="${escapeHtml(row.source_evidence_id)}">Open source</button>
-          </article>
-        `).join('') || '<p class="muted padded">No anchored evidence selections yet.</p>'}
+function evidenceRowKey(row) {
+  return row.ledger_id || [row.object_type, row.object_id || row.source_evidence_id].filter(Boolean).join(':');
+}
+
+function evidenceTitleFor(row) {
+  return row.quote || row.proposed_fact || row.normalized_observation || row.title || row.canonical_url || row.source_evidence_id || '(untitled evidence)';
+}
+
+function evidenceObjectGlyph(row) {
+  if (row.object_type === 'proposed_fact') return 'F';
+  if (row.object_type === 'claim_stub') return 'C';
+  if (row.object_type === 'entity_link') return 'E';
+  if (row.object_type === 'normalized_correction') return 'N';
+  if (row.object_type === 'annotation') return 'A';
+  if (row.object_type === 'evidence_candidate') return sourceGlyph(row.source_kind);
+  return 'S';
+}
+
+function evidenceFacetGroup(title, items, activeValue, filterName) {
+  const options = items || [];
+  return `
+    <section class="evidence-facet-group">
+      <h3>${escapeHtml(title)}</h3>
+      <button class="facet ${activeValue ? '' : 'active'}" type="button" data-evidence-filter="${escapeHtml(filterName)}" data-filter-value="">
+        <span>All ${escapeHtml(title.toLowerCase())}</span><strong>${escapeHtml(options.reduce((sum, item) => sum + Number(item.count || 0), 0))}</strong>
+      </button>
+      <div class="facet-list compact">
+        ${options.map((item) => `
+          <button class="facet ${activeValue === item.id ? 'active' : ''}" type="button" data-evidence-filter="${escapeHtml(filterName)}" data-filter-value="${escapeHtml(item.id)}">
+            <span>${escapeHtml(item.label || item.id)}</span><strong>${escapeHtml(item.count || 0)}</strong>
+          </button>
+        `).join('')}
       </div>
-      <div class="panel page-panel">
-        <div class="panel-title-row"><h2>Proposed Facts</h2><span class="status-badge warn">not canonical</span></div>
-        ${facts.map((row) => `
-          <article class="review-item">
-            <div class="tag-line"><span class="pill">${escapeHtml(row.status)}</span><span class="pill">${escapeHtml(row.fact_type)}</span><span class="pill">${escapeHtml(row.field_path)}</span></div>
-            <p><strong>${escapeHtml(row.normalized_value || row.raw_value)}</strong>${row.unit ? ` ${escapeHtml(row.unit)}` : ''}</p>
-            <button class="secondary object-link" data-id="${escapeHtml(row.source_evidence_id)}">Open source</button>
-          </article>
-        `).join('') || '<p class="muted padded">No proposed facts yet.</p>'}
-      </div>
-    </section>
-    <section class="panel page-panel">
-      <div class="panel-title-row"><h2>Normalized Corrections</h2><span class="status-badge warn">overlay layer</span></div>
-      ${corrections.map((row) => `
-        <article class="review-item">
-          <div class="tag-line"><span class="pill">${escapeHtml(row.status)}</span><span class="pill">${escapeHtml(row.correction_kind)}</span><span class="pill">${escapeHtml(row.block_id)}</span></div>
-          <div class="diff-pair">
-            <div><strong>Original</strong><p>${escapeHtml(row.original_text)}</p></div>
-            <div><strong>Corrected</strong><p>${escapeHtml(row.corrected_text)}</p></div>
-          </div>
-          <button class="secondary object-link" data-id="${escapeHtml(row.source_evidence_id)}">Open source</button>
-        </article>
-      `).join('') || '<p class="muted padded">No normalized corrections yet.</p>'}
-    </section>
-    <section class="panel page-panel">
-      <div class="panel-title-row"><h2>Recent Evidence Sources</h2><span class="status-badge info">source trail</span></div>
-      <div class="dense-list">${recent.map((row) => sourceButton(row)).join('')}</div>
     </section>
   `;
-  document.querySelectorAll('.object-link[data-id]').forEach((button) => button.addEventListener('click', () => selectSource(button.dataset.id)));
-  bindObjectRows();
+}
+
+function evidenceLayerSummary(row) {
+  return `
+    <div class="evidence-layer-stack">
+      <div><span>Immutable source</span><strong>${escapeHtml(row.title || row.canonical_url || row.source_evidence_id || 'Source record')}</strong></div>
+      <div><span>Review object</span><strong>${escapeHtml(titleCase(row.object_type || 'evidence'))} · ${escapeHtml(row.review_state || 'open')}</strong></div>
+      <div><span>Normalized observation</span><strong>${escapeHtml(row.normalized_observation || 'No normalized observation attached')}</strong></div>
+      <div><span>Structured fact / claim</span><strong>${escapeHtml(row.proposed_fact || row.claim_conflict_label || 'Not promoted')}</strong></div>
+    </div>
+  `;
+}
+
+function renderEvidencePreview(data) {
+  const preview = data.preview || {};
+  const row = preview.row || null;
+  if (!row) {
+    return `
+      <div class="empty-state">
+        <h2>Evidence Detail</h2>
+        <p>Select a ledger row to inspect its source, review object, normalized observation, linked claims, and provenance.</p>
+      </div>
+    `;
+  }
+  const activeTab = ['overview', 'provenance', 'observation', 'claims'].includes(state.evidencePreviewTab) ? state.evidencePreviewTab : 'overview';
+  const previewTab = (id, label) => `<button class="${activeTab === id ? 'active' : ''}" type="button" data-evidence-preview-tab="${id}">${label}</button>`;
+  const sectionClass = (id) => `evidence-preview-section ${activeTab === id ? 'active' : ''}`;
+  const linkedFacts = preview.linked_facts || [];
+  const linkedClaims = preview.linked_claims || [];
+  const corrections = preview.linked_corrections || [];
+  const annotations = preview.linked_annotations || [];
+  const source = preview.source || {};
+  return `
+    <div class="evidence-preview-head">
+      <span class="source-glyph">${escapeHtml(evidenceObjectGlyph(row))}</span>
+      <div>
+        <h2>${escapeHtml(evidenceTitleFor(row))}</h2>
+        <p>${escapeHtml([row.source_label, row.author_handle ? '@' + row.author_handle : row.domain, fmtDate(row.updated_at)].filter(Boolean).join(' · '))}</p>
+      </div>
+    </div>
+
+    <nav class="evidence-preview-tabs" aria-label="Evidence detail sections">
+      ${previewTab('overview', 'Overview')}
+      ${previewTab('provenance', 'Provenance')}
+      ${previewTab('observation', 'Observation')}
+      ${previewTab('claims', 'Claims')}
+    </nav>
+
+    <section class="${sectionClass('overview')}" data-evidence-preview-section="overview">
+      ${evidenceLayerSummary(row)}
+      <div class="evidence-warning">
+        Accepting this row updates only <strong>${escapeHtml(titleCase(row.object_type || 'this object'))}</strong>. It does not accept linked proposed facts, claims, or corrections.
+      </div>
+      ${row.note ? `<p class="muted">${escapeHtml(row.note)}</p>` : ''}
+      <div class="tag-line">
+        <span class="pill">${escapeHtml(row.evidence_type || 'evidence')}</span>
+        <span class="pill">${escapeHtml(row.anchor_type || 'source_record')}</span>
+        <span class="pill">${escapeHtml(row.review_state || 'open')}</span>
+        ${row.claim_conflict ? '<span class="pill warn">possible conflict</span>' : ''}
+      </div>
+    </section>
+
+    <section class="${sectionClass('provenance')}" data-evidence-preview-section="provenance">
+      <div class="evidence-provenance-stack">
+        ${(preview.provenance || []).map((step, index) => `
+          <article>
+            <span>${String(index + 1).padStart(2, '0')}</span>
+            <div>
+              <strong>${escapeHtml(step.label)}</strong>
+              <p>${escapeHtml(step.value)}</p>
+              ${step.meta ? `<em>${escapeHtml(step.meta)}</em>` : ''}
+            </div>
+          </article>
+        `).join('')}
+      </div>
+      <div class="source-trail">
+        <span><strong>Capture ref</strong>${escapeHtml(row.capture_ref || 'not recorded')}</span>
+        <span><strong>Capture hash</strong>${escapeHtml(row.capture_hash || 'not recorded')}</span>
+        <span><strong>Source ID</strong>${escapeHtml(row.source_evidence_id || '')}</span>
+        <span><strong>Object ID</strong>${escapeHtml(row.object_id || '')}</span>
+      </div>
+      ${source.canonical_url ? `<p><a href="${escapeHtml(source.canonical_url)}" target="_blank" rel="noreferrer">${escapeHtml(source.canonical_url)}</a></p>` : ''}
+    </section>
+
+    <section class="${sectionClass('observation')}" data-evidence-preview-section="observation">
+      <article class="evidence-preview-card">
+        <h4>Evidence anchor</h4>
+        <p>${escapeHtml(row.quote || row.anchor_label || 'No anchor text recorded.')}</p>
+      </article>
+      <article class="evidence-preview-card">
+        <h4>Machine / normalized observation</h4>
+        <p>${escapeHtml(row.normalized_observation || 'No normalized observation recorded for this ledger row.')}</p>
+      </article>
+      <article class="evidence-preview-card">
+        <h4>Linked proposed facts (${linkedFacts.length})</h4>
+        ${linkedFacts.map((fact) => `<p><strong>${escapeHtml(fact.fact_type || 'fact')}</strong> · ${escapeHtml(fact.status || '')}<br>${escapeHtml(fact.normalized_value || fact.raw_value || fact.evidence_quote || '')}</p>`).join('') || '<p class="muted">No linked proposed facts.</p>'}
+      </article>
+      <article class="evidence-preview-card">
+        <h4>Corrections / annotations</h4>
+        ${corrections.map((item) => `<p><strong>${escapeHtml(item.correction_kind || 'correction')}</strong> · ${escapeHtml(item.status || '')}<br>${escapeHtml(item.corrected_text || '')}</p>`).join('')}
+        ${annotations.map((item) => `<p><strong>${escapeHtml(item.annotation_type || 'annotation')}</strong> · ${escapeHtml(item.status || '')}<br>${escapeHtml(item.body || '')}</p>`).join('')}
+        ${!corrections.length && !annotations.length ? '<p class="muted">No corrections or annotations linked yet.</p>' : ''}
+      </article>
+    </section>
+
+    <section class="${sectionClass('claims')}" data-evidence-preview-section="claims">
+      <article class="evidence-preview-card">
+        <h4>Linked claims (${linkedClaims.length})</h4>
+        ${linkedClaims.map((claim) => `
+          <p>
+            <strong>${escapeHtml(claim.claim_type || 'claim')}</strong> · ${escapeHtml(claim.evidence_relation || '')} · ${escapeHtml(claim.status || '')}<br>
+            ${escapeHtml(claim.claim_text || '')}
+          </p>
+        `).join('') || '<p class="muted">No linked claims.</p>'}
+      </article>
+      <div class="evidence-warning">
+        Claims remain contestable publication candidates until separately reviewed against their supporting evidence.
+      </div>
+    </section>
+
+    <label class="preview-note">Decision note
+      <input id="evidenceDecisionNote" placeholder="Optional decision note, claim link target, taxonomy label, or export context">
+    </label>
+    <div id="evidenceActionStatus" class="review-status muted"></div>
+    <div class="evidence-preview-actions">
+      <button class="secondary" data-evidence-action="assign_review">Assign</button>
+      <button class="secondary" data-evidence-action="defer">Defer</button>
+      <button class="secondary" data-evidence-action="reject">Reject</button>
+      <button class="secondary" data-evidence-action="link_claim">Link claim</button>
+      <button class="secondary" data-evidence-action="create_claim">Create claim</button>
+      <button class="secondary" data-evidence-action="change_type">Change type</button>
+      <button class="secondary" data-evidence-action="taxonomy">Taxonomy</button>
+      <button class="secondary" data-evidence-action="export_publication">Export</button>
+      <button class="secondary" data-evidence-action="open_workbench">Open source</button>
+      <button data-evidence-action="accept">Accept & next</button>
+    </div>
+  `;
+}
+
+function renderEvidencePage(data) {
+  const rows = data.rows || data.results?.rows || [];
+  state.evidenceRows = rows;
+  if (!state.evidenceSelectedId || !rows.some((row) => evidenceRowKey(row) === state.evidenceSelectedId)) {
+    state.evidenceSelectedId = data.selected_id || (rows[0] ? evidenceRowKey(rows[0]) : '');
+  }
+  const summary = data.summary || {};
+  const facets = data.facets || {};
+  const selectedId = state.evidenceSelectedId;
+  $('routePage').innerHTML = `
+    ${pageHeader('Evidence Ledger', 'Review evidence objects, candidates, anchors, derived observations, and claim links without collapsing their provenance layers.')}
+    ${metricCards([
+      { label: 'Visible objects', value: summary.visible ?? rows.length },
+      { label: 'Selections', value: summary.selections ?? 0 },
+      { label: 'Proposed facts', value: summary.proposed_facts ?? 0 },
+      { label: 'Claim conflicts', value: summary.claim_conflicts ?? 0 },
+    ])}
+    <section class="evidence-shell">
+      <aside class="panel evidence-filter-panel">
+        <label class="library-control"><span>Review mode</span>
+          <div class="segmented-control">
+            ${['exact', 'semantic', 'hybrid'].map((mode) => `<button class="${state.evidenceMode === mode ? 'active' : ''}" type="button" data-evidence-mode="${mode}">${escapeHtml(titleCase(mode))}</button>`).join('')}
+          </div>
+        </label>
+        ${evidenceFacetGroup('Evidence type', facets.evidence_types, state.evidenceType, 'type')}
+        ${evidenceFacetGroup('Review state', facets.review_states, state.evidenceReviewState, 'review_state')}
+        ${evidenceFacetGroup('Source kind', facets.source_kinds, state.evidenceSourceKind, 'source_kind')}
+        ${evidenceFacetGroup('Anchor type', facets.anchor_types, '', 'anchor_type')}
+      </aside>
+
+      <section class="panel evidence-ledger-panel">
+        <div class="evidence-search-strip">
+          <label><span>Evidence search</span><input id="evidenceSearchInput" value="${escapeHtml(state.q)}" placeholder="Search quotes, anchors, claims, URLs, sources"></label>
+          <button class="secondary" id="evidenceClearFilters">Clear</button>
+        </div>
+        <div class="evidence-explanation">
+          <span class="status-badge info">${escapeHtml(titleCase(state.evidenceMode || 'hybrid'))}</span>
+          <p>${escapeHtml(data.scope?.q ? `Filtered by "${data.scope.q}".` : 'Showing reviewable evidence objects and source candidates by latest activity.')}</p>
+        </div>
+        <div class="evidence-bulk-toolbar">
+          <label><input type="checkbox" id="evidenceSelectAll"> Select visible</label>
+          ${['accept', 'reject', 'defer', 'assign_review', 'link_claim', 'create_claim', 'change_type', 'taxonomy', 'export_publication'].map((action) => `<button class="secondary" data-evidence-bulk-action="${action}">${escapeHtml(titleCase(action))}</button>`).join('')}
+          <span id="evidenceBulkStatus" class="muted"></span>
+        </div>
+        <div class="evidence-results-list">
+          ${rows.length ? rows.map((row) => {
+            const rowKey = evidenceRowKey(row);
+            const selected = rowKey === selectedId;
+            return `
+              <article class="evidence-row ${selected ? 'active' : ''}" data-ledger-id="${escapeHtml(rowKey)}" data-source-id="${escapeHtml(row.source_evidence_id || '')}" data-object-type="${escapeHtml(row.object_type || '')}">
+                <input class="evidence-check" type="checkbox" aria-label="Select evidence object" ${state.evidenceSelectedIds.has(rowKey) ? 'checked' : ''}>
+                <span class="source-glyph">${escapeHtml(evidenceObjectGlyph(row))}</span>
+                <div class="evidence-row-main">
+                  <div class="evidence-title-line">
+                    <strong>${escapeHtml(evidenceTitleFor(row))}</strong>
+                    ${row.claim_conflict ? '<span class="pill warn">conflict</span>' : ''}
+                  </div>
+                  <p>${escapeHtml(row.match_explanation || row.immutable_note || '')}</p>
+                  <div class="row-meta">
+                    <span class="pill">${escapeHtml(titleCase(row.object_type || 'evidence'))}</span>
+                    <span class="pill">${escapeHtml(row.evidence_type || 'evidence')}</span>
+                    <span class="pill">${escapeHtml(row.review_state || 'open')}</span>
+                    <span class="pill">${escapeHtml(row.anchor_type || 'source_record')}</span>
+                    ${row.source_label ? `<span class="pill">${escapeHtml(row.source_label)}</span>` : ''}
+                    ${row.author_handle ? `<span class="pill">@${escapeHtml(row.author_handle)}</span>` : ''}
+                    ${row.domain ? `<span class="pill">${escapeHtml(row.domain)}</span>` : ''}
+                  </div>
+                </div>
+                <div class="evidence-row-counts">
+                  <strong>${escapeHtml(row.fact_count || 0)}</strong><em>facts</em>
+                  <strong>${escapeHtml(row.claim_count || 0)}</strong><em>claims</em>
+                  <strong>${escapeHtml(row.annotation_count || 0)}</strong><em>notes</em>
+                </div>
+              </article>
+            `;
+          }).join('') : '<div class="empty-state"><h2>No evidence objects</h2><p>Try a different search, source filter, or review-state filter.</p></div>'}
+        </div>
+      </section>
+
+      <aside class="panel evidence-detail-panel">
+        ${renderEvidencePreview(data)}
+      </aside>
+    </section>
+  `;
+  bindEvidencePage(data);
+}
+
+function evidenceReviewStatusForAction(row, action) {
+  const objectType = row.object_type || '';
+  if (action === 'accept') return acceptStatusByObject[objectType] || 'accepted';
+  if (action === 'reject') return rejectStatusByObject[objectType] || 'rejected';
+  if (action === 'defer') return deferStatusByObject[objectType] || 'open';
+  return '';
+}
+
+function evidenceEventTypeForAction(action) {
+  return {
+    accept: 'evidence.review_action.recorded',
+    reject: 'evidence.review_action.recorded',
+    defer: 'evidence.review_action.recorded',
+    assign_review: 'evidence.assignment.recorded',
+    link_claim: 'evidence.claim_link.requested',
+    create_claim: 'evidence.claim_create.requested',
+    change_type: 'evidence.type_change.requested',
+    taxonomy: 'evidence.taxonomy_label.requested',
+    export_publication: 'evidence.publication_export.requested',
+  }[action] || 'evidence.action.recorded';
+}
+
+function evidenceAnchorForRow(row, action) {
+  return {
+    kind: 'evidence_ledger_object',
+    ledger_id: evidenceRowKey(row),
+    source_evidence_id: row.source_evidence_id || '',
+    object_type: row.object_type || '',
+    object_id: row.object_id || '',
+    evidence_type: row.evidence_type || '',
+    anchor_type: row.anchor_type || '',
+    action,
+  };
+}
+
+async function persistEvidenceAction(row, action, note = '') {
+  if (!row) return;
+  if (action === 'open_workbench') {
+    await selectSource(row.source_evidence_id);
+    return;
+  }
+  if (['accept', 'reject', 'defer'].includes(action) && row.can_update_review_state && reviewStatusOptions[row.object_type]) {
+    await postJson('/api/review-state', {
+      source_evidence_id: row.source_evidence_id || '',
+      source_project: row.source_project || '',
+      project: row.source_project || state.project || '',
+      subject_type: row.object_type || '',
+      subject_id: row.object_id || '',
+      status: evidenceReviewStatusForAction(row, action),
+      note,
+      source_anchor: evidenceAnchorForRow(row, action),
+      idempotency_key: `${evidenceRowKey(row)}:${action}:${Date.now()}`,
+    });
+    return;
+  }
+  await postJson('/api/review/events', {
+    event_type: evidenceEventTypeForAction(action),
+    source_evidence_id: row.source_evidence_id || '',
+    source_project: row.source_project || '',
+    project: row.source_project || state.project || '',
+    subject_type: row.object_type || 'evidence_candidate',
+    subject_id: row.object_id || evidenceRowKey(row),
+    action,
+    decision: previewDecisionForAction(action),
+    status: previewDecisionForAction(action),
+    note,
+    source_anchor: evidenceAnchorForRow(row, action),
+    idempotency_key: `${evidenceRowKey(row)}:${action}:${Date.now()}`,
+  });
+}
+
+function nextEvidenceSelectionAfter(row) {
+  const rows = state.evidenceRows || [];
+  const index = rows.findIndex((item) => evidenceRowKey(item) === evidenceRowKey(row));
+  const next = rows[index + 1] || rows[index - 1] || null;
+  return next ? evidenceRowKey(next) : '';
+}
+
+async function applyEvidenceAction(row, action) {
+  const status = $('evidenceActionStatus') || $('evidenceBulkStatus');
+  const note = $('evidenceDecisionNote')?.value || '';
+  if (!row) {
+    if (status) status.textContent = 'Select an evidence row first.';
+    return;
+  }
+  if (status) status.textContent = `${titleCase(action)}...`;
+  await persistEvidenceAction(row, action, note);
+  if (['accept', 'reject', 'defer'].includes(action)) {
+    state.evidenceSelectedId = nextEvidenceSelectionAfter(row);
+  }
+  state.evidenceSelectedIds.clear();
+  if (status) status.textContent = `${titleCase(action)} recorded.`;
+  replaceRouteHash();
+  await loadRoutePage();
+}
+
+async function applyBulkEvidenceAction(action) {
+  const status = $('evidenceBulkStatus');
+  const selectedIds = Array.from(document.querySelectorAll('.evidence-row .evidence-check:checked'))
+    .map((checkbox) => checkbox.closest('.evidence-row')?.dataset.ledgerId)
+    .filter(Boolean);
+  const selectedRows = state.evidenceRows.filter((row) => selectedIds.includes(evidenceRowKey(row)));
+  if (!selectedRows.length) {
+    if (status) status.textContent = 'Select at least one evidence object.';
+    return;
+  }
+  if (status) status.textContent = `${titleCase(action)} ${selectedRows.length} evidence object${selectedRows.length === 1 ? '' : 's'}...`;
+  for (const row of selectedRows) {
+    await persistEvidenceAction(row, action, `Bulk ${titleCase(action)} from Evidence Ledger`);
+  }
+  state.evidenceSelectedIds.clear();
+  if (status) status.textContent = `${titleCase(action)} recorded for ${selectedRows.length}.`;
+  await loadRoutePage();
+}
+
+function moveEvidenceSelection(delta) {
+  if (state.route !== 'evidence') return;
+  const rows = state.evidenceRows || [];
+  if (!rows.length) return;
+  const current = rows.findIndex((row) => evidenceRowKey(row) === state.evidenceSelectedId);
+  const nextIndex = Math.max(0, Math.min(rows.length - 1, (current >= 0 ? current : 0) + delta));
+  state.evidenceSelectedId = evidenceRowKey(rows[nextIndex]);
+  replaceRouteHash();
+  loadRoutePage();
+}
+
+function bindEvidenceKeyboard() {
+  if (window.__webOsintEvidenceKeyboardBound) return;
+  window.__webOsintEvidenceKeyboardBound = true;
+  window.addEventListener('keydown', async (event) => {
+    if (state.route !== 'evidence') return;
+    const active = document.activeElement;
+    if (active && ['INPUT', 'TEXTAREA', 'SELECT', 'BUTTON'].includes(active.tagName)) return;
+    const key = event.key.toLowerCase();
+    if (key === 'j') {
+      event.preventDefault();
+      moveEvidenceSelection(1);
+    } else if (key === 'k') {
+      event.preventDefault();
+      moveEvidenceSelection(-1);
+    } else if (['a', 'r', 'd'].includes(key)) {
+      event.preventDefault();
+      const row = state.evidenceRows.find((item) => evidenceRowKey(item) === state.evidenceSelectedId);
+      const action = key === 'a' ? 'accept' : key === 'r' ? 'reject' : 'defer';
+      try {
+        await applyEvidenceAction(row, action);
+      } catch (error) {
+        const status = $('evidenceActionStatus') || $('evidenceBulkStatus');
+        if (status) status.textContent = error.message;
+      }
+    }
+  });
+}
+
+function bindEvidencePage(data) {
+  document.querySelectorAll('[data-evidence-mode]').forEach((button) => {
+    button.addEventListener('click', () => {
+      state.evidenceMode = button.dataset.evidenceMode || 'hybrid';
+      replaceRouteHash();
+      loadRoutePage();
+    });
+  });
+  document.querySelectorAll('[data-evidence-filter]').forEach((button) => {
+    button.addEventListener('click', () => {
+      const filter = button.dataset.evidenceFilter;
+      const value = button.dataset.filterValue || '';
+      if (filter === 'type') state.evidenceType = value;
+      if (filter === 'review_state') state.evidenceReviewState = value;
+      if (filter === 'source_kind') state.evidenceSourceKind = value;
+      if (filter === 'anchor_type') state.evidenceAnchorType = value;
+      state.evidenceSelectedId = '';
+      replaceRouteHash();
+      loadRoutePage();
+    });
+  });
+  $('evidenceSearchInput')?.addEventListener('input', () => {
+    state.q = $('evidenceSearchInput').value.trim();
+    clearTimeout(window.__evidenceSearchTimer);
+    window.__evidenceSearchTimer = setTimeout(() => {
+      state.evidenceSelectedId = '';
+      replaceRouteHash();
+      loadRoutePage();
+    }, 250);
+  });
+  $('evidenceClearFilters')?.addEventListener('click', () => {
+    state.q = '';
+    state.project = '';
+    state.evidenceMode = 'hybrid';
+    state.evidenceType = '';
+    state.evidenceReviewState = '';
+    state.evidenceSourceKind = '';
+    state.evidenceAnchorType = '';
+    state.evidenceSelectedId = '';
+    state.evidenceSelectedIds.clear();
+    replaceRouteHash();
+    loadRoutePage();
+  });
+  $('evidenceSelectAll')?.addEventListener('change', () => {
+    const checked = $('evidenceSelectAll').checked;
+    state.evidenceSelectedIds.clear();
+    document.querySelectorAll('.evidence-row').forEach((row) => {
+      const id = row.dataset.ledgerId || '';
+      const checkbox = row.querySelector('.evidence-check');
+      if (checkbox) checkbox.checked = checked;
+      if (checked && id) state.evidenceSelectedIds.add(id);
+    });
+  });
+  document.querySelectorAll('.evidence-row').forEach((row) => {
+    row.addEventListener('click', () => {
+      state.evidenceSelectedId = row.dataset.ledgerId || '';
+      replaceRouteHash();
+      loadRoutePage();
+    });
+    row.addEventListener('dblclick', async () => {
+      if (row.dataset.sourceId) await selectSource(row.dataset.sourceId);
+    });
+    row.querySelector('.evidence-check')?.addEventListener('click', (event) => {
+      event.stopPropagation();
+      const id = row.dataset.ledgerId || '';
+      if (!id) return;
+      if (event.currentTarget.checked) state.evidenceSelectedIds.add(id);
+      else state.evidenceSelectedIds.delete(id);
+    });
+  });
+  document.querySelectorAll('[data-evidence-preview-tab]').forEach((button) => {
+    button.addEventListener('click', () => {
+      state.evidencePreviewTab = button.dataset.evidencePreviewTab || 'overview';
+      document.querySelectorAll('[data-evidence-preview-tab]').forEach((tab) => tab.classList.toggle('active', tab === button));
+      document.querySelectorAll('[data-evidence-preview-section]').forEach((section) => {
+        section.classList.toggle('active', section.dataset.evidencePreviewSection === state.evidencePreviewTab);
+      });
+    });
+  });
+  document.querySelectorAll('[data-evidence-action]').forEach((button) => {
+    button.addEventListener('click', async () => {
+      const row = (data.rows || []).find((item) => evidenceRowKey(item) === state.evidenceSelectedId) || data.preview?.row;
+      try {
+        await applyEvidenceAction(row, button.dataset.evidenceAction || 'defer');
+      } catch (error) {
+        const status = $('evidenceActionStatus');
+        if (status) status.textContent = error.message;
+      }
+    });
+  });
+  document.querySelectorAll('[data-evidence-bulk-action]').forEach((button) => {
+    button.addEventListener('click', async () => {
+      try {
+        await applyBulkEvidenceAction(button.dataset.evidenceBulkAction || 'defer');
+      } catch (error) {
+        const status = $('evidenceBulkStatus');
+        if (status) status.textContent = error.message;
+      }
+    });
+  });
+  bindEvidenceKeyboard();
 }
 
 function renderEntitiesPage(data) {
@@ -1629,7 +2123,7 @@ function renderRoutePage(route, data) {
 function routeQuery() {
   const params = new URLSearchParams({ limit: state.limit });
   if (state.q) params.set('q', state.q);
-  if (state.kind) params.set('kind', state.kind);
+  if (state.kind && state.route !== 'evidence') params.set('kind', state.kind);
   if (state.project) params.set('project', state.project);
   if (state.route === 'library') {
     params.set('mode', state.libraryMode || 'hybrid');
@@ -1640,6 +2134,14 @@ function routeQuery() {
     if (state.libraryDateTo) params.set('date_to', state.libraryDateTo);
     if (state.libraryIncludeArchived) params.set('include_archived', '1');
     if (state.librarySelectedId) params.set('inspect', `source:${state.librarySelectedId}`);
+  }
+  if (state.route === 'evidence') {
+    params.set('mode', state.evidenceMode || 'hybrid');
+    if (state.evidenceType) params.set('type', state.evidenceType);
+    if (state.evidenceReviewState) params.set('review_state', state.evidenceReviewState);
+    if (state.evidenceSourceKind) params.set('source_kind', state.evidenceSourceKind);
+    if (state.evidenceAnchorType) params.set('anchor_type', state.evidenceAnchorType);
+    if (state.evidenceSelectedId) params.set('inspect', `evidence:${state.evidenceSelectedId}`);
   }
   return params.toString();
 }
@@ -3010,7 +3512,7 @@ function wireEvents() {
     if ($('inboxLocalSearch') && $('inboxLocalSearch').value !== state.q) $('inboxLocalSearch').value = state.q;
     clearTimeout(window.__inboxTimer);
     window.__inboxTimer = setTimeout(() => {
-      if (state.route === 'library') replaceRouteHash();
+      if (state.route === 'library' || state.route === 'evidence') replaceRouteHash();
       if (state.route === 'home' || state.route === 'inbox') loadInbox();
       else loadRoutePage();
     }, 250);
@@ -3056,7 +3558,7 @@ function wireEvents() {
     state.previewTaskKey = '';
     loadInbox();
     if (state.route !== 'home' && state.route !== 'inbox') {
-      if (state.route === 'library') replaceRouteHash();
+      if (state.route === 'library' || state.route === 'evidence') replaceRouteHash();
       loadRoutePage();
     }
   });

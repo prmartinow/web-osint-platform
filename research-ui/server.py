@@ -1789,16 +1789,242 @@ def create_library_action(payload):
     return {"action": action, "outcomes": outcomes, "created_at": now_iso()}
 
 
+def first_nonempty(*values):
+    for value in values:
+        if value is None:
+            continue
+        text = str(value).strip()
+        if text:
+            return text
+    return ""
+
+
+def group_rows(rows, key_name):
+    grouped = {}
+    for row in rows:
+        key = row.get(key_name) or ""
+        if key:
+            grouped.setdefault(key, []).append(row)
+    return grouped
+
+
+def anchor_type_for(row, anchor):
+    text = " ".join(str(row.get(key) or "") for key in ("selection_kind", "correction_kind", "block_id", "field_path")).lower()
+    if isinstance(anchor, dict):
+        keys = " ".join(str(key).lower() for key in anchor.keys())
+        values = " ".join(str(value).lower() for value in anchor.values() if not isinstance(value, (dict, list)))
+        text = f"{text} {keys} {values}"
+    if "timecode" in text or "video" in text:
+        return "video_timecode"
+    if "bbox" in text or "image" in text or "media" in text or "region" in text:
+        return "image_region"
+    if "table" in text or "cell" in text or "row" in text:
+        return "table_cell"
+    if "line" in text or "repo" in text or "path" in text:
+        return "repo_line"
+    if row.get("block_id") or row.get("document_id"):
+        return "document_block"
+    return "source_record"
+
+
+def anchor_label_for(row, anchor):
+    if isinstance(anchor, dict):
+        label = first_nonempty(anchor.get("label"), anchor.get("selector"), anchor.get("dom_path"), anchor.get("artifact_path"))
+        if label:
+            return compact_text(label, 180)
+    parts = [row.get("document_id"), row.get("block_id"), row.get("field_path")]
+    return compact_text(" / ".join(str(part) for part in parts if part), 180)
+
+
+def source_for_ledger_row(source_map, source_id):
+    source = source_map.get(source_id or "") or {}
+    return {
+        "evidence_id": source_id or source.get("evidence_id") or "",
+        "source_kind": source.get("source_kind") or "",
+        "source_label": source.get("source_label") or source_kind_label(source.get("source_kind")),
+        "source_project": source.get("source_project") or "",
+        "canonical_url": source.get("canonical_url") or "",
+        "title": source.get("title") or source.get("canonical_url") or source_id or "",
+        "snippet": source.get("snippet") or "",
+        "author_handle": source.get("author_handle") or "",
+        "domain": source.get("domain") or "",
+        "captured_at": source.get("last_captured_at") or source.get("captured_at") or "",
+        "last_ingested_at": source.get("last_ingested_at") or "",
+        "has_media": bool(source.get("has_media")),
+        "has_ocr": bool(source.get("has_ocr")),
+        "observations": source.get("observations") or 0,
+        "text_chars": source.get("text_chars") or 0,
+    }
+
+
+def evidence_search_explanation(row, mode, q):
+    mode_label = {"exact": "Exact", "semantic": "Semantic", "hybrid": "Hybrid"}.get(mode or "hybrid", "Hybrid")
+    if q:
+        return f"{mode_label} match over evidence text, source metadata, anchors, and linked review objects."
+    return f"{mode_label} ledger view ordered by review activity and source freshness."
+
+
+def make_evidence_row(row, object_type, object_id, source_map, facts_by_selection, facts_by_source, claims_by_selection, claims_by_source, corrections_by_source, annotations_by_selection, annotations_by_source, mode, q):
+    source_id = row.get("source_evidence_id") or row.get("evidence_id") or ""
+    source = source_for_ledger_row(source_map, source_id)
+    anchor = parse_raw_json(row.get("source_anchor_json", ""))
+    selection_id = row.get("selection_id") or row.get("evidence_selection_id") or ""
+    linked_facts = facts_by_selection.get(selection_id, []) + facts_by_source.get(source_id, [])
+    linked_claims = claims_by_selection.get(selection_id, []) + claims_by_source.get(source_id, [])
+    linked_corrections = corrections_by_source.get(source_id, [])
+    linked_annotations = annotations_by_selection.get(selection_id, []) + annotations_by_source.get(source_id, [])
+    status = row.get("status") or ("candidate" if object_type == "evidence_candidate" else "open")
+    evidence_type = first_nonempty(
+        row.get("selection_kind"),
+        row.get("fact_type"),
+        row.get("correction_kind"),
+        row.get("annotation_type"),
+        row.get("claim_type"),
+        "source_candidate" if object_type == "evidence_candidate" else object_type,
+    )
+    quote = first_nonempty(
+        row.get("quote"),
+        row.get("evidence_quote"),
+        row.get("body"),
+        row.get("claim_text"),
+        row.get("corrected_text"),
+        row.get("normalized_value"),
+        row.get("raw_value"),
+        row.get("snippet"),
+        source.get("snippet"),
+    )
+    normalized_observation = first_nonempty(
+        row.get("corrected_text"),
+        row.get("normalized_value"),
+        row.get("body"),
+        row.get("claim_text"),
+        row.get("quote"),
+    )
+    proposed_fact = first_nonempty(
+        row.get("normalized_value"),
+        row.get("raw_value"),
+        linked_facts[0].get("normalized_value") if linked_facts else "",
+        linked_facts[0].get("raw_value") if linked_facts else "",
+    )
+    conflict_claims = [claim for claim in linked_claims if str(claim.get("status") or "").lower() in ("disputed", "contradicted", "rejected", "needs_more_evidence")]
+    ledger_id = f"{object_type}:{object_id or source_id}"
+    result = {
+        **source,
+        "ledger_id": ledger_id,
+        "object_type": object_type,
+        "object_id": object_id or source_id,
+        "review_state": status,
+        "evidence_type": evidence_type,
+        "anchor_type": anchor_type_for(row, anchor),
+        "anchor_label": anchor_label_for(row, anchor),
+        "quote": compact_text(quote, 2000),
+        "normalized_observation": compact_text(normalized_observation, 2000),
+        "proposed_fact": compact_text(proposed_fact, 1200),
+        "note": row.get("note") or "",
+        "actor": row.get("actor") or "",
+        "created_at": row.get("created_at") or source.get("captured_at"),
+        "updated_at": row.get("updated_at") or source.get("last_ingested_at"),
+        "fact_count": len({fact.get("proposed_fact_id") for fact in linked_facts if fact.get("proposed_fact_id")}),
+        "claim_count": len({claim.get("claim_id") for claim in linked_claims if claim.get("claim_id")}),
+        "correction_count": len({correction.get("correction_id") for correction in linked_corrections if correction.get("correction_id")}),
+        "annotation_count": len({annotation.get("annotation_id") for annotation in linked_annotations if annotation.get("annotation_id")}),
+        "claim_conflict": bool(conflict_claims),
+        "claim_conflict_label": "possible conflict" if conflict_claims else ("linked claims" if linked_claims else "no linked claim"),
+        "capture_ref": first_nonempty(source.get("last_ingested_at"), source.get("captured_at"), source_id),
+        "capture_hash": "not recorded",
+        "match_explanation": evidence_search_explanation(row, mode, q),
+        "immutable_note": "Review state applies only to this object; source captures remain immutable.",
+        "can_update_review_state": object_type in REVIEW_OBJECT_CONFIGS,
+    }
+    return result
+
+
+def evidence_row_matches(row, q, evidence_type, review_state, source_kind, anchor_type, project):
+    if evidence_type and evidence_type not in (row.get("evidence_type"), row.get("object_type"), row.get("anchor_type")):
+        return False
+    if review_state and review_state != row.get("review_state"):
+        return False
+    if source_kind and source_kind != row.get("source_kind"):
+        return False
+    if anchor_type and anchor_type != row.get("anchor_type"):
+        return False
+    if project and project != row.get("source_project"):
+        return False
+    if q:
+        haystack = " ".join(str(row.get(key) or "") for key in (
+            "ledger_id", "object_type", "object_id", "review_state", "evidence_type",
+            "anchor_type", "anchor_label", "quote", "normalized_observation",
+            "proposed_fact", "note", "title", "canonical_url", "snippet",
+            "author_handle", "domain", "source_project",
+        ))
+        if q.lower() not in haystack.lower():
+            return False
+    return True
+
+
+def evidence_facet_counts(rows, field):
+    counts = {}
+    for row in rows:
+        value = row.get(field) or "unknown"
+        counts[value] = counts.get(value, 0) + 1
+    return [{"id": key, "label": title_case_label(key), "count": counts[key]} for key in sorted(counts, key=lambda item: (-counts[item], item))]
+
+
+def title_case_label(value):
+    return str(value or "unknown").replace("_", " ").title()
+
+
+def evidence_preview(row, source_map, facts_by_selection, facts_by_source, claims_by_selection, claims_by_source, corrections_by_source, annotations_by_selection, annotations_by_source):
+    if not row:
+        return {}
+    source_id = row.get("source_evidence_id") or ""
+    object_id = row.get("object_id") or ""
+    selection_id = object_id if row.get("object_type") == "evidence_selection" else ""
+    linked_facts = facts_by_selection.get(selection_id, []) + facts_by_source.get(source_id, [])
+    linked_claims = claims_by_selection.get(selection_id, []) + claims_by_source.get(source_id, [])
+    linked_corrections = corrections_by_source.get(source_id, [])
+    linked_annotations = annotations_by_selection.get(selection_id, []) + annotations_by_source.get(source_id, [])
+    source = source_for_ledger_row(source_map, source_id)
+    return {
+        "row": row,
+        "source": source,
+        "linked_facts": linked_facts[:20],
+        "linked_claims": linked_claims[:20],
+        "linked_corrections": linked_corrections[:20],
+        "linked_annotations": linked_annotations[:20],
+        "provenance": [
+            {"label": "Source capture", "value": source.get("canonical_url") or source_id, "meta": source.get("captured_at") or ""},
+            {"label": "Normalized source row", "value": source_id, "meta": source.get("last_ingested_at") or ""},
+            {"label": "Ledger object", "value": row.get("ledger_id") or "", "meta": row.get("updated_at") or ""},
+            {"label": "Anchor", "value": row.get("anchor_label") or row.get("anchor_type") or "source record", "meta": row.get("anchor_type") or ""},
+            {"label": "Review state", "value": row.get("review_state") or "", "meta": "object-specific state only"},
+        ],
+    }
+
+
 def evidence_ledger(params):
     limit = sql_int(params.get("limit", ["120"])[0], 120)
+    fetch_limit = max(limit * 3, 150)
+    q = (params.get("q", [""])[0] or "").strip()
+    mode = (params.get("mode", ["hybrid"])[0] or "hybrid").strip()
+    evidence_type = (params.get("type", [""])[0] or params.get("kind", [""])[0] or "").strip()
+    review_state = (params.get("review_state", [""])[0] or "").strip()
+    source_kind = (params.get("source_kind", [""])[0] or "").strip()
+    anchor_type = (params.get("anchor_type", [""])[0] or "").strip()
+    project = (params.get("project", [""])[0] or "").strip()
+    inspect = (params.get("inspect", [""])[0] or "").strip()
+    if inspect.startswith("evidence:"):
+        inspect = inspect.removeprefix("evidence:")
+
     selections = ch_data(
         f"""
         SELECT
           selection_id, source_evidence_id, document_id, block_id, selection_kind,
-          quote, status, note, actor, created_at, updated_at
+          quote, context_before, context_after, source_anchor_json, status, note,
+          actor, created_at, updated_at
         FROM evidence_selections FINAL
         ORDER BY updated_at DESC
-        LIMIT {limit}
+        LIMIT {fetch_limit}
         """,
         fallback=[],
     )
@@ -1806,11 +2032,12 @@ def evidence_ledger(params):
         f"""
         SELECT
           proposed_fact_id, source_evidence_id, evidence_selection_id, fact_type,
-          field_path, raw_value, normalized_value, unit, evidence_quote, status,
-          note, actor, created_at, updated_at
+          field_path, raw_value, normalized_value, unit, entities_json,
+          evidence_quote, source_anchor_json, status, note, actor, created_at,
+          updated_at
         FROM proposed_facts FINAL
         ORDER BY updated_at DESC
-        LIMIT {limit}
+        LIMIT {fetch_limit}
         """,
         fallback=[],
     )
@@ -1822,42 +2049,118 @@ def evidence_ledger(params):
           actor, created_at, updated_at
         FROM normalized_corrections FINAL
         ORDER BY updated_at DESC
-        LIMIT {limit}
+        LIMIT {fetch_limit}
         """,
         fallback=[],
     )
-    recent = ch_data(
+    annotations = ch_data(
         f"""
         SELECT
-          evidence_id,
-          argMax(source_kind, ingested_at) AS source_kind,
-          argMax(source_project, ingested_at) AS source_project,
-          argMax(canonical_url, ingested_at) AS canonical_url,
-          argMax(title, ingested_at) AS title,
-          substring(argMax(text, ingested_at), 1, 300) AS snippet,
-          max(has_media) AS has_media,
-          max(has_ocr) AS has_ocr,
-          max(ingested_at) AS last_ingested_at
-        FROM evidence_events
-        GROUP BY evidence_id
-        ORDER BY (has_media + has_ocr) DESC, last_ingested_at DESC
-        LIMIT {limit}
+          annotation_id, source_evidence_id, evidence_selection_id, annotation_type,
+          body, status, source_anchor_json, actor, created_at, updated_at
+        FROM review_annotations FINAL
+        ORDER BY updated_at DESC
+        LIMIT {fetch_limit}
         """,
         fallback=[],
     )
+    claims = ch_data(
+        f"""
+        SELECT
+          claim_id, source_evidence_id, evidence_selection_id, claim_text,
+          claim_type, evidence_relation, qualifier_json, source_anchor_json,
+          status, note, actor, created_at, updated_at
+        FROM claim_records FINAL
+        ORDER BY updated_at DESC
+        LIMIT {fetch_limit}
+        """,
+        fallback=[],
+    )
+    recent = [decorate_source_row(row) for row in latest_source_rows("1 = 1", fetch_limit)]
+
+    source_ids = []
+    for rows, key in (
+        (selections, "source_evidence_id"),
+        (proposed, "source_evidence_id"),
+        (corrections, "source_evidence_id"),
+        (annotations, "source_evidence_id"),
+        (claims, "source_evidence_id"),
+        (recent, "evidence_id"),
+    ):
+        source_ids.extend(row.get(key) for row in rows)
+    source_map = hydrate_source_rows(source_ids)
     for row in recent:
-        row["source_label"] = source_kind_label(row.get("source_kind"))
+        source_map.setdefault(row.get("evidence_id"), row)
+
+    facts_by_selection = group_rows(proposed, "evidence_selection_id")
+    facts_by_source = group_rows(proposed, "source_evidence_id")
+    claims_by_selection = group_rows(claims, "evidence_selection_id")
+    claims_by_source = group_rows(claims, "source_evidence_id")
+    corrections_by_source = group_rows(corrections, "source_evidence_id")
+    annotations_by_selection = group_rows(annotations, "evidence_selection_id")
+    annotations_by_source = group_rows(annotations, "source_evidence_id")
+
+    all_rows = []
+    for row in selections:
+        all_rows.append(make_evidence_row(row, "evidence_selection", row.get("selection_id"), source_map, facts_by_selection, facts_by_source, claims_by_selection, claims_by_source, corrections_by_source, annotations_by_selection, annotations_by_source, mode, q))
+    for row in proposed:
+        all_rows.append(make_evidence_row(row, "proposed_fact", row.get("proposed_fact_id"), source_map, facts_by_selection, facts_by_source, claims_by_selection, claims_by_source, corrections_by_source, annotations_by_selection, annotations_by_source, mode, q))
+    for row in corrections:
+        all_rows.append(make_evidence_row(row, "normalized_correction", row.get("correction_id"), source_map, facts_by_selection, facts_by_source, claims_by_selection, claims_by_source, corrections_by_source, annotations_by_selection, annotations_by_source, mode, q))
+    for row in annotations:
+        all_rows.append(make_evidence_row(row, "annotation", row.get("annotation_id"), source_map, facts_by_selection, facts_by_source, claims_by_selection, claims_by_source, corrections_by_source, annotations_by_selection, annotations_by_source, mode, q))
+    for row in claims:
+        all_rows.append(make_evidence_row(row, "claim_stub", row.get("claim_id"), source_map, facts_by_selection, facts_by_source, claims_by_selection, claims_by_source, corrections_by_source, annotations_by_selection, annotations_by_source, mode, q))
+    for row in recent[:limit]:
+        candidate = {
+            **row,
+            "source_evidence_id": row.get("evidence_id"),
+            "status": "candidate",
+            "snippet": row.get("snippet") or "",
+            "updated_at": row.get("last_ingested_at") or "",
+        }
+        all_rows.append(make_evidence_row(candidate, "evidence_candidate", row.get("evidence_id"), source_map, facts_by_selection, facts_by_source, claims_by_selection, claims_by_source, corrections_by_source, annotations_by_selection, annotations_by_source, mode, q))
+
+    all_rows.sort(key=lambda item: str(item.get("updated_at") or item.get("last_ingested_at") or ""), reverse=True)
+    filtered = [row for row in all_rows if evidence_row_matches(row, q, evidence_type, review_state, source_kind, anchor_type, project)]
+    rows = filtered[:limit]
+    selected = next((row for row in rows if row.get("ledger_id") == inspect), None) or (rows[0] if rows else None)
     return {
+        "scope": {
+            "mode": mode,
+            "q": q,
+            "type": evidence_type,
+            "review_state": review_state,
+            "source_kind": source_kind,
+            "anchor_type": anchor_type,
+            "project": project,
+            "limit": limit,
+        },
         "summary": {
+            "objects": len(all_rows),
+            "visible": len(filtered),
             "selections": len(selections),
             "proposed_facts": len(proposed),
             "normalized_corrections": len(corrections),
-            "recent_sources": len(recent),
+            "annotations": len(annotations),
+            "claims": len(claims),
+            "source_candidates": len(recent),
+            "claim_conflicts": sum(1 for row in all_rows if row.get("claim_conflict")),
         },
-        "selections": selections,
-        "proposed_facts": proposed,
-        "normalized_corrections": corrections,
-        "recent_sources": recent,
+        "facets": {
+            "evidence_types": evidence_facet_counts(all_rows, "evidence_type"),
+            "object_types": evidence_facet_counts(all_rows, "object_type"),
+            "review_states": evidence_facet_counts(all_rows, "review_state"),
+            "source_kinds": evidence_facet_counts(all_rows, "source_kind"),
+            "projects": evidence_facet_counts(all_rows, "source_project"),
+            "anchor_types": evidence_facet_counts(all_rows, "anchor_type"),
+        },
+        "results": {"rows": rows, "count": len(filtered), "limit": limit},
+        "rows": rows,
+        "selected_id": selected.get("ledger_id") if selected else "",
+        "preview": evidence_preview(selected, source_map, facts_by_selection, facts_by_source, claims_by_selection, claims_by_source, corrections_by_source, annotations_by_selection, annotations_by_source),
+        "generated_at": now_iso(),
+        "version": "evidence-ledger.v2",
     }
 
 

@@ -34,7 +34,10 @@ Do not expose the Research UI publicly in v1. Keep it LAN/WireGuard scoped unles
 - First source viewer: **X post/thread/account/media**.
 - Second source viewer: **web/blog page**.
 - Editing scope: full v1 editing, including evidence selection, normalized extraction corrections, entity links, claims, annotations, review state, comparison rows, and publication drafts.
-- Autonomous research loops remain deferred.
+- Later-stage closed-loop research automation is outside the v1 Research UI page
+  scope. Page-specific research-agent prompts should not ask for that topic;
+  keep them focused on human-led collection, inspection, review, curation, and
+  publication-prep workflows.
 
 Test case sources:
 

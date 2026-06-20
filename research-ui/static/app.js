@@ -15,6 +15,14 @@ const state = {
   selectedBlock: null,
   projectPhase: '',
   projectOwner: '',
+  libraryMode: 'hybrid',
+  libraryScope: 'corpus',
+  librarySort: 'relevance',
+  libraryDateFrom: '',
+  libraryDateTo: '',
+  libraryIncludeArchived: false,
+  librarySelectedId: '',
+  librarySelectedIds: new Set(),
 };
 
 const $ = (id) => document.getElementById(id);
@@ -124,6 +132,52 @@ const routeConfig = {
   publishing: { title: 'Publishing', endpoint: '/api/publishing' },
   taxonomy: { title: 'Taxonomy', endpoint: '/api/taxonomy' },
 };
+
+function currentHashParts() {
+  const raw = (location.hash || '').replace(/^#/, '');
+  const separator = raw.indexOf('?');
+  const route = separator >= 0 ? raw.slice(0, separator) : raw;
+  const query = separator >= 0 ? raw.slice(separator + 1) : '';
+  return { route, params: new URLSearchParams(query) };
+}
+
+function applyHashParams() {
+  const { route, params } = currentHashParts();
+  if (route === 'library') {
+    state.q = params.get('q') || state.q || '';
+    state.kind = params.get('type') || params.get('kind') || state.kind || '';
+    state.project = params.get('project') || state.project || '';
+    state.libraryMode = params.get('mode') || state.libraryMode || 'hybrid';
+    state.libraryScope = params.get('scope') || state.libraryScope || 'corpus';
+    state.librarySort = params.get('sort') || state.librarySort || 'relevance';
+    state.libraryDateFrom = params.get('date_from') || '';
+    state.libraryDateTo = params.get('date_to') || '';
+    state.libraryIncludeArchived = params.get('include_archived') === '1';
+    const inspect = params.get('inspect') || '';
+    state.librarySelectedId = inspect.startsWith('source:') ? inspect.slice(7) : inspect;
+  }
+}
+
+function routeHash() {
+  if (state.route !== 'library') return `#${state.route}`;
+  const params = new URLSearchParams();
+  if (state.q) params.set('q', state.q);
+  if (state.kind) params.set('type', state.kind);
+  if (state.project) params.set('project', state.project);
+  if (state.libraryMode && state.libraryMode !== 'hybrid') params.set('mode', state.libraryMode);
+  if (state.libraryScope && state.libraryScope !== 'corpus') params.set('scope', state.libraryScope);
+  if (state.librarySort && state.librarySort !== 'relevance') params.set('sort', state.librarySort);
+  if (state.libraryDateFrom) params.set('date_from', state.libraryDateFrom);
+  if (state.libraryDateTo) params.set('date_to', state.libraryDateTo);
+  if (state.libraryIncludeArchived) params.set('include_archived', '1');
+  if (state.librarySelectedId) params.set('inspect', `source:${state.librarySelectedId}`);
+  const query = params.toString();
+  return `#library${query ? '?' + query : ''}`;
+}
+
+function replaceRouteHash() {
+  history.replaceState(null, '', routeHash());
+}
 
 async function fetchJson(url) {
   const response = await fetch(url, { cache: 'no-store' });
@@ -365,6 +419,20 @@ function renderHome(data) {
   document.querySelectorAll('.signal-row[data-id]').forEach((button) => {
     button.addEventListener('click', () => selectSource(button.dataset.id));
   });
+  const queueRoutes = {
+    'New captures': 'source_triage',
+    'Evidence selections': 'selection_review',
+    'Proposed facts': 'fact_review',
+    'Corrections': 'correction_review',
+    'Claim stubs': 'claim_review',
+  };
+  document.querySelectorAll('[data-queue-jump]').forEach((button) => {
+    button.addEventListener('click', () => {
+      state.queue = queueRoutes[button.dataset.queueJump] || 'all';
+      state.previewTaskKey = '';
+      setRoute('inbox');
+    });
+  });
 }
 
 async function loadHome() {
@@ -550,6 +618,34 @@ function renderAuditEvent(event) {
   `;
 }
 
+function renderQuestionMoveControls(questions) {
+  const rows = questions || [];
+  if (!rows.length) return '<p class="muted">No open questions yet.</p>';
+  return `
+    <div class="question-move-list">
+      ${rows.map((question, index) => `
+        <div class="question-move-row">
+          <span>${escapeHtml(question.text || question.question || '')}</span>
+          <button type="button" class="icon-button" data-question-move="${index}:-1" ${index === 0 ? 'disabled' : ''}>Up</button>
+          <button type="button" class="icon-button" data-question-move="${index}:1" ${index === rows.length - 1 ? 'disabled' : ''}>Down</button>
+        </div>
+      `).join('')}
+    </div>
+  `;
+}
+
+function moveTextareaLine(selector, index, delta) {
+  const textarea = document.querySelector(selector);
+  if (!textarea) return;
+  const lines = splitLines(textarea.value);
+  const target = index + delta;
+  if (target < 0 || target >= lines.length) return;
+  const [item] = lines.splice(index, 1);
+  lines.splice(target, 0, item);
+  textarea.value = lines.join('\n');
+  textarea.dispatchEvent(new Event('input', { bubbles: true }));
+}
+
 function projectBriefPayload(row) {
   const scopeTags = splitLines(document.querySelector('[data-brief-scope="tags"]')?.value || '').flatMap((line) => line.split(',')).map((item) => item.trim()).filter(Boolean);
   return {
@@ -705,6 +801,7 @@ function renderProjectsPage(data) {
             <div class="brief-editor-section">
               <div class="panel-title-row"><h2>Open Questions</h2><span class="status-badge warn">${escapeHtml((brief.open_questions || []).length)} active</span></div>
               <textarea data-brief-list="open_questions">${escapeHtml(briefLines(brief.open_questions))}</textarea>
+              ${renderQuestionMoveControls(brief.open_questions || [])}
             </div>
             <div class="brief-editor-section">
               <div class="panel-title-row"><h2>Working Definitions</h2><span class="status-badge">project terms</span></div>
@@ -733,7 +830,10 @@ function renderProjectsPage(data) {
               <div class="panel-title-row"><h2>Project Controls</h2><span class="status-badge">${escapeHtml(activeRow.visibility || 'internal')}</span></div>
               <div class="project-mini-list">
                 <div><span>Owner</span><strong>${escapeHtml(activeRow.owner || 'unassigned')}</strong></div>
+                <div><span>Contributors</span><strong>${escapeHtml((activeRow.contributors || []).join(', ') || 'none')}</strong></div>
                 <div><span>Phase</span><strong>${escapeHtml(titleCase(activeRow.phase))}</strong></div>
+                <div><span>Due</span><strong>${escapeHtml(fmtDate(activeRow.due_at) || 'not set')}</strong></div>
+                <div><span>Next review</span><strong>${escapeHtml(fmtDate(activeRow.next_review_at) || 'not set')}</strong></div>
                 <div><span>First capture</span><strong>${escapeHtml(fmtDate(activeRow.first_capture) || 'none')}</strong></div>
                 <div><span>Last activity</span><strong>${escapeHtml(fmtDate(activeRow.last_activity) || 'none')}</strong></div>
               </div>
@@ -785,6 +885,12 @@ function renderProjectsPage(data) {
   document.querySelectorAll('[data-brief-field], [data-brief-scope], [data-brief-list]').forEach((field) => {
     field.addEventListener('input', () => activeRow && scheduleProjectBriefSave(activeRow));
   });
+  document.querySelectorAll('[data-question-move]').forEach((button) => {
+    button.addEventListener('click', () => {
+      const [index, delta] = String(button.dataset.questionMove || '').split(':').map((value) => Number(value));
+      moveTextareaLine('[data-brief-list="open_questions"]', index, delta);
+    });
+  });
   $('projectBriefPreviewButton')?.addEventListener('click', () => {
     if (!activeRow) return;
     const payload = projectBriefPayload(activeRow);
@@ -809,23 +915,364 @@ function renderProjectsPage(data) {
 }
 
 function renderLibraryPage(data) {
-  const rows = data.rows || [];
+  const rows = data.rows || data.results?.rows || [];
+  if (!state.librarySelectedId && rows[0]?.evidence_id) state.librarySelectedId = rows[0].evidence_id;
+  const summary = data.summary || {};
+  const query = data.query || {};
+  const preview = data.preview || null;
+  const selectedIds = new Set(state.librarySelectedIds || []);
+  const sourceKindOptions = [{ id: '', label: 'All source types' }].concat((data.facets || []).find((group) => group.id === 'source_type')?.items || []);
   $('routePage').innerHTML = `
-    ${pageHeader('Source Library', 'Search the captured corpus by source, exact text, URL, author, domain, and project.')}
+    ${pageHeader('Source Library', 'Corpus workspace for source records, immutable captures, normalized extractions, artifacts, evidence links, and discovery provenance.', `
+      <button id="libraryImportSource" class="secondary" type="button">Import manual source</button>
+      <button id="libraryOpenSelected" type="button">Open selected</button>
+    `)}
     ${metricCards([
-      { label: 'Results', value: rows.length, hint: data.mode || 'hybrid' },
-      { label: 'Source types', value: (data.facets?.source_kinds || []).length },
-      { label: 'Domains', value: (data.facets?.domains || []).length },
+      { label: 'Source records', value: summary.source_records ?? rows.length, hint: data.scope?.label || 'corpus' },
+      { label: 'Immutable captures', value: summary.captures ?? 0 },
+      { label: 'Normalized captures', value: summary.normalized_captures ?? 0 },
+      { label: 'Version clusters', value: summary.duplicate_clusters ?? 0 },
+      { label: 'New since view', value: summary.new_since_view ?? 0 },
     ])}
-    <section class="panel page-panel">
-      <div class="panel-title-row"><h2>Corpus Results</h2><span class="status-badge info">exact + metadata now</span></div>
-      <div class="dense-list">${rows.map((row) => sourceButton(row, `
-        <span class="status-badge">${escapeHtml(row.review_hint || 'triage')}</span>
-        ${row.has_ocr ? '<span class="status-badge ok">OCR</span>' : ''}
-      `)).join('') || '<p class="muted padded">No library results.</p>'}</div>
+    <section class="library-shell">
+      <aside class="panel library-facet-panel">
+        <div class="panel-title-row"><h2>Scope</h2><span class="status-badge">${escapeHtml(query.mode || state.libraryMode)}</span></div>
+        <label class="library-control"><span>Search mode</span>
+          <div class="segmented-control" id="libraryModeButtons">
+            ${['exact', 'semantic', 'hybrid'].map((mode) => `<button type="button" data-library-mode="${mode}" class="${(query.mode || state.libraryMode) === mode ? 'active' : ''}">${escapeHtml(titleCase(mode))}</button>`).join('')}
+          </div>
+        </label>
+        <label class="library-control"><span>Source type</span>
+          <select id="librarySourceKind">
+            ${sourceKindOptions.map((item) => `<option value="${escapeHtml(item.id)}" ${state.kind === item.id ? 'selected' : ''}>${escapeHtml(item.label)}</option>`).join('')}
+          </select>
+        </label>
+        <label class="library-control"><span>Sort</span>
+          <select id="librarySort">
+            ${[
+              ['relevance', 'Relevance / recent'],
+              ['captured_desc', 'Captured date'],
+              ['published_desc', 'Published date'],
+              ['freshness', 'Freshness signals'],
+            ].map(([value, label]) => `<option value="${value}" ${state.librarySort === value ? 'selected' : ''}>${label}</option>`).join('')}
+          </select>
+        </label>
+        <div class="date-filter-grid">
+          <label class="library-control"><span>From</span><input id="libraryDateFrom" type="date" value="${escapeHtml(state.libraryDateFrom)}"></label>
+          <label class="library-control"><span>To</span><input id="libraryDateTo" type="date" value="${escapeHtml(state.libraryDateTo)}"></label>
+        </div>
+        <label class="checkbox-row"><input id="libraryIncludeArchived" type="checkbox" ${state.libraryIncludeArchived ? 'checked' : ''}> Include archived</label>
+        <div class="saved-view-list library-saved-views">
+          ${(data.saved_views || []).map((view) => `<button type="button" data-library-saved-view="${escapeHtml(view.id)}"><strong>${escapeHtml(view.label)}</strong><span>${escapeHtml(view.description || '')}</span></button>`).join('')}
+        </div>
+        ${(data.facets || []).map(renderLibraryFacetGroup).join('')}
+      </aside>
+      <section class="panel library-results-panel">
+        <div class="library-search-strip">
+          <label><span>Corpus search</span><input id="librarySearchInput" type="search" value="${escapeHtml(query.text ?? state.q)}" placeholder="Search titles, URLs, handles, extracted text, OCR, claims, or ids"></label>
+          <button id="libraryClearFilters" class="secondary" type="button">Clear</button>
+        </div>
+        <div class="library-explanation">
+          <span class="status-badge info">${escapeHtml(titleCase(query.mode || state.libraryMode))}</span>
+          <p>${escapeHtml(query.explanation || '')}</p>
+        </div>
+        <div class="library-bulk-toolbar">
+          <label><input id="librarySelectAll" type="checkbox"> Select page</label>
+          <button class="secondary" data-library-action="add_to_project" type="button">Add to project</button>
+          <button class="secondary" data-library-action="assign_review" type="button">Assign review</button>
+          <button class="secondary" data-library-action="merge_cluster" type="button">Merge cluster</button>
+          <button class="secondary danger-button" data-library-action="archive" type="button">Archive</button>
+          <span id="libraryActionStatus" class="muted"></span>
+        </div>
+        <div class="library-results-list">
+          ${rows.map((row) => renderLibraryResultRow(row, selectedIds)).join('') || '<div class="empty-state"><h2>No source records</h2><p>Try a broader query, remove filters, or import a manual source.</p></div>'}
+        </div>
+      </section>
+      <aside class="panel library-preview-panel">
+        ${renderLibraryPreview(preview)}
+      </aside>
     </section>
   `;
-  bindObjectRows();
+  wireLibraryEvents(data);
+}
+
+function renderLibraryFacetGroup(group) {
+  const items = group.items || [];
+  if (!items.length) return '';
+  return `
+    <section class="library-facet-group">
+      <h3>${escapeHtml(group.label || titleCase(group.id))}</h3>
+      <div class="facet-list compact">
+        ${items.slice(0, 12).map((item) => `
+          <button type="button" class="facet" data-library-facet-group="${escapeHtml(group.id)}" data-library-facet-id="${escapeHtml(item.id)}">
+            <span>${escapeHtml(item.label || item.id || '(blank)')}</span>
+            <strong class="count">${escapeHtml(item.count ?? 0)}</strong>
+          </button>
+        `).join('')}
+      </div>
+    </section>
+  `;
+}
+
+function renderLibraryResultRow(row, selectedIds) {
+  const id = row.evidence_id || '';
+  const active = state.librarySelectedId === id;
+  const checked = selectedIds.has(id);
+  const layerClass = row.source_layer === 'discovery provenance' ? 'warn' : row.review_state === 'review-linked' ? 'ok' : '';
+  return `
+    <article class="library-source-row ${active ? 'active' : ''}" data-library-id="${escapeHtml(id)}">
+      <input class="library-check" type="checkbox" ${checked ? 'checked' : ''} aria-label="Select source record">
+      <span class="source-glyph">${escapeHtml(sourceGlyph(row.source_kind))}</span>
+      <div class="library-source-main">
+        <div class="library-title-line">
+          <strong>${escapeHtml(titleFor(row))}</strong>
+          <span class="status-badge ${escapeHtml(layerClass)}">${escapeHtml(row.source_layer || row.source_label || 'source')}</span>
+          ${row.duplicate_state === 'candidate_duplicate' ? '<span class="status-badge warn">version cluster</span>' : ''}
+        </div>
+        <p>${escapeHtml(row.snippet || row.canonical_url || id)}</p>
+        <div class="row-meta">
+          <span class="pill">${escapeHtml(row.source_label || row.source_kind)}</span>
+          ${row.author_handle ? `<span class="pill">@${escapeHtml(row.author_handle)}</span>` : ''}
+          ${row.domain ? `<span class="pill">${escapeHtml(row.domain)}</span>` : ''}
+          ${row.source_project ? `<span class="pill">${escapeHtml(row.source_project)}</span>` : ''}
+          <span class="pill">${escapeHtml(row.observations || 0)} capture${Number(row.observations || 0) === 1 ? '' : 's'}</span>
+          ${row.artifact_available ? '<span class="pill ok">artifacts</span>' : ''}
+          ${row.has_ocr || row.ocr_count ? '<span class="pill ok">OCR</span>' : ''}
+          ${row.vl_count ? '<span class="pill ok">VL</span>' : ''}
+        </div>
+        <div class="match-line">${escapeHtml(row.match_explanation || 'Matched captured source metadata.')}</div>
+      </div>
+      <div class="library-source-counts">
+        <span><strong>${escapeHtml(row.evidence_count || 0)}</strong> evidence</span>
+        <span><strong>${escapeHtml(row.claim_count || 0)}</strong> claims</span>
+        <span><strong>${escapeHtml(row.entity_count || 0)}</strong> entities</span>
+        <em>${escapeHtml(fmtDate(row.last_ingested_at) || 'no date')}</em>
+      </div>
+    </article>
+  `;
+}
+
+function renderLibraryPreview(preview) {
+  if (!preview) {
+    return `
+      <div class="empty-state">
+        <h2>Source Preview</h2>
+        <p>Select a source record to inspect source identity, capture history, extraction state, artifacts, evidence, claims, entities, and review work before opening the Source Workbench.</p>
+      </div>
+    `;
+  }
+  const source = preview.source || {};
+  const counts = preview.counts || {};
+  const artifacts = preview.artifacts || [];
+  const review = preview.review || {};
+  return `
+    <div class="library-preview-head">
+      <span class="source-glyph">${escapeHtml(sourceGlyph(source.source_kind))}</span>
+      <div>
+        <h2>${escapeHtml(source.title || source.canonical_url || source.evidence_id || 'Source record')}</h2>
+        <p>${escapeHtml([source_kind_labelClient(source.source_kind), source.author_handle ? '@' + source.author_handle : source.domain, fmtDate(source.captured_at)].filter(Boolean).join(' · '))}</p>
+      </div>
+    </div>
+    <div class="library-layer-stack">
+      ${libraryLayerRow('Source record', source.evidence_id || '', 'Mutable logical identity; groups captures and research links.')}
+      ${libraryLayerRow('Immutable captures', counts.captures || 0, 'Frozen observations with timestamps, hashes, and collection context.')}
+      ${libraryLayerRow('Normalized extraction', source.text ? `${String(source.text).length} chars` : 'missing', 'Parsed text, OCR, transcript, VL output, and proposed structure remain observations.')}
+      ${libraryLayerRow('Artifact manifest', counts.artifacts || 0, 'DOM, screenshots, PDFs, media, OCR/VL files, source bundles, or repo files.')}
+      ${libraryLayerRow('Curated research', `${counts.evidence || 0} evidence · ${counts.claims || 0} claims`, 'Human-selected evidence and claim records with anchors.')}
+    </div>
+    <section class="preview-card">
+      <h4>Discovery trail</h4>
+      <p>${source.source_kind === 'google_search_page' || source.source_kind === 'search_result' ? 'This record is discovery provenance. The opened captured page should become the substantive source unless the search result itself is being studied.' : 'This record can be used as a substantive source if its capture and normalized extraction are sufficient.'}</p>
+      ${source.canonical_url ? `<a href="${escapeHtml(source.canonical_url)}" target="_blank" rel="noreferrer">${escapeHtml(source.canonical_url)}</a>` : ''}
+    </section>
+    <section class="preview-card">
+      <h4>Current capture</h4>
+      <div class="source-trail">
+        <span><strong>Captured</strong>${escapeHtml(fmtDate(source.captured_at) || 'unknown')}</span>
+        <span><strong>Ingested</strong>${escapeHtml(fmtDate(source.ingested_at) || 'unknown')}</span>
+        <span><strong>Collector</strong>${escapeHtml(source.collector_run_id || 'unknown')}</span>
+        <span><strong>Project</strong>${escapeHtml(source.source_project || '(unassigned)')}</span>
+      </div>
+    </section>
+    <section class="preview-card">
+      <h4>Artifacts</h4>
+      ${artifacts.length ? `<div class="artifact-link-list">${artifacts.slice(0, 6).map((item) => `<a href="${escapeHtml(item.url || '#')}" target="_blank" rel="noreferrer">${escapeHtml(item.path || item.url)}</a>`).join('')}</div>` : '<p>No artifact paths are linked to this source yet.</p>'}
+      <div class="tag-line">
+        <span class="pill">${escapeHtml(counts.ocr || 0)} OCR</span>
+        <span class="pill">${escapeHtml(counts.vl || 0)} VL</span>
+        <span class="pill">${escapeHtml(counts.annotations || 0)} annotations</span>
+      </div>
+    </section>
+    <section class="preview-card">
+      <h4>Review objects</h4>
+      <div class="source-trail">
+        <span><strong>Evidence</strong>${escapeHtml(counts.evidence || 0)}</span>
+        <span><strong>Claims</strong>${escapeHtml(counts.claims || 0)}</span>
+        <span><strong>Entities</strong>${escapeHtml(counts.entities || 0)}</span>
+        <span><strong>Facts</strong>${escapeHtml((review.proposed_facts || []).length)}</span>
+      </div>
+    </section>
+    <div class="library-preview-actions">
+      <button class="secondary" type="button" data-library-preview-action="assign_review">Assign review</button>
+      <button class="secondary" type="button" data-library-preview-action="archive">Archive</button>
+      <button type="button" data-library-preview-action="open_workbench">Open workbench</button>
+    </div>
+  `;
+}
+
+function source_kind_labelClient(kind) {
+  const labels = {
+    x_post: 'X post',
+    x_account: 'X account',
+    x_page: 'X page',
+    web_page: 'Web/blog',
+    search_result: 'Search result',
+    google_search_page: 'Google SERP',
+    media: 'Media',
+    user_input: 'Manual doc',
+  };
+  return labels[kind] || titleCase(kind || 'source');
+}
+
+function libraryLayerRow(label, value, detail) {
+  return `
+    <div>
+      <span>${escapeHtml(label)}</span>
+      <strong>${escapeHtml(value)}</strong>
+      <p>${escapeHtml(detail)}</p>
+    </div>
+  `;
+}
+
+function wireLibraryEvents(data) {
+  const reload = () => {
+    replaceRouteHash();
+    loadRoutePage();
+  };
+  $('librarySearchInput')?.addEventListener('input', () => {
+    state.q = $('librarySearchInput').value.trim();
+    if ($('searchInput') && $('searchInput').value !== state.q) $('searchInput').value = state.q;
+    clearTimeout(window.__libraryTimer);
+    window.__libraryTimer = setTimeout(reload, 300);
+  });
+  document.querySelectorAll('[data-library-mode]').forEach((button) => {
+    button.addEventListener('click', () => {
+      state.libraryMode = button.dataset.libraryMode || 'hybrid';
+      reload();
+    });
+  });
+  $('librarySourceKind')?.addEventListener('change', () => {
+    state.kind = $('librarySourceKind').value;
+    reload();
+  });
+  $('librarySort')?.addEventListener('change', () => {
+    state.librarySort = $('librarySort').value;
+    reload();
+  });
+  $('libraryDateFrom')?.addEventListener('change', () => {
+    state.libraryDateFrom = $('libraryDateFrom').value;
+    reload();
+  });
+  $('libraryDateTo')?.addEventListener('change', () => {
+    state.libraryDateTo = $('libraryDateTo').value;
+    reload();
+  });
+  $('libraryIncludeArchived')?.addEventListener('change', () => {
+    state.libraryIncludeArchived = $('libraryIncludeArchived').checked;
+    reload();
+  });
+  $('libraryClearFilters')?.addEventListener('click', () => {
+    state.q = '';
+    state.kind = '';
+    state.project = '';
+    state.libraryMode = 'hybrid';
+    state.libraryScope = 'corpus';
+    state.librarySort = 'relevance';
+    state.libraryDateFrom = '';
+    state.libraryDateTo = '';
+    state.libraryIncludeArchived = false;
+    state.librarySelectedId = '';
+    state.librarySelectedIds = new Set();
+    if ($('searchInput')) $('searchInput').value = '';
+    reload();
+  });
+  document.querySelectorAll('.library-source-row[data-library-id]').forEach((row) => {
+    row.addEventListener('click', () => {
+      state.librarySelectedId = row.dataset.libraryId || '';
+      reload();
+    });
+    row.querySelector('.library-check')?.addEventListener('click', (event) => {
+      event.stopPropagation();
+      const id = row.dataset.libraryId || '';
+      if (!id) return;
+      if (event.currentTarget.checked) state.librarySelectedIds.add(id);
+      else state.librarySelectedIds.delete(id);
+    });
+  });
+  $('librarySelectAll')?.addEventListener('change', () => {
+    const checked = $('librarySelectAll').checked;
+    (data.rows || data.results?.rows || []).forEach((row) => {
+      if (!row.evidence_id) return;
+      if (checked) state.librarySelectedIds.add(row.evidence_id);
+      else state.librarySelectedIds.delete(row.evidence_id);
+    });
+    document.querySelectorAll('.library-check').forEach((box) => { box.checked = checked; });
+  });
+  document.querySelectorAll('[data-library-action], [data-library-preview-action]').forEach((button) => {
+    button.addEventListener('click', async () => applyLibraryAction(button.dataset.libraryAction || button.dataset.libraryPreviewAction));
+  });
+  $('libraryOpenSelected')?.addEventListener('click', () => applyLibraryAction('open_workbench'));
+  $('libraryImportSource')?.addEventListener('click', () => {
+    const status = $('libraryActionStatus');
+    if (status) status.textContent = 'Manual source import will use the capture/source adapter flow; use Inbox capture for now.';
+  });
+  document.querySelectorAll('[data-library-facet-group]').forEach((button) => {
+    button.addEventListener('click', () => {
+      const group = button.dataset.libraryFacetGroup;
+      const id = button.dataset.libraryFacetId || '';
+      if (group === 'source_type') state.kind = id;
+      if (group === 'project') state.project = id;
+      reload();
+    });
+  });
+  document.querySelectorAll('[data-library-saved-view]').forEach((button) => {
+    button.addEventListener('click', () => {
+      const view = button.dataset.librarySavedView || '';
+      if (view === 'versions') state.librarySort = 'freshness';
+      if (view === 'google-provenance') state.kind = 'google_search_page';
+      if (view === 'needs-extraction') state.librarySort = 'freshness';
+      reload();
+    });
+  });
+}
+
+async function applyLibraryAction(action) {
+  const ids = Array.from(state.librarySelectedIds || []);
+  if (!ids.length && state.librarySelectedId) ids.push(state.librarySelectedId);
+  const status = $('libraryActionStatus');
+  if (!ids.length) {
+    if (status) status.textContent = 'Select at least one source record.';
+    return;
+  }
+  if (action === 'open_workbench') {
+    await selectSource(ids[0]);
+    return;
+  }
+  try {
+    if (status) status.textContent = `${titleCase(action)}...`;
+    await postJson('/api/library/actions', {
+      action,
+      source_ids: ids,
+      project: state.project || '',
+      target_project: state.project || '',
+      note: `Library ${action} from Source Library page`,
+      idempotency_key: `library-${action}-${Date.now()}`,
+    });
+    if (status) status.textContent = `${titleCase(action)} recorded for ${ids.length} source${ids.length === 1 ? '' : 's'}.`;
+    await loadRoutePage();
+  } catch (error) {
+    if (status) status.textContent = error.message;
+  }
 }
 
 function renderEvidencePage(data) {
@@ -1038,6 +1485,16 @@ function routeQuery() {
   if (state.q) params.set('q', state.q);
   if (state.kind) params.set('kind', state.kind);
   if (state.project) params.set('project', state.project);
+  if (state.route === 'library') {
+    params.set('mode', state.libraryMode || 'hybrid');
+    params.set('scope', state.libraryScope || 'corpus');
+    params.set('sort', state.librarySort || 'relevance');
+    if (state.kind) params.set('type', state.kind);
+    if (state.libraryDateFrom) params.set('date_from', state.libraryDateFrom);
+    if (state.libraryDateTo) params.set('date_to', state.libraryDateTo);
+    if (state.libraryIncludeArchived) params.set('include_archived', '1');
+    if (state.librarySelectedId) params.set('inspect', `source:${state.librarySelectedId}`);
+  }
   return params.toString();
 }
 
@@ -1076,7 +1533,7 @@ async function loadRoutePage() {
 
 function setRoute(route, push = true) {
   state.route = routeConfig[route] ? route : 'home';
-  if (push) history.replaceState(null, '', `#${state.route}`);
+  if (push) replaceRouteHash();
   loadRoutePage();
 }
 
@@ -1233,6 +1690,7 @@ function renderInboxPreview(row) {
     </label>
     <div id="previewActionStatus" class="review-status muted"></div>
     <div class="preview-actions">
+      <button class="secondary" data-preview-action="assign">Assign</button>
       <button class="secondary" data-preview-action="defer">Defer</button>
       <button class="secondary" data-preview-action="reject">Reject</button>
       <button class="secondary" data-preview-action="edit">Edit proposal</button>
@@ -1298,9 +1756,40 @@ function sourceAnchorForTask(row) {
 async function applyPreviewDecision(row, action) {
   const status = $('previewActionStatus');
   const note = $('previewDecisionNote')?.value || '';
-  const sourceId = sourceIdFor(row);
   const decision = previewDecisionForAction(action);
   status.textContent = `${titleCase(decision)}...`;
+  await persistInboxDecision(row, action, note);
+  status.textContent = `${titleCase(decision)} decision saved. Refreshing queue...`;
+  const currentIndex = state.rows.findIndex((item) => taskKeyFor(item) === taskKeyFor(row));
+  const next = state.rows[currentIndex + 1] || state.rows[currentIndex - 1] || null;
+  state.previewTaskKey = next ? taskKeyFor(next) : '';
+  await loadFacets();
+  await loadInbox();
+}
+
+async function persistInboxDecision(row, action, note = '') {
+  const sourceId = sourceIdFor(row);
+  const decision = previewDecisionForAction(action);
+  if (action === 'assign') {
+    await postJson('/api/review/events', {
+      event_type: 'review_task.assignment.recorded',
+      source_evidence_id: sourceId,
+      source_project: row.source_project || '',
+      project: row.source_project || '',
+      subject_type: 'review_task',
+      subject_id: row.task_id || taskKeyFor(row),
+      task_type: row.task_type || '',
+      object_type: row.object_type || 'source',
+      object_id: row.object_id || sourceId,
+      decision: 'assigned',
+      status: 'assigned',
+      assignee: 'web-osint-user',
+      note,
+      source_anchor: sourceAnchorForTask(row),
+      idempotency_key: `${row.task_id || taskKeyFor(row)}:assigned:${Date.now()}`,
+    });
+    return;
+  }
   if (isReviewObjectTask(row)) {
     await postJson('/api/review-state', {
       source_evidence_id: sourceId,
@@ -1313,28 +1802,43 @@ async function applyPreviewDecision(row, action) {
       source_anchor: sourceAnchorForTask(row),
       idempotency_key: `${row.task_id || taskKeyFor(row)}:${decision}:${Date.now()}`,
     });
-  } else {
-    await postJson('/api/review/events', {
-      event_type: 'review_task.decision.recorded',
-      source_evidence_id: sourceId,
-      source_project: row.source_project || '',
-      project: row.source_project || '',
-      subject_type: 'review_task',
-      subject_id: row.task_id || taskKeyFor(row),
-      task_type: row.task_type || '',
-      object_type: row.object_type || 'source',
-      object_id: row.object_id || sourceId,
-      decision,
-      status: decision,
-      note,
-      source_anchor: sourceAnchorForTask(row),
-      idempotency_key: `${row.task_id || taskKeyFor(row)}:${decision}:${Date.now()}`,
-    });
+    return;
   }
-  status.textContent = `${titleCase(decision)} decision saved. Refreshing queue...`;
-  const currentIndex = state.rows.findIndex((item) => taskKeyFor(item) === taskKeyFor(row));
-  const next = state.rows[currentIndex + 1] || state.rows[currentIndex - 1] || null;
-  state.previewTaskKey = next ? taskKeyFor(next) : '';
+  await postJson('/api/review/events', {
+    event_type: 'review_task.decision.recorded',
+    source_evidence_id: sourceId,
+    source_project: row.source_project || '',
+    project: row.source_project || '',
+    subject_type: 'review_task',
+    subject_id: row.task_id || taskKeyFor(row),
+    task_type: row.task_type || '',
+    object_type: row.object_type || 'source',
+    object_id: row.object_id || sourceId,
+    decision,
+    status: decision,
+    note,
+    source_anchor: sourceAnchorForTask(row),
+    idempotency_key: `${row.task_id || taskKeyFor(row)}:${decision}:${Date.now()}`,
+  });
+}
+
+async function applyBulkInboxAction(action) {
+  const selectedKeys = Array.from(document.querySelectorAll('#inboxRows .task-check:checked'))
+    .map((checkbox) => checkbox.closest('.task-card')?.dataset.taskKey)
+    .filter(Boolean);
+  const selectedRows = state.rows.filter((row) => selectedKeys.includes(taskKeyFor(row)));
+  const preview = $('previewActionStatus');
+  if (!selectedRows.length) {
+    if (preview) preview.textContent = 'Select at least one task.';
+    return;
+  }
+  const note = `Bulk ${previewDecisionForAction(action)} from Inbox`;
+  if (preview) preview.textContent = `${titleCase(action)} ${selectedRows.length} task${selectedRows.length === 1 ? '' : 's'}...`;
+  for (const row of selectedRows) {
+    await persistInboxDecision(row, action, note);
+  }
+  if (preview) preview.textContent = `${titleCase(previewDecisionForAction(action))} saved for ${selectedRows.length} task${selectedRows.length === 1 ? '' : 's'}.`;
+  state.previewTaskKey = '';
   await loadFacets();
   await loadInbox();
 }
@@ -2328,6 +2832,7 @@ function wireEvents() {
     if ($('inboxLocalSearch') && $('inboxLocalSearch').value !== state.q) $('inboxLocalSearch').value = state.q;
     clearTimeout(window.__inboxTimer);
     window.__inboxTimer = setTimeout(() => {
+      if (state.route === 'library') replaceRouteHash();
       if (state.route === 'home' || state.route === 'inbox') loadInbox();
       else loadRoutePage();
     }, 250);
@@ -2359,17 +2864,23 @@ function wireEvents() {
     });
   });
   document.querySelectorAll('[data-bulk-action]').forEach((button) => {
-    button.addEventListener('click', () => {
-      const selected = document.querySelectorAll('#inboxRows .task-check:checked').length;
-      const preview = $('previewActionStatus');
-      if (preview) preview.textContent = `${titleCase(button.dataset.bulkAction)} is staged for ${selected} selected task${selected === 1 ? '' : 's'} once bulk review events are wired.`;
+    button.addEventListener('click', async () => {
+      try {
+        await applyBulkInboxAction(button.dataset.bulkAction || 'defer');
+      } catch (error) {
+        const preview = $('previewActionStatus');
+        if (preview) preview.textContent = error.message;
+      }
     });
   });
   $('projectSelect').addEventListener('change', () => {
     state.project = $('projectSelect').value;
     state.previewTaskKey = '';
     loadInbox();
-    if (state.route !== 'home' && state.route !== 'inbox') loadRoutePage();
+    if (state.route !== 'home' && state.route !== 'inbox') {
+      if (state.route === 'library') replaceRouteHash();
+      loadRoutePage();
+    }
   });
   $('limitSelect').addEventListener('change', () => {
     state.limit = $('limitSelect').value;
@@ -2380,14 +2891,17 @@ function wireEvents() {
     tab.addEventListener('click', () => activateTab(tab.dataset.tab));
   });
   window.addEventListener('hashchange', () => {
-    const route = (location.hash || '').replace(/^#/, '');
+    const { route } = currentHashParts();
+    applyHashParams();
     setRoute(route, false);
   });
 }
 
 async function init() {
   wireEvents();
-  state.route = routeConfig[(location.hash || '').replace(/^#/, '')] ? (location.hash || '').replace(/^#/, '') : 'home';
+  const { route } = currentHashParts();
+  state.route = routeConfig[route] ? route : 'home';
+  applyHashParams();
   await loadHome();
   await loadFacets();
   await loadInbox();

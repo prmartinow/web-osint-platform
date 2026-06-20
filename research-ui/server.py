@@ -1358,6 +1358,9 @@ def project_rows(params=None):
         row["proposed_evidence"] = int(evidence_review.get("proposed_evidence") or 0)
         row["accepted_claims"] = int(claim_review.get("accepted_claims") or 0)
         row["open_claims"] = int(claim_review.get("open_claims") or 0)
+        row["contributors"] = [REVIEW_ACTOR]
+        row["due_at"] = ""
+        row["next_review_at"] = ""
         row["unresolved_conflicts"] = 0
         row["review_blockers"] = review_blockers
         row["publication_blockers"] = diversity_gaps + review_blockers
@@ -1380,14 +1383,228 @@ def project_rows(params=None):
     }
 
 
+def sql_in_list(values):
+    quoted = [sql_string(value) for value in values if value]
+    return "(" + ", ".join(quoted) + ")" if quoted else "('')"
+
+
+def library_count_map(ids, table, column="source_evidence_id"):
+    if not ids:
+        return {}
+    rows = ch_data(
+        f"""
+        SELECT {column} AS evidence_id, count() AS rows
+        FROM {table} FINAL
+        WHERE {column} IN {sql_in_list(ids)}
+        GROUP BY {column}
+        """,
+        fallback=[],
+    )
+    return {row.get("evidence_id"): int(row.get("rows") or 0) for row in rows}
+
+
+def library_annotation_counts(ids):
+    if not ids:
+        return {}
+    rows = ch_data(
+        f"""
+        SELECT evidence_id, count() AS rows
+        FROM semantic_annotations
+        WHERE evidence_id IN {sql_in_list(ids)}
+        GROUP BY evidence_id
+        """,
+        fallback=[],
+    )
+    return {row.get("evidence_id"): int(row.get("rows") or 0) for row in rows}
+
+
+def library_latest_actions(ids):
+    if not ids:
+        return {}
+    rows = ch_data(
+        f"""
+        SELECT
+          source_evidence_id,
+          argMax(JSONExtractString(payload_json, 'action'), created_at) AS action,
+          argMax(JSONExtractString(payload_json, 'target_project'), created_at) AS target_project,
+          argMax(actor, created_at) AS actor,
+          max(created_at) AS created_at
+        FROM research_review_events
+        WHERE event_type = 'library.source_action.recorded'
+          AND source_evidence_id IN {sql_in_list(ids)}
+        GROUP BY source_evidence_id
+        """,
+        fallback=[],
+    )
+    return {row.get("source_evidence_id"): row for row in rows}
+
+
+def library_facets_for_where(where):
+    base = f"""
+      FROM
+      (
+        SELECT
+          evidence_id,
+          argMax(source_kind, ingested_at) AS source_kind,
+          argMax(source_project, ingested_at) AS source_project,
+          argMax(domain, ingested_at) AS domain,
+          argMax(author_handle, ingested_at) AS author_handle,
+          length(argMax(text, ingested_at)) AS text_chars,
+          max(has_media) AS has_media,
+          max(has_ocr) AS has_ocr,
+          count() AS capture_count,
+          max(ingested_at) AS last_ingested_at
+        FROM evidence_events
+        WHERE {where}
+        GROUP BY evidence_id
+      )
+    """
+    source_types = ch_data(
+        f"""
+        SELECT source_kind AS id, count() AS count
+        {base}
+        GROUP BY source_kind
+        ORDER BY count DESC, id ASC
+        LIMIT 40
+        """,
+        fallback=[],
+    )
+    projects = ch_data(
+        f"""
+        SELECT source_project AS id, count() AS count
+        {base}
+        GROUP BY source_project
+        ORDER BY count DESC, id ASC
+        LIMIT 40
+        """,
+        fallback=[],
+    )
+    domains = ch_data(
+        f"""
+        SELECT if(domain != '', domain, author_handle) AS id, count() AS count
+        {base}
+        WHERE domain != '' OR author_handle != ''
+        GROUP BY id
+        ORDER BY count DESC, id ASC
+        LIMIT 60
+        """,
+        fallback=[],
+    )
+    processing = [
+        {"id": "normalized", "label": "Normalized text", "count": sum(1 for row in ch_data(f"SELECT text_chars {base}", fallback=[]) if int(row.get("text_chars") or 0) >= 120)},
+        {"id": "media", "label": "Media present", "count": sum(1 for row in ch_data(f"SELECT has_media {base}", fallback=[]) if int(row.get("has_media") or 0))},
+        {"id": "ocr", "label": "OCR present", "count": sum(1 for row in ch_data(f"SELECT has_ocr {base}", fallback=[]) if int(row.get("has_ocr") or 0))},
+        {"id": "versions", "label": "Multiple captures", "count": sum(1 for row in ch_data(f"SELECT capture_count {base}", fallback=[]) if int(row.get("capture_count") or 0) > 1)},
+    ]
+    return [
+        {"id": "source_type", "label": "Source type", "items": [{"id": row.get("id") or "unknown", "label": source_kind_label(row.get("id")), "count": int(row.get("count") or 0)} for row in source_types]},
+        {"id": "project", "label": "Project", "items": [{"id": row.get("id") or "", "label": row.get("id") or "(unassigned)", "count": int(row.get("count") or 0)} for row in projects]},
+        {"id": "publisher", "label": "Publisher / account", "items": [{"id": row.get("id") or "", "label": row.get("id") or "(unknown)", "count": int(row.get("count") or 0)} for row in domains]},
+        {"id": "processing", "label": "Processing state", "items": processing},
+    ]
+
+
+def library_summary_for_where(where):
+    rows = ch_data(
+        f"""
+        SELECT
+          count() AS source_records,
+          sum(capture_count) AS captures,
+          countIf(text_chars >= 120) AS normalized_captures,
+          countIf(capture_count > 1) AS duplicate_clusters,
+          countIf(last_ingested_at >= now() - INTERVAL 1 DAY) AS new_since_view
+        FROM
+        (
+          SELECT
+            evidence_id,
+            length(argMax(text, ingested_at)) AS text_chars,
+            count() AS capture_count,
+            max(ingested_at) AS last_ingested_at
+          FROM evidence_events
+          WHERE {where}
+          GROUP BY evidence_id
+        )
+        """,
+        fallback=[{}],
+    )
+    row = rows[0] if rows else {}
+    return {
+        "source_records": int(row.get("source_records") or 0),
+        "captures": int(row.get("captures") or 0),
+        "normalized_captures": int(row.get("normalized_captures") or 0),
+        "duplicate_clusters": int(row.get("duplicate_clusters") or 0),
+        "new_since_view": int(row.get("new_since_view") or 0),
+    }
+
+
+def library_query_explanation(q, mode):
+    if not q:
+        return "Showing recent captured source records in the selected scope."
+    if mode == "exact":
+        return "Exact search across titles, URLs, handles, domains, captured text, normalized text, OCR/transcript text, and evidence identifiers."
+    if mode == "semantic":
+        return "Semantic mode is presented as concept matching; explanations should name matched concepts and source locations rather than raw vector scores."
+    return "Hybrid search combines exact matched fragments with semantic reason categories and source/review state."
+
+
+def source_layer_label(kind):
+    if kind in ("search_result", "google_search_page"):
+        return "discovery provenance"
+    if kind in ("x_post", "x_account", "x_page"):
+        return "social source"
+    if kind == "web_page":
+        return "substantive web source"
+    if kind == "media":
+        return "media artifact"
+    if kind == "user_input":
+        return "manual research document"
+    return "source record"
+
+
+def library_preview(selected_id):
+    if not selected_id:
+        return None
+    try:
+        detail = source_detail({"id": [selected_id]})
+    except ResearchUiError:
+        return None
+    latest = detail.get("latest") or {}
+    review = detail.get("review") or {}
+    return {
+        "source": latest,
+        "captures": detail.get("observations") or [],
+        "artifacts": latest.get("artifact_paths") or [],
+        "ocr": detail.get("ocr") or [],
+        "vl": detail.get("vl") or [],
+        "annotations": detail.get("annotations") or [],
+        "related": detail.get("related") or [],
+        "review": review,
+        "counts": {
+            "captures": len(detail.get("observations") or []),
+            "artifacts": len(latest.get("artifact_paths") or []),
+            "ocr": len(detail.get("ocr") or []),
+            "vl": len(detail.get("vl") or []),
+            "evidence": len(review.get("evidence_selections") or []),
+            "claims": len(review.get("claim_records") or []),
+            "entities": len(review.get("entity_links") or []),
+            "annotations": len(review.get("annotations") or []),
+        },
+    }
+
+
 def library_search(params):
     limit = sql_int(params.get("limit", ["80"])[0], 80)
     q = (params.get("q", [""])[0] or "").strip()
-    kind = (params.get("kind", [""])[0] or "").strip()
+    kind = (params.get("type", params.get("kind", [""]))[0] or "").strip()
     project = (params.get("project", [""])[0] or "").strip()
     mode = (params.get("mode", ["hybrid"])[0] or "hybrid").strip()
+    scope = (params.get("scope", ["corpus"])[0] or "corpus").strip()
+    sort = (params.get("sort", ["relevance"])[0] or "relevance").strip()
+    inspect = (params.get("inspect", params.get("id", [""]))[0] or "").strip()
+    date_from = (params.get("date_from", [""])[0] or "").strip()
+    date_to = (params.get("date_to", [""])[0] or "").strip()
+    include_archived = (params.get("include_archived", ["0"])[0] or "").strip() in ("1", "true", "yes")
     clauses = ["1 = 1"]
-    match_explanation = "Recent source"
     if q:
         like = sql_string(q)
         clauses.append(
@@ -1400,12 +1617,22 @@ def library_search(params):
             f"positionCaseInsensitive(evidence_id, {like}) > 0"
             ")"
         )
-        match_explanation = f"Matched query: {q}"
     if kind:
         clauses.append(f"source_kind = {sql_string(kind)}")
     if project:
         clauses.append(f"source_project = {sql_string(project)}")
+    if date_from:
+        clauses.append(f"toDate(ifNull(captured_at, ingested_at)) >= toDate({sql_string(date_from)})")
+    if date_to:
+        clauses.append(f"toDate(ifNull(captured_at, ingested_at)) <= toDate({sql_string(date_to)})")
     where = " AND ".join(clauses)
+    order_by = "last_ingested_at DESC"
+    if sort == "captured_desc":
+        order_by = "captured_at DESC, last_ingested_at DESC"
+    elif sort == "published_desc":
+        order_by = "posted_at DESC, captured_at DESC"
+    elif sort == "freshness":
+        order_by = "has_media DESC, has_ocr DESC, observations DESC, last_ingested_at DESC"
     rows = ch_data(
         f"""
         SELECT
@@ -1416,26 +1643,150 @@ def library_search(params):
           argMax(author_handle, ingested_at) AS author_handle,
           argMax(domain, ingested_at) AS domain,
           argMax(title, ingested_at) AS title,
+          argMax(raw_json, ingested_at) AS raw_json,
           substring(argMax(text, ingested_at), 1, 500) AS snippet,
           length(argMax(text, ingested_at)) AS text_chars,
           max(has_media) AS has_media,
           max(has_ocr) AS has_ocr,
+          max(posted_at) AS posted_at,
           max(captured_at) AS captured_at,
           max(ingested_at) AS last_ingested_at,
           count() AS observations
         FROM evidence_events
         WHERE {where}
         GROUP BY evidence_id
-        ORDER BY last_ingested_at DESC
-        LIMIT {limit}
+        ORDER BY {order_by}
+        LIMIT {max(limit, 1) * 2}
         """,
         fallback=[],
     )
+    ids = [row.get("evidence_id") for row in rows if row.get("evidence_id")]
+    evidence_counts = library_count_map(ids, "evidence_selections")
+    claim_counts = library_count_map(ids, "claim_records")
+    fact_counts = library_count_map(ids, "proposed_facts")
+    correction_counts = library_count_map(ids, "normalized_corrections")
+    entity_counts = library_count_map(ids, "entity_links")
+    annotation_counts = library_annotation_counts(ids)
+    ocr_counts = library_count_map(ids, "media_ocr_results", "evidence_id")
+    vl_counts = library_count_map(ids, "media_vl_embeddings", "evidence_id")
+    latest_actions = library_latest_actions(ids)
+    visible_rows = []
     for row in rows:
+        evidence_id = row.get("evidence_id") or ""
+        action_state = latest_actions.get(evidence_id) or {}
+        if action_state.get("action") == "archive" and not include_archived:
+            continue
+        raw = parse_raw_json(row.get("raw_json", ""))
+        artifact_paths = extract_paths(raw)
+        row.pop("raw_json", None)
         row["source_label"] = source_kind_label(row.get("source_kind"))
+        row["source_layer"] = source_layer_label(row.get("source_kind"))
         row["review_hint"] = review_hint(row)
-        row["match_explanation"] = match_explanation
-    return {"mode": mode, "rows": rows, "facets": facets()}
+        row["match_explanation"] = library_query_explanation(q, mode) if q else "Recent captured source in the selected scope."
+        row["extraction_state"] = "complete" if int(row.get("text_chars") or 0) >= 120 else "partial"
+        row["capture_state"] = "complete" if row.get("captured_at") else "pending"
+        row["artifact_count"] = len(artifact_paths)
+        row["artifact_available"] = bool(artifact_paths or int(row.get("has_media") or 0) or int(row.get("has_ocr") or 0))
+        row["evidence_count"] = evidence_counts.get(evidence_id, 0)
+        row["claim_count"] = claim_counts.get(evidence_id, 0)
+        row["fact_count"] = fact_counts.get(evidence_id, 0)
+        row["correction_count"] = correction_counts.get(evidence_id, 0)
+        row["entity_count"] = entity_counts.get(evidence_id, 0)
+        row["annotation_count"] = annotation_counts.get(evidence_id, 0)
+        row["ocr_count"] = ocr_counts.get(evidence_id, 0)
+        row["vl_count"] = vl_counts.get(evidence_id, 0)
+        row["latest_library_action"] = action_state.get("action") or ""
+        row["latest_library_action_at"] = action_state.get("created_at") or ""
+        row["review_state"] = "archived" if action_state.get("action") == "archive" else ("review-linked" if row["evidence_count"] or row["claim_count"] or row["fact_count"] else "unreviewed")
+        row["duplicate_state"] = "candidate_duplicate" if int(row.get("observations") or 0) > 1 else "single"
+        row["permitted_actions"] = ["add_to_project", "assign_review", "merge_cluster", "archive", "open_workbench"]
+        visible_rows.append(row)
+        if len(visible_rows) >= limit:
+            break
+    selected_id = inspect or (visible_rows[0].get("evidence_id") if visible_rows else "")
+    if selected_id.startswith("source:"):
+        selected_id = selected_id.removeprefix("source:")
+    return {
+        "scope": {
+            "kind": "project" if project else scope,
+            "project_ids": [project] if project else [],
+            "label": project or ("Entire corpus" if scope == "corpus" else scope),
+        },
+        "query": {
+            "text": q,
+            "mode": mode,
+            "row_mode": "source",
+            "sort": sort,
+            "filters": {
+                "source_kind": kind,
+                "project": project,
+                "date_from": date_from,
+                "date_to": date_to,
+                "include_archived": include_archived,
+            },
+            "explanation": library_query_explanation(q, mode),
+        },
+        "summary": library_summary_for_where(where),
+        "saved_views": [
+            {"id": "recent", "label": "Recent captures", "description": "Latest captured source records"},
+            {"id": "needs-extraction", "label": "Needs extraction review", "description": "Sparse normalized text, media, OCR, and VL work"},
+            {"id": "versions", "label": "Version candidates", "description": "Sources with multiple immutable captures"},
+            {"id": "google-provenance", "label": "Google discovery provenance", "description": "SERP records separate from opened pages"},
+        ],
+        "facets": library_facets_for_where(where),
+        "results": {"rows": visible_rows, "limit": limit, "count": len(visible_rows), "has_more": len(rows) > len(visible_rows)},
+        "rows": visible_rows,
+        "preview": library_preview(selected_id),
+        "selection": {
+            "selected_source_ids": [selected_id] if selected_id else [],
+            "capabilities": {
+                "add_to_project": True,
+                "assign_review": True,
+                "archive": True,
+                "merge_cluster": True,
+                "open_workbench": True,
+            },
+        },
+        "permissions": ["read", "review_event_write"],
+        "generated_at": now_iso(),
+        "stale": False,
+        "version": "source_library.v1",
+        "mode": mode,
+    }
+
+
+def create_library_action(payload):
+    action = compact_text(payload.get("action"), 80)
+    source_ids = payload.get("source_ids")
+    if not isinstance(source_ids, list):
+        source_ids = [payload.get("source_evidence_id") or payload.get("source_id")]
+    source_ids = [compact_text(item, 1000) for item in source_ids if compact_text(item, 1000)]
+    if not action:
+        raise ResearchUiError(400, "action is required")
+    if not source_ids:
+        raise ResearchUiError(400, "source_ids are required")
+    allowed = {"add_to_project", "assign_review", "archive", "merge_cluster", "dismiss_duplicate", "restore"}
+    if action not in allowed:
+        raise ResearchUiError(400, f"Unsupported library action: {action}")
+    outcomes = []
+    for source_id in source_ids:
+        event_payload = {
+            **payload,
+            "source_evidence_id": source_id,
+            "subject_type": "source_record",
+            "subject_id": source_id,
+            "action": action,
+            "status": action,
+            "source_anchor": {
+                "kind": "source_record",
+                "source_evidence_id": source_id,
+                "library_action": action,
+            },
+            "idempotency_key": compact_text(payload.get("idempotency_key"), 500) or f"library:{action}:{source_id}:{now_iso()}",
+        }
+        event = persist_review_event(build_review_event("library.source_action.recorded", event_payload))
+        outcomes.append({"source_evidence_id": source_id, "action": action, "event_id": event.get("event_id"), "ok": True})
+    return {"action": action, "outcomes": outcomes, "created_at": now_iso()}
 
 
 def evidence_ledger(params):
@@ -2526,9 +2877,14 @@ class ResearchUiHandler(BaseHTTPRequestHandler):
         return value
 
     def do_HEAD(self):
-        if urllib.parse.urlparse(self.path).path == "/":
+        path = urllib.parse.urlparse(self.path).path
+        if path == "/":
             self.send_response(200)
             self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.end_headers()
+            return
+        if path == "/favicon.ico":
+            self.send_response(204)
             self.end_headers()
             return
         self.send_response(404)
@@ -2540,6 +2896,10 @@ class ResearchUiHandler(BaseHTTPRequestHandler):
         try:
             if parsed.path == "/":
                 return self.send_static("index.html")
+            if parsed.path == "/favicon.ico":
+                self.send_response(204)
+                self.end_headers()
+                return
             if parsed.path == "/healthz":
                 return self.send_json({"ok": True, "service": "research-ui"})
             if parsed.path == "/api/home":
@@ -2594,6 +2954,8 @@ class ResearchUiHandler(BaseHTTPRequestHandler):
                 return self.send_json(update_project_brief(payload), status=201)
             if parsed.path == "/api/project-brief/review":
                 return self.send_json(update_project_brief(payload, review_request=True), status=201)
+            if parsed.path == "/api/library/actions":
+                return self.send_json(create_library_action(payload), status=201)
             if parsed.path == "/api/evidence/selections":
                 return self.send_json(create_evidence_selection(payload), status=201)
             if parsed.path == "/api/annotations":

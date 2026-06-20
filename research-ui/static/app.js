@@ -434,6 +434,8 @@ function setSidebarCollapsed(collapsed) {
   toggle.setAttribute('aria-expanded', state.sidebarCollapsed ? 'false' : 'true');
   toggle.setAttribute('aria-label', state.sidebarCollapsed ? 'Open sidebar' : 'Close sidebar');
   toggle.setAttribute('title', state.sidebarCollapsed ? 'Open sidebar' : 'Close sidebar');
+  const label = toggle.querySelector('.rail-toggle-label');
+  if (label) label.textContent = state.sidebarCollapsed ? 'Open' : 'Close';
 }
 
 function renderFacets(data) {

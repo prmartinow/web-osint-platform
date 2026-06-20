@@ -227,15 +227,19 @@ body.rail-collapsed.has-source .research-shell {
 }
 .rail-toggle {
   margin-left: auto;
-  width: 30px;
-  height: 30px;
-  padding: 0;
-  display: grid;
-  place-items: center;
-  border: 1px solid #2c3c53;
+  min-width: 72px;
+  height: 34px;
+  padding: 0 9px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  border: 1px solid #39516f;
   border-radius: 8px;
-  color: #9fb2c9;
-  background: transparent;
+  color: #d6e5f7;
+  background: #142033;
+  font-size: 11px;
+  font-weight: 800;
 }
 .rail-toggle svg {
   width: 18px;
@@ -243,6 +247,10 @@ body.rail-collapsed.has-source .research-shell {
   stroke: currentColor;
   stroke-width: 1.8;
   fill: none;
+}
+.rail-toggle:hover {
+  color: #fff;
+  background: #1b2a40;
 }
 .primary-nav {
   display: grid;
@@ -366,6 +374,9 @@ body.rail-collapsed .brand-lockup {
   width: 100%;
   justify-content: center;
 }
+body.rail-collapsed .brand-mark {
+  opacity: 0;
+}
 body.rail-collapsed .brand-lockup strong,
 body.rail-collapsed .brand-lockup span:not(.brand-mark),
 body.rail-collapsed .primary-nav::before,
@@ -381,16 +392,14 @@ body.rail-collapsed .rail-toggle {
   inset: 0;
   width: 100%;
   height: 44px;
-  border-color: transparent;
-  opacity: 0;
-}
-body.rail-collapsed .brand-lockup:hover .brand-mark {
-  opacity: .15;
-}
-body.rail-collapsed .brand-lockup:hover .rail-toggle {
+  min-width: 0;
+  padding: 0;
+  border-color: #2d3e55;
   opacity: 1;
-  border-color: #2c3c53;
-  background: var(--rail-2);
+  background: #101a29;
+}
+body.rail-collapsed .rail-toggle-label {
+  display: none;
 }
 body.rail-collapsed .primary-nav {
   width: 100%;

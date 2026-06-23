@@ -20,6 +20,12 @@ DATA_ROOT = Path(os.environ.get("WEB_OSINT_DATA_ROOT", "/mnt/data/web-osint-plat
 TEXT_MODEL_DIR = Path(os.environ.get("QWEN_TEXT_EMBEDDING_MODEL_DIR", DATA_ROOT / "models/Qwen3-Embedding-8B"))
 RERANKER_MODEL_DIR = Path(os.environ.get("QWEN_RERANKER_MODEL_DIR", DATA_ROOT / "models/Qwen3-Reranker-8B"))
 VL_MODEL_DIR = Path(os.environ.get("QWEN_VL_EMBEDDING_MODEL_DIR", DATA_ROOT / "models/Qwen3-VL-Embedding-8B"))
+# The Qwen3-VL-Embedding-8B checkpoint is architecturally Qwen3VLForConditionalGeneration
+# (generative-capable). The generative route loads it as a vision-to-text model, separate
+# from the SentenceTransformer embedding path above. Defaults to the same weights on disk.
+VL_GENERATIVE_MODEL_DIR = Path(
+    os.environ.get("QWEN_VL_GENERATIVE_MODEL_DIR", DATA_ROOT / "models/Qwen3-VL-Embedding-8B")
+)
 
 DEFAULT_BATCH_SIZE = int(os.environ.get("QWEN_INFERENCE_BATCH_SIZE", "1"))
 DEFAULT_MAX_LENGTH = int(os.environ.get("QWEN_INFERENCE_MAX_LENGTH", "8192"))
@@ -73,12 +79,19 @@ RERANK_QUEUE_TIMEOUT = env_float("QWEN_RERANK_QUEUE_TIMEOUT_SECONDS", 240)
 VL_CONCURRENCY = env_int("QWEN_VL_CONCURRENCY", 1)
 VL_QUEUE_LIMIT = env_int("QWEN_VL_QUEUE_LIMIT", 16)
 VL_QUEUE_TIMEOUT = env_float("QWEN_VL_QUEUE_TIMEOUT_SECONDS", 300)
+# Generative VL route runs on CPU; expect tens of seconds per image+prompt.
+# Single-flight with a small queue and generous timeout.
+CHAT_CONCURRENCY = env_int("QWEN_CHAT_CONCURRENCY", 1)
+CHAT_QUEUE_LIMIT = env_int("QWEN_CHAT_QUEUE_LIMIT", 4)
+CHAT_QUEUE_TIMEOUT = env_float("QWEN_CHAT_QUEUE_TIMEOUT_SECONDS", 600)
 
 EMBED_MAX_INPUT_CHARS = env_int("QWEN_EMBED_MAX_INPUT_CHARS", 12000)
 RERANK_MAX_QUERY_CHARS = env_int("QWEN_RERANK_MAX_QUERY_CHARS", 1500)
 RERANK_MAX_CANDIDATES = env_int("QWEN_RERANK_MAX_CANDIDATES", 5)
 RERANK_MAX_CANDIDATE_CHARS = env_int("QWEN_RERANK_MAX_CANDIDATE_CHARS", 2500)
 RERANK_MAX_TOTAL_CANDIDATE_CHARS = env_int("QWEN_RERANK_MAX_TOTAL_CANDIDATE_CHARS", 12000)
+CHAT_MAX_INPUT_CHARS = env_int("QWEN_CHAT_MAX_INPUT_CHARS", 6000)
+CHAT_MAX_NEW_TOKENS = env_int("QWEN_CHAT_MAX_NEW_TOKENS", 64)
 
 
 class EmbeddingRequest(BaseModel):
@@ -105,6 +118,16 @@ class RerankRequest(BaseModel):
 
 class WarmupRequest(BaseModel):
     models: list[str] = Field(default_factory=lambda: ["text"])
+
+
+class ChatCompletionRequest(BaseModel):
+    # OpenAI-shaped request. `image_path` is a server-side file path read by the
+    # server (same-host convention used by the existing /embed VL path), not base64.
+    model: str = "vl"
+    messages: list[dict[str, Any]]
+    image_path: str | None = None
+    max_tokens: int | None = None
+    temperature: float | None = None
 
 
 @dataclass
@@ -282,6 +305,35 @@ class ModelRegistry:
             self._models["reranker"] = LoadedModel(name="reranker", loaded_at=time.time(), model=model)
             return model
 
+    def get_vl_generative(self):
+        # Returns (model, processor). Stored together under one LoadedModel entry.
+        with self._lock:
+            item = self._models.get("vl_generative")
+            if item is not None:
+                model, processor = item.model
+                return model, processor
+            if not VL_GENERATIVE_MODEL_DIR.exists():
+                raise RuntimeError(f"model path does not exist: {VL_GENERATIVE_MODEL_DIR}")
+
+            from transformers import AutoModelForImageTextToText, AutoProcessor
+
+            model = AutoModelForImageTextToText.from_pretrained(
+                str(VL_GENERATIVE_MODEL_DIR),
+                device_map=DEVICE,
+                torch_dtype=torch.bfloat16,
+                trust_remote_code=True,
+            )
+            processor = AutoProcessor.from_pretrained(
+                str(VL_GENERATIVE_MODEL_DIR),
+                trust_remote_code=True,
+            )
+            self._models["vl_generative"] = LoadedModel(
+                name="vl_generative",
+                loaded_at=time.time(),
+                model=(model, processor),
+            )
+            return model, processor
+
 
 registry = ModelRegistry()
 metrics = InferenceMetrics()
@@ -290,6 +342,7 @@ guardrails = {
     "query_embed": Guardrail("query_embed", EMBED_CONCURRENCY, QUERY_EMBED_QUEUE_LIMIT, QUERY_EMBED_QUEUE_TIMEOUT),
     "rerank": Guardrail("rerank", RERANK_CONCURRENCY, RERANK_QUEUE_LIMIT, RERANK_QUEUE_TIMEOUT),
     "vl": Guardrail("vl", VL_CONCURRENCY, VL_QUEUE_LIMIT, VL_QUEUE_TIMEOUT),
+    "chat": Guardrail("chat", CHAT_CONCURRENCY, CHAT_QUEUE_LIMIT, CHAT_QUEUE_TIMEOUT),
 }
 app = FastAPI(title="Web OSINT Qwen Inference", version="0.1.0")
 
@@ -427,11 +480,13 @@ def healthz() -> dict[str, Any]:
             "text": str(TEXT_MODEL_DIR),
             "reranker": str(RERANKER_MODEL_DIR),
             "vl": str(VL_MODEL_DIR),
+            "vl_generative": str(VL_GENERATIVE_MODEL_DIR),
         },
         "model_path_exists": {
             "text": TEXT_MODEL_DIR.exists(),
             "reranker": RERANKER_MODEL_DIR.exists(),
             "vl": VL_MODEL_DIR.exists(),
+            "vl_generative": VL_GENERATIVE_MODEL_DIR.exists(),
         },
         "loaded": registry.loaded(),
         "guardrails": {name: guard.snapshot() for name, guard in guardrails.items()},
@@ -465,6 +520,23 @@ def warmup(request: WarmupRequest, http_request: Request) -> dict[str, Any]:
 
             run_with_guard("vl", "Qwen3-VL-Embedding-8B", caller_from(http_request), 24, 1, 0, do_vl)
             warmed.append("vl")
+        elif selector in {"chat", "vl-generative", "vl-generate"}:
+            def do_chat():
+                model, processor = registry.get_vl_generative()
+                # Tiny text-only generation to load weights + processor without
+                # requiring an image file during warmup.
+                prompt = processor.apply_chat_template(
+                    [{"role": "user", "content": "Reply with the single word: OK"}],
+                    add_generation_prompt=True,
+                    tokenize=False,
+                )
+                inputs = processor(text=[prompt], return_tensors="pt").to(model.device)
+                with torch.no_grad():
+                    out = model.generate(**inputs, max_new_tokens=4, do_sample=False)
+                processor.batch_decode(out, skip_special_tokens=True)
+
+            run_with_guard("chat", "Qwen3-VL-Generative", caller_from(http_request), 48, 1, 0, do_chat)
+            warmed.append("chat")
         else:
             raise HTTPException(status_code=400, detail=f"unknown warmup model: {name}")
     return {"ok": True, "warmed": warmed, "loaded": registry.loaded()}
@@ -528,6 +600,105 @@ def openai_embeddings(request: OpenAIEmbeddingRequest, http_request: Request) ->
         ],
         "usage": {"prompt_tokens": 0, "total_tokens": 0},
     }
+
+
+@app.post("/v1/chat/completions")
+def openai_chat_completions(request: ChatCompletionRequest, http_request: Request) -> dict[str, Any]:
+    if not request.messages:
+        raise HTTPException(status_code=400, detail="messages must not be empty")
+    messages_text = sum(len(json_dumps_compact(m)) for m in request.messages)
+    if messages_text > CHAT_MAX_INPUT_CHARS:
+        raise HTTPException(
+            status_code=413,
+            detail=f"chat input is {messages_text} chars; max is {CHAT_MAX_INPUT_CHARS}",
+        )
+    image_path = request.image_path.strip() if request.image_path else None
+    if image_path:
+        image_path_obj = Path(image_path)
+        if not image_path_obj.is_absolute():
+            raise HTTPException(
+                status_code=400,
+                detail="image_path must be an absolute server-side filesystem path",
+            )
+        if not image_path_obj.exists():
+            raise HTTPException(status_code=400, detail=f"image_path does not exist: {image_path}")
+    max_new_tokens = min(request.max_tokens or CHAT_MAX_NEW_TOKENS, CHAT_MAX_NEW_TOKENS)
+
+    def run_generate() -> dict[str, Any]:
+        from PIL import Image
+
+        model, processor = registry.get_vl_generative()
+        content = []
+        if image_path:
+            content.append({"type": "image", "image": Image.open(image_path)})
+        last_user_text = ""
+        for msg in request.messages:
+            if isinstance(msg.get("content"), str):
+                last_user_text = msg["content"]
+        if last_user_text and image_path:
+            # Replace the last user message with a multimodal content block list.
+            patched = []
+            for msg in request.messages:
+                if msg.get("role") == "user" and isinstance(msg.get("content"), str):
+                    patched.append({**msg, "content": [*content, {"type": "text", "text": msg["content"]}]})
+                else:
+                    patched.append(msg)
+            chat_messages = patched
+        else:
+            chat_messages = request.messages
+        prompt = processor.apply_chat_template(
+            chat_messages,
+            add_generation_prompt=True,
+            tokenize=False,
+        )
+        proc_kwargs: dict[str, Any] = {"text": [prompt], "return_tensors": "pt"}
+        if image_path:
+            proc_kwargs["images"] = Image.open(image_path)
+        inputs = processor(**proc_kwargs).to(model.device)
+        gen_kwargs: dict[str, Any] = {
+            "max_new_tokens": max_new_tokens,
+            "do_sample": False,
+        }
+        if request.temperature is not None:
+            gen_kwargs["do_sample"] = True
+            gen_kwargs["temperature"] = float(request.temperature)
+        started = time.time()
+        with torch.no_grad():
+            out = model.generate(**inputs, **gen_kwargs)
+        elapsed_ms = round((time.time() - started) * 1000, 2)
+        # Trim prompt tokens so decoded text is only the model's response.
+        input_len = inputs["input_ids"].shape[1]
+        new_tokens = out[0, input_len:]
+        text = processor.decode(new_tokens, skip_special_tokens=True).strip()
+        completion_tokens = int(new_tokens.shape[0])
+        return {
+            "object": "chat.completion",
+            "model": "Qwen3-VL-Generative",
+            "elapsed_ms": elapsed_ms,
+            "choices": [
+                {
+                    "index": 0,
+                    "message": {"role": "assistant", "content": text},
+                    "finish_reason": "stop",
+                }
+            ],
+            "usage": {
+                "prompt_tokens": int(input_len),
+                "completion_tokens": completion_tokens,
+                "total_tokens": int(input_len) + completion_tokens,
+            },
+        }
+
+    caller = caller_from(http_request)
+    return run_with_guard(
+        "chat",
+        "Qwen3-VL-Generative",
+        caller,
+        messages_text,
+        1,
+        0,
+        run_generate,
+    )
 
 
 @app.post("/rerank")

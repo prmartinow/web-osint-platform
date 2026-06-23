@@ -13,6 +13,10 @@ HF_TOKEN_FILE="${HF_TOKEN_FILE:-/home/ops/dev/huggingface.md}"
 TEXT_MODEL="${WEB_OSINT_TEXT_EMBEDDING_MODEL:-Qwen/Qwen3-Embedding-8B}"
 RERANKER_MODEL="${WEB_OSINT_RERANKER_MODEL:-Qwen/Qwen3-Reranker-8B}"
 VL_MODEL="${WEB_OSINT_VL_EMBEDDING_MODEL:-Qwen/Qwen3-VL-Embedding-8B}"
+# Generative VLM for the /v1/chat/completions route. Qwen3-VL-Embedding-8B has no
+# trained lm_head, so a true instruct VLM is downloaded separately and served by
+# the same transformers route via QWEN_VL_GENERATIVE_MODEL_DIR.
+VL_GENERATIVE_MODEL="${WEB_OSINT_VL_GENERATIVE_MODEL:-Qwen/Qwen3-VL-8B-Instruct}"
 
 mkdir -p "$MODELS_DIR" "$LOG_DIR" "$HF_HOME" "$HF_HUB_CACHE" "$HF_XET_CACHE"
 LOG_FILE="$LOG_DIR/qwen-model-downloads-$(date -u +%Y%m%dT%H%M%SZ).log"
@@ -51,7 +55,7 @@ if [[ -n "${HF_TOKEN:-}" ]]; then
 else
   echo "hf_token_loaded=no"
 fi
-echo "models=$TEXT_MODEL | $RERANKER_MODEL | $VL_MODEL"
+echo "models=$TEXT_MODEL | $RERANKER_MODEL | $VL_MODEL | $VL_GENERATIVE_MODEL"
 
 if [[ ! -x "$HF_VENV/bin/python" ]]; then
   echo "[$(date -Is)] creating isolated Hugging Face downloader venv"
@@ -92,6 +96,7 @@ download_model() {
 download_model "$TEXT_MODEL" "$MODELS_DIR/Qwen3-Embedding-8B"
 download_model "$RERANKER_MODEL" "$MODELS_DIR/Qwen3-Reranker-8B"
 download_model "$VL_MODEL" "$MODELS_DIR/Qwen3-VL-Embedding-8B"
+download_model "$VL_GENERATIVE_MODEL" "$MODELS_DIR/Qwen3-VL-8B-Instruct"
 
 echo
 echo "[$(date -Is)] final model directory sizes"

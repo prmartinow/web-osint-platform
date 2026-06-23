@@ -84,6 +84,19 @@ VL_QUEUE_TIMEOUT = env_float("QWEN_VL_QUEUE_TIMEOUT_SECONDS", 300)
 CHAT_CONCURRENCY = env_int("QWEN_CHAT_CONCURRENCY", 1)
 CHAT_QUEUE_LIMIT = env_int("QWEN_CHAT_QUEUE_LIMIT", 4)
 CHAT_QUEUE_TIMEOUT = env_float("QWEN_CHAT_QUEUE_TIMEOUT_SECONDS", 600)
+# Specialized solvers (reCAPTCHA classifier, OCR, slider gap). Small ONNX models,
+# CPU-fast (~50-300ms), so they can run at higher concurrency than the big
+# transformer routes above. Two dedicated guards so a slow VLM/rerank call never
+# blocks a quick classifier call.
+RECAPTCHA_CONCURRENCY = env_int("QWEN_RECAPTCHA_CONCURRENCY", 2)
+RECAPTCHA_QUEUE_LIMIT = env_int("QWEN_RECAPTCHA_QUEUE_LIMIT", 8)
+RECAPTCHA_QUEUE_TIMEOUT = env_float("QWEN_RECAPTCHA_QUEUE_TIMEOUT_SECONDS", 60)
+OCR_CONCURRENCY = env_int("QWEN_OCR_CONCURRENCY", 2)
+OCR_QUEUE_LIMIT = env_int("QWEN_OCR_QUEUE_LIMIT", 8)
+OCR_QUEUE_TIMEOUT = env_float("QWEN_OCR_QUEUE_TIMEOUT_SECONDS", 60)
+SLIDE_CONCURRENCY = env_int("QWEN_SLIDE_CONCURRENCY", 2)
+SLIDE_QUEUE_LIMIT = env_int("QWEN_SLIDE_QUEUE_LIMIT", 8)
+SLIDE_QUEUE_TIMEOUT = env_float("QWEN_SLIDE_QUEUE_TIMEOUT_SECONDS", 60)
 
 EMBED_MAX_INPUT_CHARS = env_int("QWEN_EMBED_MAX_INPUT_CHARS", 12000)
 RERANK_MAX_QUERY_CHARS = env_int("QWEN_RERANK_MAX_QUERY_CHARS", 1500)
@@ -92,6 +105,15 @@ RERANK_MAX_CANDIDATE_CHARS = env_int("QWEN_RERANK_MAX_CANDIDATE_CHARS", 2500)
 RERANK_MAX_TOTAL_CANDIDATE_CHARS = env_int("QWEN_RERANK_MAX_TOTAL_CANDIDATE_CHARS", 12000)
 CHAT_MAX_INPUT_CHARS = env_int("QWEN_CHAT_MAX_INPUT_CHARS", 6000)
 CHAT_MAX_NEW_TOKENS = env_int("QWEN_CHAT_MAX_NEW_TOKENS", 64)
+# Specialized solver model path (YOLOv8n classifier fine-tuned on the 14
+# reCAPTCHA classes; ddddocr ships its own bundled ONNX in the wheel, no dir).
+RECAPTCHA_MODEL_PATH = Path(
+    os.environ.get(
+        "QWEN_RECAPTCHA_MODEL_PATH",
+        DATA_ROOT / "models/recaptcha-yolov8n/recaptcha_classification_57k.onnx",
+    )
+)
+RECAPTCHA_CONFIDENCE_THRESHOLD = env_float("QWEN_RECAPTCHA_CONFIDENCE_THRESHOLD", 0.40)
 
 
 class EmbeddingRequest(BaseModel):
@@ -128,6 +150,26 @@ class ChatCompletionRequest(BaseModel):
     image_path: str | None = None
     max_tokens: int | None = None
     temperature: float | None = None
+
+
+class ClassifyRecaptchaRequest(BaseModel):
+    # One or more tile image paths. The classifier returns a label + confidence
+    # per tile. `target` optionally filters results to only that class.
+    image_paths: list[str]
+    target: str | None = None
+    confidence_threshold: float | None = None
+
+
+class OcrRequest(BaseModel):
+    image_path: str
+
+
+class SlideGapRequest(BaseModel):
+    # Two server-side image paths: the full background and the slider piece.
+    bg_path: str
+    slider_path: str
+    # simple=True is faster but slightly less accurate; matches ddddocr's API.
+    simple: bool = True
 
 
 @dataclass
@@ -334,6 +376,45 @@ class ModelRegistry:
             )
             return model, processor
 
+    def get_recaptcha_classifier(self):
+        # YOLOv8n classifier (ONNX). Cached as a single ultralytics.YOLO instance.
+        with self._lock:
+            item = self._models.get("recaptcha_classifier")
+            if item is not None:
+                return item.model
+            if not RECAPTCHA_MODEL_PATH.exists():
+                raise RuntimeError(f"model path does not exist: {RECAPTCHA_MODEL_PATH}")
+
+            from ultralytics import YOLO
+
+            model = YOLO(str(RECAPTCHA_MODEL_PATH), task="classify")
+            self._models["recaptcha_classifier"] = LoadedModel(
+                name="recaptcha_classifier",
+                loaded_at=time.time(),
+                model=model,
+            )
+            return model
+
+    def get_ocr(self):
+        # ddddocr ships its own bundled ONNX in the wheel. Three separate
+        # instances because ddddocr configures them with different flags.
+        with self._lock:
+            item = self._models.get("ocr")
+            if item is not None:
+                return item.model
+            import ddddocr
+
+            bundle = {
+                "ocr": ddddocr.DdddOcr(show_ad=False),
+                "slide": ddddocr.DdddOcr(ocr=False, det=False, show_ad=False),
+            }
+            self._models["ocr"] = LoadedModel(
+                name="ocr",
+                loaded_at=time.time(),
+                model=bundle,
+            )
+            return bundle
+
 
 registry = ModelRegistry()
 metrics = InferenceMetrics()
@@ -343,6 +424,9 @@ guardrails = {
     "rerank": Guardrail("rerank", RERANK_CONCURRENCY, RERANK_QUEUE_LIMIT, RERANK_QUEUE_TIMEOUT),
     "vl": Guardrail("vl", VL_CONCURRENCY, VL_QUEUE_LIMIT, VL_QUEUE_TIMEOUT),
     "chat": Guardrail("chat", CHAT_CONCURRENCY, CHAT_QUEUE_LIMIT, CHAT_QUEUE_TIMEOUT),
+    "recaptcha": Guardrail("recaptcha", RECAPTCHA_CONCURRENCY, RECAPTCHA_QUEUE_LIMIT, RECAPTCHA_QUEUE_TIMEOUT),
+    "ocr": Guardrail("ocr", OCR_CONCURRENCY, OCR_QUEUE_LIMIT, OCR_QUEUE_TIMEOUT),
+    "slide": Guardrail("slide", SLIDE_CONCURRENCY, SLIDE_QUEUE_LIMIT, SLIDE_QUEUE_TIMEOUT),
 }
 app = FastAPI(title="Web OSINT Qwen Inference", version="0.1.0")
 
@@ -481,12 +565,14 @@ def healthz() -> dict[str, Any]:
             "reranker": str(RERANKER_MODEL_DIR),
             "vl": str(VL_MODEL_DIR),
             "vl_generative": str(VL_GENERATIVE_MODEL_DIR),
+            "recaptcha_classifier": str(RECAPTCHA_MODEL_PATH),
         },
         "model_path_exists": {
             "text": TEXT_MODEL_DIR.exists(),
             "reranker": RERANKER_MODEL_DIR.exists(),
             "vl": VL_MODEL_DIR.exists(),
             "vl_generative": VL_GENERATIVE_MODEL_DIR.exists(),
+            "recaptcha_classifier": RECAPTCHA_MODEL_PATH.exists(),
         },
         "loaded": registry.loaded(),
         "guardrails": {name: guard.snapshot() for name, guard in guardrails.items()},
@@ -537,6 +623,43 @@ def warmup(request: WarmupRequest, http_request: Request) -> dict[str, Any]:
 
             run_with_guard("chat", "Qwen3-VL-Generative", caller_from(http_request), 48, 1, 0, do_chat)
             warmed.append("chat")
+        elif selector in {"recaptcha", "recaptcha-classifier", "yolo"}:
+            def do_recaptcha():
+                model = registry.get_recaptcha_classifier()
+                # Probe on a 1x1 transparent PNG generated in-memory so warmup
+                # never depends on a real tile file being present.
+                from PIL import Image
+
+                probe = "/tmp/wop_recaptcha_warmup.png"
+                Image.new("RGB", (64, 64), "gray").save(probe)
+                model(probe, verbose=False)
+
+            run_with_guard("recaptcha", "recaptcha-yolov8n-57k", caller_from(http_request), 8, 1, 0, do_recaptcha)
+            warmed.append("recaptcha")
+        elif selector in {"ocr", "ddddocr"}:
+            def do_ocr():
+                bundle = registry.get_ocr()
+                # A tiny synthetic image with a couple of characters exercises
+                # the CRNN path without depending on a real CAPTCHA file.
+                from PIL import Image, ImageDraw
+
+                img = Image.new("RGB", (80, 30), "white")
+                ImageDraw.Draw(img).text((8, 6), "OK", fill="black")
+                probe = "/tmp/wop_ocr_warmup.png"
+                img.save(probe)
+                bundle["ocr"].classification(open(probe, "rb").read())
+
+            run_with_guard("ocr", "ddddocr", caller_from(http_request), 8, 1, 0, do_ocr)
+            warmed.append("ocr")
+        elif selector in {"slide", "slide-gap", "slider"}:
+            def do_slide():
+                bundle = registry.get_ocr()
+                # Just instantiate the slide model; slide_match needs real input
+                # images to be meaningful, so warmup only confirms it loaded.
+                _ = bundle["slide"]
+
+            run_with_guard("slide", "ddddocr-slide", caller_from(http_request), 8, 1, 0, do_slide)
+            warmed.append("slide")
         else:
             raise HTTPException(status_code=400, detail=f"unknown warmup model: {name}")
     return {"ok": True, "warmed": warmed, "loaded": registry.loaded()}
@@ -698,6 +821,137 @@ def openai_chat_completions(request: ChatCompletionRequest, http_request: Reques
         1,
         0,
         run_generate,
+    )
+
+
+@app.post("/classify_recaptcha")
+def classify_recaptcha(request: ClassifyRecaptchaRequest, http_request: Request) -> dict[str, Any]:
+    if not request.image_paths:
+        raise HTTPException(status_code=400, detail="image_paths must not be empty")
+    for path in request.image_paths:
+        p = Path(path)
+        if not p.is_absolute():
+            raise HTTPException(status_code=400, detail="image_paths must be absolute server-side paths")
+        if not p.exists():
+            raise HTTPException(status_code=400, detail=f"image_path does not exist: {path}")
+    threshold = (
+        request.confidence_threshold
+        if request.confidence_threshold is not None
+        else RECAPTCHA_CONFIDENCE_THRESHOLD
+    )
+    target = request.target.strip().lower() if request.target else None
+
+    def run_classify() -> dict[str, Any]:
+        model = registry.get_recaptcha_classifier()
+        started = time.time()
+        tiles = []
+        for idx, path in enumerate(request.image_paths):
+            results = model(path, verbose=False)
+            probs = results[0].probs
+            top1_idx = int(probs.top1)
+            label = model.names[top1_idx]
+            conf = float(probs.top1conf)
+            is_other = label.lower() == "other"
+            matches_target = (target is None) or (label.lower() == target)
+            tiles.append(
+                {
+                    "index": idx,
+                    "image_path": path,
+                    "label": label,
+                    "confidence": round(conf, 4),
+                    "is_match": (not is_other) and matches_target and conf >= threshold,
+                }
+            )
+        elapsed_ms = round((time.time() - started) * 1000, 2)
+        return {
+            "model": "recaptcha-yolov8n-57k",
+            "target": target,
+            "confidence_threshold": threshold,
+            "elapsed_ms": elapsed_ms,
+            "tiles": tiles,
+            "matching_indexes": [t["index"] for t in tiles if t["is_match"]],
+        }
+
+    caller = caller_from(http_request)
+    return run_with_guard(
+        "recaptcha",
+        "recaptcha-yolov8n-57k",
+        caller,
+        len(request.image_paths) * 32,
+        len(request.image_paths),
+        0,
+        run_classify,
+    )
+
+
+@app.post("/ocr")
+def ocr(request: OcrRequest, http_request: Request) -> dict[str, Any]:
+    p = Path(request.image_path)
+    if not p.is_absolute():
+        raise HTTPException(status_code=400, detail="image_path must be an absolute server-side path")
+    if not p.exists():
+        raise HTTPException(status_code=400, detail=f"image_path does not exist: {request.image_path}")
+
+    def run_ocr() -> dict[str, Any]:
+        bundle = registry.get_ocr()
+        docr = bundle["ocr"]
+        with open(request.image_path, "rb") as fh:
+            image_bytes = fh.read()
+        started = time.time()
+        text = docr.classification(image_bytes)
+        elapsed_ms = round((time.time() - started) * 1000, 2)
+        return {"model": "ddddocr", "text": text, "elapsed_ms": elapsed_ms}
+
+    return run_with_guard(
+        "ocr",
+        "ddddocr",
+        caller_from(http_request),
+        32,
+        1,
+        0,
+        run_ocr,
+    )
+
+
+@app.post("/slide_gap")
+def slide_gap(request: SlideGapRequest, http_request: Request) -> dict[str, Any]:
+    for label, path in (("bg_path", request.bg_path), ("slider_path", request.slider_path)):
+        p = Path(path)
+        if not p.is_absolute():
+            raise HTTPException(status_code=400, detail=f"{label} must be an absolute server-side path")
+        if not p.exists():
+            raise HTTPException(status_code=400, detail=f"{label} does not exist: {path}")
+
+    def run_slide() -> dict[str, Any]:
+        bundle = registry.get_ocr()
+        dslide = bundle["slide"]
+        with open(request.bg_path, "rb") as fh:
+            bg_bytes = fh.read()
+        with open(request.slider_path, "rb") as fh:
+            slider_bytes = fh.read()
+        started = time.time()
+        res = dslide.slide_match(slider_bytes, bg_bytes, simple_target=request.simple)
+        elapsed_ms = round((time.time() - started) * 1000, 2)
+        # ddddocr returns {"target_y": ..., "target": [x1, y1, x2, y2]} on success.
+        target = res.get("target") if isinstance(res, dict) else None
+        x = int(target[0]) if target and len(target) >= 2 else None
+        y = int(target[1]) if target and len(target) >= 2 else None
+        return {
+            "model": "ddddocr-slide",
+            "x": x,
+            "y": y,
+            "target_box": target,
+            "elapsed_ms": elapsed_ms,
+        }
+
+    return run_with_guard(
+        "slide",
+        "ddddocr-slide",
+        caller_from(http_request),
+        32,
+        1,
+        0,
+        run_slide,
     )
 
 

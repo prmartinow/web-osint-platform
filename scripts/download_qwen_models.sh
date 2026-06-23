@@ -17,6 +17,10 @@ VL_MODEL="${WEB_OSINT_VL_EMBEDDING_MODEL:-Qwen/Qwen3-VL-Embedding-8B}"
 # trained lm_head, so a true instruct VLM is downloaded separately and served by
 # the same transformers route via QWEN_VL_GENERATIVE_MODEL_DIR.
 VL_GENERATIVE_MODEL="${WEB_OSINT_VL_GENERATIVE_MODEL:-Qwen/Qwen3-VL-8B-Instruct}"
+# Specialized reCAPTCHA tile classifier (YOLOv8n, 14 classes). Single ONNX file
+# from a public HF repo; downloaded via direct resolve URL, not the hf CLI.
+RECAPTCHA_MODEL_REPO="${WEB_OSINT_RECAPTCHA_MODEL_REPO:-DannyLuna/recaptcha-classification-57k}"
+RECAPTCHA_MODEL_FILE="${WEB_OSINT_RECAPTCHA_MODEL_FILE:-recaptcha_classification_57k.onnx}"
 
 mkdir -p "$MODELS_DIR" "$LOG_DIR" "$HF_HOME" "$HF_HUB_CACHE" "$HF_XET_CACHE"
 LOG_FILE="$LOG_DIR/qwen-model-downloads-$(date -u +%Y%m%dT%H%M%SZ).log"
@@ -93,10 +97,27 @@ download_model() {
   echo "[$(date -Is)] finished download command: $repo_id"
 }
 
+# Download a single file from a public HF repo via the resolve URL. The YOLO
+# reCAPTCHA classifier ships as one ONNX file (~113 MB), so fetching the whole
+# repo via `hf download` is wasteful. curl -L follows the CDN redirect.
+download_single_file() {
+  local repo_id="$1"
+  local file_name="$2"
+  local target_path="$3"
+  mkdir -p "$(dirname "$target_path")"
+  local url="https://huggingface.co/${repo_id}/resolve/main/${file_name}"
+  echo
+  echo "[$(date -Is)] starting download: $url -> $target_path"
+  curl -fSL --retry 3 --retry-delay 5 -o "$target_path" "$url"
+  echo "[$(date -Is)] finished download: $file_name ($(du -h "$target_path" | cut -f1))"
+}
+
 download_model "$TEXT_MODEL" "$MODELS_DIR/Qwen3-Embedding-8B"
 download_model "$RERANKER_MODEL" "$MODELS_DIR/Qwen3-Reranker-8B"
 download_model "$VL_MODEL" "$MODELS_DIR/Qwen3-VL-Embedding-8B"
 download_model "$VL_GENERATIVE_MODEL" "$MODELS_DIR/Qwen3-VL-8B-Instruct"
+download_single_file "$RECAPTCHA_MODEL_REPO" "$RECAPTCHA_MODEL_FILE" \
+  "$MODELS_DIR/recaptcha-yolov8n/$RECAPTCHA_MODEL_FILE"
 
 echo
 echo "[$(date -Is)] final model directory sizes"

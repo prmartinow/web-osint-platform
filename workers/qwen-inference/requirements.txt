@@ -1,0 +1,31 @@
+# Web OSINT Qwen local inference API — pinned dependencies.
+# Validated against Python 3.12 on a CPU-only host.
+#
+# torch CPU wheels live on a separate index; install with:
+#   pip install torch==2.8.0 torchvision==0.23.0 \
+#     --index-url https://download.pytorch.org/whl/cpu
+# then:
+#   pip install -r workers/qwen-inference/requirements.txt
+
+# Web framework
+fastapi==0.137.1
+uvicorn==0.49.0
+pydantic==2.13.4
+
+# Transformer stack (embeddings, reranker, generative VL)
+sentence-transformers==5.6.0
+transformers==5.12.1
+pillow==12.2.0
+numpy==2.4.4
+
+# Specialized CAPTCHA solvers
+# - ddddocr: text OCR + slider gap detection (ships bundled ONNX in the wheel)
+# - ultralytics + onnxruntime: YOLOv8n reCAPTCHA tile classifier
+# - opencv-python-headless: image preprocessing (headless to avoid GUI lib deps)
+ddddocr==1.6.1
+ultralytics==8.4.75
+onnxruntime==1.27.0
+opencv-python-headless==4.13.0.92
+
+# Redpanda consumer (used by the embedding worker that shares this venv)
+confluent-kafka==2.14.2

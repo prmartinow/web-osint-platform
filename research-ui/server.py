@@ -826,7 +826,17 @@ def apply_review_task_decisions(tasks):
     return visible
 
 
-def review_object_rows():
+def review_object_rows(project=""):
+    # When a project filter is supplied, scope each query at the SQL level via
+    # the evidence_events lookup so ClickHouse does the filtering instead of
+    # fetching up to 200 rows per table and filtering in Python. Falls back to
+    # the original unscoped query when no project is given (e.g. global inbox).
+    project_clause = ""
+    if project:
+        project_clause = (
+            f" AND source_evidence_id IN "
+            f"(SELECT evidence_id FROM evidence_events FINAL WHERE source_project = {sql_string(project)})"
+        )
     configs = [
         {
             "task_type": "fact_review",
@@ -945,7 +955,12 @@ def review_object_rows():
     ]
     object_rows = []
     for config in configs:
-        for row in ch_data(config["query"], fallback=[]):
+        query = config["query"]
+        if project_clause:
+            # Insert the project scope right before ORDER BY so it applies
+            # alongside the existing status filter.
+            query = query.replace(" ORDER BY ", f"{project_clause} ORDER BY ", 1)
+        for row in ch_data(query, fallback=[]):
             row["task_type"] = config["task_type"]
             row["object_type"] = config["object_type"]
             row["label"] = config["label"]
@@ -1013,7 +1028,7 @@ def inbox(params):
     for row in rows:
         tasks.extend(source_tasks_for_row(row))
 
-    object_rows = review_object_rows()
+    object_rows = review_object_rows(project)
     source_map = hydrate_source_rows([row.get("source_evidence_id") for row in object_rows])
     for object_row in object_rows:
         source_id = object_row.get("source_evidence_id") or ""
@@ -2074,6 +2089,15 @@ def evidence_ledger(params):
     if inspect.startswith("evidence:"):
         inspect = inspect.removeprefix("evidence:")
 
+    # When a project filter is supplied, scope each review-table query at the
+    # SQL level via the evidence_events lookup, so ClickHouse filters instead of
+    # fetching fetch_limit rows per table and filtering in Python afterwards.
+    project_filter = ""
+    if project:
+        project_filter = (
+            f" WHERE source_evidence_id IN "
+            f"(SELECT evidence_id FROM evidence_events FINAL WHERE source_project = {sql_string(project)})"
+        )
     selections = ch_data(
         f"""
         SELECT
@@ -2081,6 +2105,7 @@ def evidence_ledger(params):
           quote, context_before, context_after, source_anchor_json, status, note,
           actor, created_at, updated_at
         FROM evidence_selections FINAL
+        {project_filter}
         ORDER BY updated_at DESC
         LIMIT {fetch_limit}
         """,
@@ -2094,6 +2119,7 @@ def evidence_ledger(params):
           evidence_quote, source_anchor_json, status, note, actor, created_at,
           updated_at
         FROM proposed_facts FINAL
+        {project_filter}
         ORDER BY updated_at DESC
         LIMIT {fetch_limit}
         """,
@@ -2106,6 +2132,7 @@ def evidence_ledger(params):
           original_text, corrected_text, source_anchor_json, status, note,
           actor, created_at, updated_at
         FROM normalized_corrections FINAL
+        {project_filter}
         ORDER BY updated_at DESC
         LIMIT {fetch_limit}
         """,
@@ -2117,6 +2144,7 @@ def evidence_ledger(params):
           annotation_id, source_evidence_id, evidence_selection_id, annotation_type,
           body, status, source_anchor_json, actor, created_at, updated_at
         FROM review_annotations FINAL
+        {project_filter}
         ORDER BY updated_at DESC
         LIMIT {fetch_limit}
         """,
@@ -2129,12 +2157,14 @@ def evidence_ledger(params):
           claim_type, evidence_relation, qualifier_json, source_anchor_json,
           status, note, actor, created_at, updated_at
         FROM claim_records FINAL
+        {project_filter}
         ORDER BY updated_at DESC
         LIMIT {fetch_limit}
         """,
         fallback=[],
     )
-    recent = [decorate_source_row(row) for row in latest_source_rows("1 = 1", fetch_limit)]
+    recent_where = f"evidence_events.source_project = {sql_string(project)}" if project else "1 = 1"
+    recent = [decorate_source_row(row) for row in latest_source_rows(recent_where, fetch_limit)]
 
     source_ids = []
     for rows, key in (
@@ -3209,6 +3239,47 @@ def review_preview(row, events_by_subject, source_map):
     }
 
 
+def publication_check_rows(project=""):
+    """Lightweight publication-readiness checks for a single project.
+
+    Computes the same checks as publishing_read_model().get("checks") without
+    building the full bundle model or fanning out into home_summary() +
+    project_rows(). Used by reviews_read_model so /api/reviews does not pay the
+    publishing/home/projects cost on every call.
+    """
+    counts = review_counts()
+    coverage = {"gaps": 0}
+    # One cheap project row (no full project_rows fanout) for the check inputs.
+    project_row = {
+        "project_id": project or "",
+        "source_classes": 0,
+        "accepted_evidence": int(counts.get("selections") or 0),
+        "accepted_claims": int(counts.get("claim_records") or 0),
+        "publication_blockers": 0,
+    }
+    if project:
+        single = ch_data(
+            f"""
+            SELECT
+              source_project AS project_id,
+              uniqExact(evidence_id) AS sources,
+              countIf(source_kind IN ('x_post','x_account','x_page')) AS x_sources,
+              countIf(source_kind IN ('web_page','search_result','google_search_page')) AS web_sources,
+              countIf(source_kind = 'media') AS media_sources,
+              countIf(source_kind = 'user_input') AS manual_sources
+            FROM evidence_events
+            WHERE source_project = {sql_string(project)}
+            GROUP BY source_project
+            LIMIT 1
+            """,
+            fallback=[],
+        )
+        if single:
+            r = single[0]
+            project_row["source_classes"] = sum(1 for key in ("x_sources", "web_sources", "media_sources", "manual_sources") if int(r.get(key) or 0) > 0)
+    return publishing_checks_for_project(project_row, counts, coverage)
+
+
 def reviews_read_model(params):
     limit = sql_int(params.get("limit", ["120"])[0], 120)
     q = (params.get("q", [""])[0] or "").strip()
@@ -3222,8 +3293,11 @@ def reviews_read_model(params):
     if inspect.startswith("review:"):
         inspect = inspect.removeprefix("review:")
 
-    publication_checks = publishing_read_model({}).get("checks", [])
-    raw_rows = review_object_rows() + make_publication_review_rows(publication_checks)
+    # Compute publication readiness checks directly rather than calling
+    # publishing_read_model({}), which would build the full bundle model and
+    # fan out into home_summary() + project_rows() on every /api/reviews call.
+    publication_checks = publication_check_rows(project)
+    raw_rows = review_object_rows(project) + make_publication_review_rows(publication_checks)
     source_ids = [row.get("source_evidence_id") for row in raw_rows]
     source_map = hydrate_source_rows(source_ids)
     rows = [make_review_task_row(row, source_map) for row in raw_rows]
@@ -4903,7 +4977,11 @@ class ResearchUiHandler(BaseHTTPRequestHandler):
     def do_POST(self):
         parsed = urllib.parse.urlparse(self.path)
         try:
-            ensure_review_tables()
+            # Review tables are ensured once at startup (see main()). Running 7
+            # CREATE TABLE IF NOT EXISTS statements on every POST was pure
+            # overhead on the write path. If a table is missing, the insert
+            # surfaces a clean ClickHouse error (502) rather than silently
+            # re-creating here.
             payload = self.read_json_body()
             if parsed.path == "/api/review/events":
                 return self.send_json(create_generic_review_event(payload), status=201)

@@ -4553,7 +4553,7 @@ def create_evidence_selection(payload):
         "subject_type": "evidence_selection",
         "subject_id": selection_id,
         "selection_kind": compact_text(payload.get("selection_kind") or "text", 80),
-        "status": compact_text(payload.get("status") or "selected", 80),
+        "status": validate_status("evidence_selection", compact_text(payload.get("status") or "selected", 80), actor=compact_text(payload.get("actor") or REVIEW_ACTOR, 200), is_create=True),
         "quote": compact_text(payload.get("quote"), 50000),
         "context_before": compact_text(payload.get("context_before"), 10000),
         "context_after": compact_text(payload.get("context_after"), 10000),
@@ -4593,7 +4593,7 @@ def create_review_annotation(payload):
         "subject_type": "annotation",
         "subject_id": annotation_id,
         "annotation_type": compact_text(payload.get("annotation_type") or "note", 80),
-        "status": compact_text(payload.get("status") or "open", 80),
+        "status": validate_status("annotation", compact_text(payload.get("status") or "open", 80), actor=compact_text(payload.get("actor") or REVIEW_ACTOR, 200), is_create=True),
         "body": body,
         "created_at": payload.get("created_at") or now,
         "updated_at": now,
@@ -4633,7 +4633,7 @@ def create_proposed_fact(payload):
         "normalized_value": normalized_value,
         "unit": compact_text(payload.get("unit"), 120),
         "evidence_quote": compact_text(payload.get("evidence_quote") or payload.get("quote"), 50000),
-        "status": compact_text(payload.get("status") or "proposed", 80),
+        "status": validate_status("proposed_fact", compact_text(payload.get("status") or "proposed", 80), actor=compact_text(payload.get("actor") or REVIEW_ACTOR, 200), is_create=True),
         "note": compact_text(payload.get("note"), 20000),
         "created_at": payload.get("created_at") or now,
         "updated_at": now,
@@ -4677,7 +4677,7 @@ def create_normalized_correction(payload):
         "correction_kind": compact_text(payload.get("correction_kind") or "normalized_text", 120),
         "original_text": original_text,
         "corrected_text": corrected_text,
-        "status": compact_text(payload.get("status") or "proposed", 80),
+        "status": validate_status("normalized_correction", compact_text(payload.get("status") or "proposed", 80), actor=compact_text(payload.get("actor") or REVIEW_ACTOR, 200), is_create=True),
         "note": compact_text(payload.get("note"), 20000),
         "created_at": payload.get("created_at") or now,
         "updated_at": now,
@@ -4718,7 +4718,7 @@ def create_entity_link(payload):
         "entity_type": compact_text(payload.get("entity_type") or "topic", 120),
         "canonical_entity_id": canonical_entity_id,
         "canonical_name": canonical_name,
-        "status": compact_text(payload.get("status") or "proposed", 80),
+        "status": validate_status("entity_link", compact_text(payload.get("status") or "proposed", 80), actor=compact_text(payload.get("actor") or REVIEW_ACTOR, 200), is_create=True),
         "note": compact_text(payload.get("note"), 20000),
         "created_at": payload.get("created_at") or now,
         "updated_at": now,
@@ -4757,7 +4757,7 @@ def create_claim_record(payload):
         "claim_type": compact_text(payload.get("claim_type") or "general", 120),
         "evidence_relation": compact_text(payload.get("evidence_relation") or "supports", 80),
         "qualifier": payload.get("qualifier") if isinstance(payload.get("qualifier"), dict) else {},
-        "status": compact_text(payload.get("status") or "draft", 80),
+        "status": validate_status("claim_stub", compact_text(payload.get("status") or "draft", 80), actor=compact_text(payload.get("actor") or REVIEW_ACTOR, 200), is_create=True),
         "note": compact_text(payload.get("note"), 20000),
         "created_at": payload.get("created_at") or now,
         "updated_at": now,
@@ -4781,36 +4781,122 @@ def create_claim_record(payload):
     return {"event": event, "claim_record": normalized}
 
 
+# Actor kind follows the spec §28 `actor: "human" | "model_run" | "unknown"`
+# discriminated union. We classify by string prefix so the existing string column
+# carries provenance without a schema change:
+#   "human:..."  -> human   |  "model:..." / "worker:..."  -> model_run  |  else unknown
+MODEL_ACTOR_PREFIXES = ("model:", "worker:")
+
+# Object-lifecycle terminals: the human-curated end-states of the epistemic layer.
+# Per spec §14/§18/§25 and ARCHITECTURE.md, these are append-only — once an object
+# reaches one, it cannot be re-transitioned by a state mutation; reopening requires
+# a NEW review task/snapshot rather than rewriting history. Review-task decision
+# states (approved/changes_requested/deferred/assigned/open/...) are NOT terminals
+# — they are inherently revisable queue states.
+TERMINAL_STATUSES = {"accepted", "rejected", "superseded", "published"}
+
+# Human-curated terminals a model/worker actor may NOT create an observation in.
+# Spec §1: "a model observation cannot directly set a claim to accepted or canonical";
+# SOURCE_WORKBENCH impl plan: workers "must not bypass human review". Machine
+# observations must be born proposed/draft/open and reach a terminal only via a
+# human review event on /api/review-state.
+HUMAN_ONLY_STATUSES = {"accepted", "canonical", "matched", "published", "merged", "created"}
+
+# Observation-type objects: machine output that must pass human review before it
+# can become a curated assertion. (annotations are human-authored, so excluded.)
+MACHINE_OBSERVATION_TYPES = {"proposed_fact", "entity_link", "normalized_correction", "claim_stub"}
+
+
+def actor_kind(actor):
+    """Classify an actor string into the spec §28 union: human | model_run | unknown."""
+    if not actor:
+        return "unknown"
+    value = str(actor).strip().lower()
+    if value.startswith("human:"):
+        return "human"
+    if value.startswith(MODEL_ACTOR_PREFIXES):
+        return "model_run"
+    # Unprefixed actors (incl. the default REVIEW_ACTOR "web-osint-user") are
+    # treated as human — the historical convention before provenance prefixes.
+    return "human"
+
+
+def validate_status(subject_type, status, *, actor=None, is_create=False):
+    """Enforce the per-type status allow-list, the terminal-state guard
+    (update path), and the machine-origin guard (create path).
+
+    Raises ResearchUiError on any violation. Returns the validated status.
+    """
+    config = REVIEW_OBJECT_CONFIGS.get(subject_type)
+    if not config:
+        raise ResearchUiError(400, f"Unsupported subject_type: {subject_type}")
+    allowed = config.get("statuses")
+    if allowed and status not in allowed:
+        raise ResearchUiError(
+            400,
+            f"status {status!r} is not valid for {subject_type}; allowed: {sorted(allowed)}",
+        )
+    if is_create and subject_type in MACHINE_OBSERVATION_TYPES:
+        # spec §1: a model observation cannot be born in a human-curated terminal.
+        if status in HUMAN_ONLY_STATUSES and actor_kind(actor) == "model_run":
+            raise ResearchUiError(
+                403,
+                f"a model observation cannot be created as {status!r}; model output "
+                f"must be born proposed/draft/open and reach {status!r} only via a "
+                f"human review event (spec §1 epistemic layers)",
+            )
+    return status
+
+
+def assert_not_terminal_transition(subject_type, previous_status, next_status):
+    """Append-only history guard (update path). A terminal status cannot be left
+    by a state mutation; reopening requires a new task/snapshot rather than
+    rewriting history (spec §14/§18/§25)."""
+    if previous_status in TERMINAL_STATUSES and next_status != previous_status:
+        raise ResearchUiError(
+            409,
+            f"{subject_type} is in terminal state {previous_status!r} and cannot be "
+            f"re-transitioned to {next_status!r}; reopen it via a new review task "
+            f"or snapshot (history is append-only)",
+        )
+
+
 REVIEW_OBJECT_CONFIGS = {
     "evidence_selection": {
         "table": "evidence_selections",
         "id_column": "selection_id",
         "columns": ["selection_id", "source_evidence_id", "document_id", "block_id", "selection_kind", "quote", "context_before", "context_after", "source_anchor_json", "note", "status", "actor", "created_at", "updated_at"],
+        "statuses": {"selected", "accepted", "rejected", "needs_more_evidence", "superseded", "open", "review_linked", "archived", "approved", "changes_requested", "deferred", "assigned"},
     },
     "annotation": {
         "table": "review_annotations",
         "id_column": "annotation_id",
         "columns": ["annotation_id", "source_evidence_id", "evidence_selection_id", "annotation_type", "body", "status", "source_anchor_json", "actor", "created_at", "updated_at"],
+        "statuses": {"open", "accepted", "resolved", "rejected", "superseded", "approved", "changes_requested", "deferred", "assigned"},
     },
     "proposed_fact": {
         "table": "proposed_facts",
         "id_column": "proposed_fact_id",
         "columns": ["proposed_fact_id", "source_evidence_id", "evidence_selection_id", "fact_type", "field_path", "raw_value", "normalized_value", "unit", "entities_json", "evidence_quote", "source_anchor_json", "status", "note", "actor", "created_at", "updated_at"],
+        "statuses": {"proposed", "accepted", "rejected", "needs_more_evidence", "superseded", "open", "approved", "changes_requested", "deferred", "assigned", "under_review"},
     },
     "normalized_correction": {
         "table": "normalized_corrections",
         "id_column": "correction_id",
         "columns": ["correction_id", "source_evidence_id", "document_id", "block_id", "correction_kind", "original_text", "corrected_text", "source_anchor_json", "status", "note", "actor", "created_at", "updated_at"],
+        "statuses": {"proposed", "accepted", "rejected", "needs_more_evidence", "superseded", "open", "approved", "changes_requested", "deferred", "assigned", "under_review"},
     },
     "entity_link": {
         "table": "entity_links",
         "id_column": "entity_link_id",
         "columns": ["entity_link_id", "source_evidence_id", "evidence_selection_id", "mention_text", "entity_type", "canonical_entity_id", "canonical_name", "source_anchor_json", "status", "note", "actor", "created_at", "updated_at"],
+        "statuses": {"proposed", "matched", "created", "rejected", "merged", "canonical", "merge_review", "superseded", "open", "approved", "changes_requested", "deferred", "assigned", "under_review", "candidate"},
     },
     "claim_stub": {
         "table": "claim_records",
         "id_column": "claim_id",
         "columns": ["claim_id", "source_evidence_id", "evidence_selection_id", "claim_text", "claim_type", "evidence_relation", "qualifier_json", "source_anchor_json", "status", "note", "actor", "created_at", "updated_at"],
+        "statuses": {"draft", "proposed", "under_review", "accepted", "disputed", "rejected", "published", "superseded", "smoke_test", "open", "approved", "changes_requested", "deferred", "assigned", "needs_more_evidence"},
     },
 }
 
@@ -4843,11 +4929,14 @@ def update_review_state(payload):
         raise ResearchUiError(400, "status is required")
     config, current = fetch_review_object(subject_type, subject_id)
     previous_status = current.get("status") or ""
+    actor_value = compact_text(payload.get("actor") or REVIEW_ACTOR, 200)
+    validate_status(subject_type, status, actor=actor_value, is_create=False)
+    assert_not_terminal_transition(subject_type, previous_status, status)
     now = now_iso()
     updated = {column: current.get(column, "") for column in config["columns"]}
     updated["status"] = status
     updated["updated_at"] = now
-    updated["actor"] = compact_text(payload.get("actor") or REVIEW_ACTOR, 200)
+    updated["actor"] = actor_value
     note = compact_text(payload.get("note"), 20000)
     if note and "note" in updated:
         updated["note"] = note

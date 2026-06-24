@@ -4417,3 +4417,82 @@ pre {
 	    justify-items: start;
 	  }
 }
+
+/* === Phase 5: epistemic-layer visual distinction + status icons ===
+   Spec §1 (visually distinguish the 4 epistemic layers) + §2 (statuses MUST use
+   text and icons, not color alone). These rules layer on top of the existing
+   *-layer-stack and .status-badge/.pill blocks without restyling them. */
+
+/* The 5 epistemic layer-stacks share a common row shape: <div><span>label</span>
+   <strong>value</strong></div>. We accent each row by its epistemic role:
+   first row = captured source (immutable), middle = machine observation (derived,
+   the layer the spec says must stay non-canonical), last = human-curated / frozen
+   publication. Applied via a shared selector list so all five stacks line up. */
+.library-layer-stack div,
+.evidence-layer-stack div,
+.entity-layer-stack div,
+.claim-layer-stack div,
+.review-layer-stack div {
+  border-left: 3px solid var(--line);
+  padding-left: 10px;
+}
+.library-layer-stack div:first-child,
+.evidence-layer-stack div:first-child,
+.entity-layer-stack div:first-child,
+.claim-layer-stack div:first-child,
+.review-layer-stack div:first-child {
+  border-left-color: var(--accent);
+}
+.library-layer-stack div:first-child::before,
+.evidence-layer-stack div:first-child::before,
+.entity-layer-stack div:first-child::before,
+.claim-layer-stack div:first-child::before,
+.review-layer-stack div:first-child::before {
+  content: "\1F512\00A0"; /* locked padlock + nbsp — captured source is immutable */
+  font-size: 11px;
+}
+.library-layer-stack div:last-child,
+.evidence-layer-stack div:last-child,
+.entity-layer-stack div:last-child,
+.claim-layer-stack div:last-child,
+.review-layer-stack div:last-child {
+  border-left-color: var(--ok);
+}
+.library-layer-stack div:last-child::before,
+.evidence-layer-stack div:last-child::before,
+.entity-layer-stack div:last-child::before,
+.claim-layer-stack div:last-child::before,
+.review-layer-stack div:last-child::before {
+  content: "\2705\00A0"; /* check mark — human-curated / published layer */
+  font-size: 11px;
+}
+/* Middle rows (machine observation) get an amber accent + a gear glyph, making
+   the derived/non-canonical layer visually distinct from both immutable source
+   and curated output (spec §1 + Increment-2 gate "machine observations remain
+   visibly non-canonical"). */
+.library-layer-stack div:not(:first-child):not(:last-child),
+.evidence-layer-stack div:not(:first-child):not(:last-child),
+.entity-layer-stack div:not(:first-child):not(:last-child),
+.claim-layer-stack div:not(:first-child):not(:last-child),
+.review-layer-stack div:not(:first-child):not(:last-child) {
+  border-left-color: var(--warn);
+}
+.library-layer-stack div:not(:first-child):not(:last-child)::before,
+.evidence-layer-stack div:not(:first-child):not(:last-child)::before,
+.entity-layer-stack div:not(:first-child):not(:last-child)::before,
+.claim-layer-stack div:not(:first-child):not(:last-child)::before,
+.review-layer-stack div:not(:first-child):not(:last-child)::before {
+  content: "\2699\00A0"; /* gear — machine-derived observation */
+  font-size: 11px;
+}
+
+/* Status icons: never rely on color alone (spec §2). A ::before glyph keyed by
+   the existing modifier classes on .status-badge and .pill. */
+.status-badge.ok::before { content: "\2713\00A0"; }     /* check mark */
+.status-badge.warn::before { content: "\26A0\00A0"; }   /* warning sign */
+.status-badge.danger::before { content: "\2717\00A0"; } /* cross mark */
+.status-badge.info::before { content: "\2139\00A0"; }   /* info */
+.pill.ok::before { content: "\2713\00A0"; }
+.pill.warn::before { content: "\26A0\00A0"; }
+.pill.task-priority.high::before { content: "\26A0\00A0"; }
+.pill.task-priority.blocking::before { content: "\2717\00A0"; }

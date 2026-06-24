@@ -678,11 +678,19 @@ def hydrate_source_rows(source_ids):
             seen.add(source_id)
     if not unique_ids:
         return {}
-    quoted = ", ".join(sql_string(source_id) for source_id in unique_ids[:500])
-    rows = latest_source_rows(f"evidence_events.evidence_id IN ({quoted})", 500)
-    for row in rows:
-        decorate_source_row(row)
-    return {row.get("evidence_id"): row for row in rows}
+    # Hydrate in chunks of 500 rather than truncating at 500. The old behavior
+    # silently dropped hydration for any source beyond the 500th, which made
+    # ledgers show blank source blocks with no error or indication.
+    hydrated = {}
+    for start in range(0, len(unique_ids), 500):
+        batch = unique_ids[start:start + 500]
+        quoted = ", ".join(sql_string(source_id) for source_id in batch)
+        rows = latest_source_rows(f"evidence_events.evidence_id IN ({quoted})", len(batch))
+        for row in rows:
+            decorate_source_row(row)
+        for row in rows:
+            hydrated[row.get("evidence_id")] = row
+    return hydrated
 
 
 def decorate_source_row(row):
@@ -2565,17 +2573,25 @@ def claim_subject_value(row):
     claim_type = row.get("claim_type") or "general"
     subject = ""
     value = text
+    scoped = False
     if ":" in text:
         left, right = text.split(":", 1)
         subject = left.strip()
         value = right.strip()
+        scoped = bool(subject)
     elif " is " in text.lower():
         parts = text.split(" is ", 1)
         if len(parts) == 2:
             subject = parts[0].strip()
             value = parts[1].strip()
+            scoped = bool(subject)
     return {
-        "subject": subject or row.get("source_project") or "Unscoped subject",
+        # Only claims with an explicitly parsed subject participate in conflict
+        # clustering. Falling back to source_project/"Unscoped subject" for
+        # free-text claims collapses unrelated claims in the same project into
+        # one subject and manufactures false contradictions.
+        "subject": subject if scoped else "",
+        "subject_scoped": scoped,
         "property": claim_type,
         "value": value or text,
     }
@@ -2637,13 +2653,23 @@ def make_claim_row(row, source_map, proposition_counts, text_counts, evidence_by
     parts = claim_subject_value({**row, **source})
     qualifier = parse_raw_json(row.get("qualifier_json", ""))
     relation = row.get("evidence_relation") or ""
-    cluster_size = int(proposition_counts.get(claim_proposition_key(parts)) or 1)
+    # Unscoped claims must not be looked up under the empty-subject key (which
+    # would collapse them); they are counted under a unique key in claims_ledger.
+    if parts.get("subject_scoped"):
+        cluster_size = int(proposition_counts.get(claim_proposition_key(parts)) or 1)
+    else:
+        cluster_size = 1
     duplicate_count = int(text_counts.get((row.get("claim_text") or "").lower()) or 1)
     contradiction = claim_contradiction_state(row, cluster_size)
-    support_count = 1 if relation.lower() in ("supports", "supporting", "supports_claim") else 0
-    refute_count = 1 if relation.lower() in ("refutes", "contradicts") or contradiction == "disputed" else 0
-    context_count = 1 if relation.lower() in ("context", "related") else 0
-    evidence_count = support_count + refute_count + context_count + len(evidence_by_source.get(source_id, []))
+    # Aggregate support/refute/context from the linked evidence selections and
+    # proposed facts for this claim's source, instead of a per-row 0/1 constant.
+    linked_selections = evidence_by_source.get(source_id, [])
+    linked_facts = facts_by_source.get(source_id, [])
+    relation_lower = relation.lower()
+    support_count = sum(1 for sel in linked_selections if str(sel.get("selection_kind") or "").lower() in ("quote", "text", "support", "supports")) + (1 if relation_lower in ("supports", "supporting", "supports_claim") else 0)
+    refute_count = sum(1 for sel in linked_selections if str(sel.get("selection_kind") or "").lower() in ("refute", "refutes", "contradict")) + (1 if relation_lower in ("refutes", "contradicts") or contradiction == "disputed" else 0)
+    context_count = sum(1 for sel in linked_selections if str(sel.get("selection_kind") or "").lower() in ("context", "related")) + (1 if relation_lower in ("context", "related") else 0)
+    evidence_count = support_count + refute_count + context_count + len(linked_facts)
     return {
         **source,
         "claim_row_id": f"claim:{row.get('claim_id')}",
@@ -2651,7 +2677,8 @@ def make_claim_row(row, source_map, proposition_counts, text_counts, evidence_by
         "object_type": "claim_stub",
         "object_id": row.get("claim_id") or "",
         "claim_text": row.get("claim_text") or "",
-        "subject": parts["subject"],
+        "subject": parts["subject"] if parts.get("subject_scoped") else "(unscoped)",
+        "subject_scoped": bool(parts.get("subject_scoped")),
         "property": parts["property"],
         "value": parts["value"],
         "qualifier": qualifier,
@@ -2687,6 +2714,11 @@ def make_claim_cluster_rows(claim_rows):
     by_proposition = {}
     by_text = {}
     for row in claim_rows:
+        # Only scoped claims (explicit subject) can form a conflict cluster.
+        # Unscoped free-text claims are excluded so unrelated assertions do not
+        # get manufactured into contradictions.
+        if not row.get("subject_scoped"):
+            continue
         proposition_key = "|".join([
             str(row.get("subject") or "").lower(),
             str(row.get("property") or row.get("claim_type") or "general").lower(),
@@ -2871,7 +2903,13 @@ def claims_ledger(params):
     for claim in claims:
         source = source_for_ledger_row(source_map, claim.get("source_evidence_id") or "")
         parts = claim_subject_value({**claim, **source})
-        proposition_key = claim_proposition_key(parts)
+        # Only scoped claims (explicit "subject: value" or "subject is value")
+        # participate in conflict clustering. Unscoped free-text claims get a
+        # unique key so they never collapse into false conflicts.
+        if parts.get("subject_scoped"):
+            proposition_key = claim_proposition_key(parts)
+        else:
+            proposition_key = f"__unscoped__{claim.get('claim_id') or id(claim)}"
         text_key = (claim.get("claim_text") or "").lower()
         proposition_groups.setdefault(proposition_key, []).append({**claim, **parts})
         text_counts[text_key] = text_counts.get(text_key, 0) + 1

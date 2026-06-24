@@ -95,6 +95,16 @@ function safeUrl(value) {
   return SAFE_URL_SCHEMES.test(raw) ? raw : '#';
 }
 
+// Build a stable idempotency key per logical mutation. A retry of the exact
+// same action (same object + action + current status) produces the same key,
+// so the backend can dedupe a double-submit; a genuine new action (e.g. a
+// status change) changes the current status and gets a fresh key. Using
+// Date.now() here defeated server-side dedup because every click minted a
+// unique key.
+function idempotencyKey(...parts) {
+  return parts.map((p) => String(p ?? '')).join(':');
+}
+
 function cssEscape(value) {
   if (window.CSS?.escape) return CSS.escape(value);
   return String(value ?? '').replace(/["\\]/g, '\\$&');
@@ -950,7 +960,7 @@ function projectBriefPayload(row) {
     project_id: row.project_id || '',
     project_name: row.name || row.project_id || '(unassigned)',
     expected_version: state.activeProjectBriefVersion || row.brief?.version || '',
-    idempotency_key: `project-brief-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+    idempotency_key: idempotencyKey('project-brief', row.project_id || '', state.activeProjectBriefVersion || row.brief?.version || ''),
     research_question: document.querySelector('[data-brief-field="research_question"]')?.value || '',
     decision_supported: document.querySelector('[data-brief-field="decision_supported"]')?.value || '',
     scope: {
@@ -978,17 +988,40 @@ function setProjectBriefStatus(text, mode = '') {
 function scheduleProjectBriefSave(row) {
   setProjectBriefStatus('Saving...', 'warn');
   clearTimeout(window.__projectBriefSaveTimer);
-  window.__projectBriefSaveTimer = setTimeout(() => saveProjectBrief(row), 850);
+  window.__projectBriefSaveTimer = setTimeout(() => serializedSaveProjectBrief(row), 850);
+}
+
+// Serialize brief saves so overlapping autosaves cannot clobber each other or
+// write version state from a stale row. A second save while one is in flight
+// is queued and runs after the first resolves, always re-reading the form.
+window.__projectBriefSaveInFlight = null;
+async function serializedSaveProjectBrief(row) {
+  while (window.__projectBriefSaveInFlight) {
+    try { await window.__projectBriefSaveInFlight; } catch (_) { /* handled below */ }
+  }
+  const promise = saveProjectBrief(row);
+  window.__projectBriefSaveInFlight = promise;
+  try {
+    await promise;
+  } finally {
+    if (window.__projectBriefSaveInFlight === promise) window.__projectBriefSaveInFlight = null;
+  }
 }
 
 async function saveProjectBrief(row) {
   try {
     const result = await postJson('/api/project-brief', projectBriefPayload(row));
+    // Only apply version/display state if this row is still the active project
+    // by the time the save resolves; the user may have switched projects.
+    if (row && state.project && row.project_id !== state.project) {
+      setProjectBriefStatus('Saved (project switched since edit)', 'warn');
+      return;
+    }
     row.brief = result.brief;
     state.activeProjectBriefVersion = result.brief.version;
-    $('projectBriefVersion').textContent = `v${result.brief.version}`;
-    $('projectBriefMaterialChanges').textContent = result.brief.material_changes_since_review ?? 0;
-    $('projectBriefReviewState').textContent = titleCase(result.brief.review_state || 'draft');
+    if ($('projectBriefVersion')) $('projectBriefVersion').textContent = `v${result.brief.version}`;
+    if ($('projectBriefMaterialChanges')) $('projectBriefMaterialChanges').textContent = result.brief.material_changes_since_review ?? 0;
+    if ($('projectBriefReviewState')) $('projectBriefReviewState').textContent = titleCase(result.brief.review_state || 'draft');
     setProjectBriefStatus('Saved just now', 'ok');
   } catch (error) {
     setProjectBriefStatus(error.message, 'danger');
@@ -1630,7 +1663,7 @@ async function applyLibraryAction(action) {
       project: state.project || '',
       target_project: state.project || '',
       note: `Library ${action} from Source Library page`,
-      idempotency_key: `library-${action}-${Date.now()}`,
+      idempotency_key: idempotencyKey('library', action, ids.slice().sort().join(',')),
     });
     if (status) status.textContent = `${titleCase(action)} recorded for ${ids.length} source${ids.length === 1 ? '' : 's'}.`;
     await loadRoutePage();
@@ -1970,7 +2003,7 @@ async function persistEvidenceAction(row, action, note = '') {
       status: evidenceReviewStatusForAction(row, action),
       note,
       source_anchor: evidenceAnchorForRow(row, action),
-      idempotency_key: `${evidenceRowKey(row)}:${action}:${Date.now()}`,
+      idempotency_key: idempotencyKey(evidenceRowKey(row), action, row.review_state || row.status || ''),
     });
     return;
   }
@@ -1986,7 +2019,7 @@ async function persistEvidenceAction(row, action, note = '') {
     status: previewDecisionForAction(action),
     note,
     source_anchor: evidenceAnchorForRow(row, action),
-    idempotency_key: `${evidenceRowKey(row)}:${action}:${Date.now()}`,
+    idempotency_key: idempotencyKey(evidenceRowKey(row), action, row.review_state || row.status || ''),
   });
 }
 
@@ -2451,7 +2484,7 @@ async function persistEntityAction(row, action, note = '') {
       status: entityStatusForAction(row, action),
       note,
       source_anchor: entityAnchorForRow(row, action),
-      idempotency_key: `${entityRowKey(row)}:${action}:${Date.now()}`,
+      idempotency_key: idempotencyKey(entityRowKey(row), action, row.review_state || row.status || ''),
     });
     return;
   }
@@ -2466,7 +2499,7 @@ async function persistEntityAction(row, action, note = '') {
     status: entityStatusForAction(row, action),
     note,
     source_anchor: entityAnchorForRow(row, action),
-    idempotency_key: `${entityRowKey(row)}:${action}:${Date.now()}`,
+    idempotency_key: idempotencyKey(entityRowKey(row), action, row.review_state || row.status || ''),
   });
 }
 
@@ -2975,7 +3008,7 @@ async function persistClaimAction(row, action, note = '') {
       status: claimStatusForAction(row, action),
       note,
       source_anchor: claimAnchorForRow(row, action),
-      idempotency_key: `${claimRowKey(row)}:${action}:${Date.now()}`,
+      idempotency_key: idempotencyKey(claimRowKey(row), action, row.review_state || row.status || ''),
     });
     return;
   }
@@ -2990,7 +3023,7 @@ async function persistClaimAction(row, action, note = '') {
     status: claimStatusForAction(row, action),
     note,
     source_anchor: claimAnchorForRow(row, action),
-    idempotency_key: `${claimRowKey(row)}:${action}:${Date.now()}`,
+    idempotency_key: idempotencyKey(claimRowKey(row), action, row.review_state || row.status || ''),
   });
 }
 
@@ -3496,7 +3529,7 @@ async function persistReviewAction(row, action, note = '') {
       status: reviewStatusForAction(row, action),
       note,
       source_anchor: reviewAnchorForRow(row, action),
-      idempotency_key: `${reviewTaskKey(row)}:${action}:${Date.now()}`,
+      idempotency_key: idempotencyKey(reviewTaskKey(row), action, row.review_state || row.status || row.decision_state || ''),
     });
     return;
   }
@@ -3511,7 +3544,7 @@ async function persistReviewAction(row, action, note = '') {
     status: reviewStatusForAction(row, action),
     note,
     source_anchor: reviewAnchorForRow(row, action),
-    idempotency_key: `${reviewTaskKey(row)}:${action}:${Date.now()}`,
+    idempotency_key: idempotencyKey(reviewTaskKey(row), action, row.review_state || row.status || row.decision_state || ''),
   });
 }
 
@@ -3904,7 +3937,7 @@ async function persistPublishingAction(row, action) {
       manifest_hash: row.manifest_hash || '',
       optimistic_version: row.optimistic_version || '',
     },
-    idempotency_key: `${publishingBundleKey(row)}:${action}:${Date.now()}`,
+    idempotency_key: idempotencyKey(publishingBundleKey(row), action, row.display_state || row.release_state || ''),
   });
 }
 
@@ -4432,7 +4465,7 @@ async function applyTaxonomyAction(row, action) {
       vocabulary: row.vocabulary,
       term: row.term,
     },
-    idempotency_key: `taxonomy-${action}-${taxonomyRecordKey(row)}-${Date.now()}`,
+    idempotency_key: idempotencyKey('taxonomy', action, taxonomyRecordKey(row), row.review_state || ''),
   };
   const status = $('taxonomyActionStatus');
   if (status) status.textContent = 'Recording action...';
@@ -4970,7 +5003,7 @@ async function persistInboxDecision(row, action, note = '') {
       assignee: 'web-osint-user',
       note,
       source_anchor: sourceAnchorForTask(row),
-      idempotency_key: `${row.task_id || taskKeyFor(row)}:assigned:${Date.now()}`,
+      idempotency_key: idempotencyKey(row.task_id || taskKeyFor(row), 'assigned', row.status || row.task_state || ''),
     });
     return;
   }
@@ -4984,7 +5017,7 @@ async function persistInboxDecision(row, action, note = '') {
       status: reviewStatusForPreviewAction(row, action),
       note,
       source_anchor: sourceAnchorForTask(row),
-      idempotency_key: `${row.task_id || taskKeyFor(row)}:${decision}:${Date.now()}`,
+      idempotency_key: idempotencyKey(row.task_id || taskKeyFor(row), decision, row.status || row.task_state || ''),
     });
     return;
   }
@@ -5002,7 +5035,7 @@ async function persistInboxDecision(row, action, note = '') {
     status: decision,
     note,
     source_anchor: sourceAnchorForTask(row),
-    idempotency_key: `${row.task_id || taskKeyFor(row)}:${decision}:${Date.now()}`,
+    idempotency_key: idempotencyKey(row.task_id || taskKeyFor(row), decision, row.status || row.task_state || ''),
   });
 }
 

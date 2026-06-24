@@ -2022,6 +2022,8 @@ async function persistEvidenceAction(row, action, note = '') {
       project: row.source_project || state.project || '',
       subject_type: row.object_type || '',
       subject_id: row.object_id || '',
+      actor: REVIEW_UI_ACTOR,
+      expected_version: expectedVersionForRow(row),
       status: evidenceReviewStatusForAction(row, action),
       note,
       source_anchor: evidenceAnchorForRow(row, action),
@@ -2503,6 +2505,8 @@ async function persistEntityAction(row, action, note = '') {
       project: row.source_project || state.project || '',
       subject_type: 'entity_link',
       subject_id: row.object_id,
+      actor: REVIEW_UI_ACTOR,
+      expected_version: expectedVersionForRow(row),
       status: entityStatusForAction(row, action),
       note,
       source_anchor: entityAnchorForRow(row, action),
@@ -3027,6 +3031,8 @@ async function persistClaimAction(row, action, note = '') {
       project: row.source_project || state.project || '',
       subject_type: 'claim_stub',
       subject_id: row.object_id,
+      actor: REVIEW_UI_ACTOR,
+      expected_version: expectedVersionForRow(row),
       status: claimStatusForAction(row, action),
       note,
       source_anchor: claimAnchorForRow(row, action),
@@ -3497,6 +3503,21 @@ function renderReviewsPage(data) {
   bindReviewPage(data);
 }
 
+// Every UI-initiated mutation carries an explicit human actor (spec §28
+// actor union). The Phase 2 machine-origin guard treats model:/worker: prefixes
+// as model_run; the UI is always the human surface.
+const REVIEW_UI_ACTOR = 'human:web-osint-user';
+
+// Optimistic-concurrency token (spec §31) echoed back to /api/review-state.
+// The server compares this to the object's updated_at. Reads from the row's
+// optimistic_version first (review-task / publishing rows surface it), then
+// falls back to updated_at. Empty string -> no OCC check (server treats absent
+// expected_version as optional, so legacy rows still work).
+function expectedVersionForRow(row) {
+  if (!row) return '';
+  return String(row.optimistic_version || row.updated_at || row.version || '');
+}
+
 function reviewStatusForAction(row, action) {
   if (action === 'approve') return 'approved';
   if (action === 'reject') return 'rejected';
@@ -3548,6 +3569,8 @@ async function persistReviewAction(row, action, note = '') {
       project: row.source_project || state.project || '',
       subject_type: row.object_type || '',
       subject_id: row.object_id || '',
+      actor: REVIEW_UI_ACTOR,
+      expected_version: expectedVersionForRow(row),
       status: reviewStatusForAction(row, action),
       note,
       source_anchor: reviewAnchorForRow(row, action),
@@ -5041,6 +5064,8 @@ async function persistInboxDecision(row, action, note = '') {
       project: row.source_project || '',
       subject_type: row.object_type,
       subject_id: row.object_id,
+      actor: REVIEW_UI_ACTOR,
+      expected_version: expectedVersionForRow(row),
       status: reviewStatusForPreviewAction(row, action),
       note,
       source_anchor: sourceAnchorForTask(row),
@@ -5996,6 +6021,7 @@ function wireReviewEvents(source, attachedSelection) {
           project: source.latest?.source_project || '',
           subject_type: subjectType,
           subject_id: subjectId,
+          actor: REVIEW_UI_ACTOR,
           status: statusSelect?.value || '',
           note: noteInput?.value || '',
         });

@@ -382,6 +382,9 @@ function replaceRouteHash() {
 function sourceKindForCoverage(key) {
   if (key === 'x') return 'x_post';
   if (key === 'web') return 'web_page';
+  // The "papers" column historically counted user_input (manual research
+  // notes/docs), not arXiv-style papers. The header is labeled "Notes/docs"
+  // to reflect that honestly; the key stays "papers" for data compatibility.
   if (key === 'papers') return 'user_input';
   if (key === 'media') return 'media';
   return '';
@@ -642,7 +645,7 @@ function renderHome(data) {
   $('coverageGapCount').textContent = `${coverage.gaps || 0} gaps`;
   $('coverageMatrix').innerHTML = coverageRows.length ? `
     <table>
-      <thead><tr><th>Where the current brief is strong and where it needs more sources</th><th>X/social</th><th>Web</th><th>Papers/docs</th><th>Media</th></tr></thead>
+      <thead><tr><th>Where the current brief is strong and where it needs more sources</th><th>X/social</th><th>Web</th><th>Notes/docs</th><th>Media</th></tr></thead>
       <tbody>${coverageRows.map((row) => `
         <tr>
           <td>${escapeHtml(row.topic)}</td>
@@ -728,7 +731,11 @@ function renderHome(data) {
 
 async function loadHome() {
   try {
-    renderHome(await fetchJson('/api/home'));
+    // Thread the active project so the backend sources the research brief
+    // (question, scope, open questions) for the project the analyst is in,
+    // rather than returning a fixed hardcoded brief.
+    const homePath = state.project ? `/api/home?project=${encodeURIComponent(state.project)}` : '/api/home';
+    renderHome(await fetchJson(homePath));
   } catch (error) {
     $('homeUpdated').textContent = `Home summary error: ${error.message}`;
   }
@@ -3853,14 +3860,30 @@ function renderPublishingPreview(data) {
       </article>
     </section>
     <div id="publishingActionStatus" class="review-status muted"></div>
-    <div class="review-preview-actions publishing-actions">
-      <button class="secondary" data-publishing-action="open_package">Open package</button>
-      <button class="secondary" data-publishing-action="run_checks">Run checks</button>
-      <button class="secondary" data-publishing-action="focus_blockers">Resolve blockers</button>
-      <button class="secondary" data-publishing-action="create_snapshot">Create snapshot</button>
-      <button data-publishing-action="request_review">Request review</button>
-    </div>
+    ${renderPublishingActions(preview.row)}
   `;
+}
+
+// Publishing is a preview surface: snapshot/approve/publish are disabled until
+// a snapshot store exists. Drive enabled/disabled from the backend's
+// permitted_actions / disabled_actions so the UI never offers a button that
+// only logs an event without doing the real work.
+function renderPublishingActions(row) {
+  const permitted = row?.permitted_actions || ['open_package', 'run_checks', 'focus_blockers'];
+  const disabled = row?.disabled_actions || ['create_snapshot', 'request_review', 'create_handoff', 'publish_snapshot', 'supersede_release'];
+  const labelFor = (action) => ({
+    open_package: 'Open package', run_checks: 'Run checks', focus_blockers: 'Resolve blockers',
+    create_snapshot: 'Create snapshot', request_review: 'Request review',
+    create_handoff: 'Create handoff', publish_snapshot: 'Publish snapshot', supersede_release: 'Supersede release',
+    new_package: 'New package', create_from_draft: 'Create from draft', published_releases: 'Published releases',
+  })[action] || action;
+  const all = [...new Set([...permitted, ...disabled])];
+  return `<div class="review-preview-actions publishing-actions">
+    ${all.map((action) => {
+      const isDisabled = disabled.includes(action) && !permitted.includes(action);
+      return `<button class="secondary" data-publishing-action="${escapeHtml(action)}" ${isDisabled ? 'disabled title="Not implemented yet — publication is a preview surface"' : ''}>${escapeHtml(labelFor(action))}</button>`;
+    }).join('')}
+  </div>`;
 }
 
 async function persistPublishingAction(row, action) {
@@ -3934,6 +3957,7 @@ function bindPublishingPage(data) {
   });
   document.querySelectorAll('[data-publishing-action]').forEach((button) => {
     button.addEventListener('click', async () => {
+      if (button.disabled) return;
       const row = (data.bundles || []).find((item) => publishingBundleKey(item) === state.publishingSelectedId) || data.preview?.row;
       const status = $('publishingActionStatus');
       try {
@@ -3959,16 +3983,17 @@ function renderPublishingPage(data) {
       <div>
         <span class="breadcrumb">Research UI / Publication preparation</span>
         <div class="title-action-group">
-          <span class="status-badge ok">versioned handoff</span>
+          <span class="status-badge warn">preview — snapshot & publish not implemented</span>
           <span class="status-badge danger">${escapeHtml(summary.blocked || 0)} blocking checks</span>
         </div>
         <h1>Publishing</h1>
         <p>Assemble reviewed claims and exact source citations into frozen, reusable publication packages.</p>
+        <p class="muted">Readiness checks are derived from review-object counts. Snapshot creation, approval, and release are placeholders pending a snapshot store; those actions are disabled.</p>
       </div>
       <div class="page-actions">
-        <button class="secondary" data-publishing-action="published_releases">Published releases</button>
-        <button class="secondary" data-publishing-action="create_from_draft">Create from draft</button>
-        <button data-publishing-action="new_package">New package</button>
+        <button class="secondary" data-publishing-action="published_releases" disabled title="Not implemented yet">Published releases</button>
+        <button class="secondary" data-publishing-action="create_from_draft" disabled title="Not implemented yet">Create from draft</button>
+        <button data-publishing-action="new_package" disabled title="Not implemented yet">New package</button>
       </div>
     </header>
     <section class="operation-search-card">

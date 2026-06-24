@@ -1353,8 +1353,16 @@ def project_rows(params=None):
             row["phase"] = "capture triage"
         row["owner"] = REVIEW_ACTOR
         row["visibility"] = "internal"
-        row["question"] = "Collect and validate source-linked evidence"
-        row["scope"] = "Captured sources, normalized artifacts, evidence selections, claims, review queues, and publication readiness."
+        # Surface the real brief question/scope per project instead of the same
+        # fixed string for every project. The brief is read on the next line.
+        brief_for_row = read_project_brief(row.get("project_id") or "", row.get("name") or "", row)
+        row["question"] = brief_for_row.get("research_question") or "Collect and validate source-linked evidence"
+        scope_obj = brief_for_row.get("scope") or {}
+        row["scope"] = "; ".join(part for part in (
+            scope_obj.get("time_window"),
+            scope_obj.get("geography"),
+            scope_obj.get("population"),
+        ) if part) or "Captured sources, normalized artifacts, and review queues."
         row["accepted_evidence"] = int(evidence_review.get("accepted_evidence") or 0)
         row["proposed_evidence"] = int(evidence_review.get("proposed_evidence") or 0)
         row["accepted_claims"] = int(claim_review.get("accepted_claims") or 0)
@@ -1367,7 +1375,7 @@ def project_rows(params=None):
         row["publication_blockers"] = diversity_gaps + review_blockers
         row["source_classes"] = source_classes
         row["completion_percent"] = completion_percent
-        row["brief"] = read_project_brief(row.get("project_id") or "", row.get("name") or "", row)
+        row["brief"] = brief_for_row
         row["source_targets"] = project_source_targets(row)
         row["coverage_targets"] = project_coverage_targets(row)
         row["blockers"] = project_blockers(row)
@@ -3300,7 +3308,7 @@ def publishing_checks_for_project(row, counts, coverage):
             "id": "snapshot",
             "label": "Frozen publication snapshot exists",
             "state": "not_started",
-            "detail": "Create a frozen snapshot only after blockers are resolved.",
+            "detail": "Snapshot/approval storage is not implemented yet; publication is a preview.",
         },
     ]
 
@@ -3357,7 +3365,14 @@ def make_publication_bundle_row(row, counts, coverage, package_type="research_pa
         "owner": REVIEW_ACTOR,
         "due_at": "",
         "updated_at": row.get("last_activity") or now_iso(),
-        "permitted_actions": ["open_package", "run_checks", "focus_blockers", "create_snapshot", "request_review", "create_handoff", "publish_snapshot", "supersede_release"],
+        # Publication is a preview: the readiness checks are derived heuristics
+        # (row counts, not real gating), and there is no snapshot/approval table
+        # yet, so create_snapshot/publish_snapshot only log review events. The
+        # view-only and blocker-focus actions are safe; the mutating snapshot
+        # actions are disabled until a snapshot store exists.
+        "implementation_state": "preview",
+        "permitted_actions": ["open_package", "run_checks", "focus_blockers"],
+        "disabled_actions": ["create_snapshot", "request_review", "create_handoff", "publish_snapshot", "supersede_release"],
         "optimistic_version": digest[:16],
         "checks": checks,
         "history": [
@@ -3697,25 +3712,12 @@ def taxonomy_read_model(params):
             definition="Machine-suggested label for sources describing unusually large context windows; may be a qualitative topic rather than a measurable property.",
             path="Model facets / Capabilities / Context and memory",
             review_state="proposed",
-            row_kind="proposal",
+            row_kind="illustrative",
             aliases=["long context", "extended context", "large-context support", "1M-token capability"],
-            usage={"observations": 27, "evidence": 3, "projects": 6, "packages": 4},
+            usage={},
             owner=REVIEW_ACTOR,
-            priority="high",
+            priority="normal",
             stable_id="TAX-PROP-4092",
-            mapping_candidates=[
-                {"term": "Context window", "stable_id": "claim_properties.context_window", "relation": "narrower_or_related", "confidence": 0.86},
-                {"term": "Capability", "stable_id": "claim_properties.capability", "relation": "related", "confidence": 0.63},
-                {"term": "Topic: context and memory", "stable_id": "topics.context_memory", "relation": "topic_parent", "confidence": 0.58},
-            ],
-            impacts=[
-                {"label": "Publication packages", "count": 4, "state": "blocking", "detail": "Comparison tables should not publish this as a stable metric until mapped."},
-                {"label": "Claim extraction rules", "count": 9, "state": "review", "detail": "Qualitative capability terms need qualifiers."},
-            ],
-            anchors=[
-                {"source_kind": "x_post", "label": "Observed in model launch posts", "count": 11},
-                {"source_kind": "web_page", "label": "Observed in release blogs", "count": 8},
-            ],
             policy={"publication_safe": False, "required_qualifier": "model/provider version", "decision_rule": "Map to context_window if numeric tokens are present; otherwise keep as topic/capability."},
         ),
         taxonomy_row(
@@ -3724,14 +3726,13 @@ def taxonomy_read_model(params):
             vocabulary_label="Topic hierarchy",
             definition="Ambiguous industry term used for capability-leading models, closed flagship models, and models above a compute or benchmark threshold.",
             path="Topics / Model positioning",
-            review_state="mapping_conflict",
-            row_kind="conflict",
+            review_state="proposed",
+            row_kind="illustrative",
             aliases=["frontier AI model", "state-of-the-art model", "flagship model"],
-            usage={"observations": 66, "evidence": 8, "projects": 9, "packages": 2},
+            usage={},
             owner=REVIEW_ACTOR,
-            priority="high",
+            priority="normal",
             stable_id="topic.model.frontier",
-            impacts=[{"label": "Definition conflict", "count": 3, "state": "blocking", "detail": "Requires scoped definition before publication use."}],
         ),
         taxonomy_row(
             term="vendor-reported",
@@ -3739,10 +3740,10 @@ def taxonomy_read_model(params):
             vocabulary_label="Benchmark facets",
             definition="Benchmark result reported by the vendor or model author without independent reproduction by this research workspace.",
             path="Benchmark facets / Result provenance",
-            review_state="deprecated",
-            row_kind="deprecated_term",
+            review_state="proposed",
+            row_kind="illustrative",
             aliases=["vendor reported", "author reported"],
-            usage={"claims": 12, "evidence": 18, "packages": 1},
+            usage={},
             stable_id="benchmark.result.vendor_reported",
             policy={"replacement": "benchmark.result.author_reported", "publication_safe": False},
         ),
@@ -3803,7 +3804,6 @@ def taxonomy_read_model(params):
     rows.sort(key=lambda row: (
         0 if row.get("review_state") == "proposed" else 1 if row.get("review_state") == "mapping_conflict" else 2,
         priority_rank.get(row.get("priority") or "normal", 1),
-        0 if row.get("stable_id") == "TAX-PROP-4092" else 1,
         -int(row.get("usage_total") or 0),
         str(row.get("term") or ""),
     ))
@@ -3849,10 +3849,10 @@ def taxonomy_read_model(params):
         "hierarchy": [
             {"id": "model_facets", "label": "Model facets", "depth": 0, "count": 2},
             {"id": "model_facets.capabilities", "label": "Capabilities", "depth": 1, "count": 2},
-            {"id": "model_facets.context_memory", "label": "Context and memory", "depth": 2, "count": 2, "active": True},
+            {"id": "model_facets.context_memory", "label": "Context and memory", "depth": 2, "count": 0},
             {"id": "claim_properties.context_window", "label": "Context window", "depth": 3, "count": taxonomy_usage_count(claim_types, "context_window"), "leaf": True},
-            {"id": "TAX-PROP-4092", "label": "Long-context capability", "depth": 3, "count": 27, "leaf": True},
-            {"id": "benchmark_facets", "label": "Benchmark facets", "depth": 0, "count": 2},
+            {"id": "TAX-PROP-4092", "label": "Long-context capability", "depth": 3, "count": 0, "leaf": True},
+            {"id": "benchmark_facets", "label": "Benchmark facets", "depth": 0, "count": 0},
             {"id": "entity_types", "label": "Entity categories", "depth": 0, "count": len(core["entity_types"])},
         ],
         "facets": {
@@ -3864,8 +3864,10 @@ def taxonomy_read_model(params):
         "rows": visible,
         "preview": taxonomy_preview(selected),
         "selection": {"selected_record_ids": [], "compatible_actions": ["promote", "map", "merge", "add_alias", "deprecate", "assign_review", "export"]},
-        "active_release": {"id": "taxonomy-v27", "label": "Version 27", "state": "active", "published_at": ""},
-        "draft_release": {"id": "taxonomy-v28", "label": "Version 28 draft", "state": "draft", "changed_terms": sum(1 for row in rows if row.get("review_state") != "accepted")},
+        # No taxonomy-version table exists yet; report honestly that there is
+        # no published or draft release rather than fabricating version numbers.
+        "active_release": {"id": "", "label": "No active release", "state": "none", "published_at": ""},
+        "draft_release": {"id": "", "label": "No draft", "state": "none", "changed_terms": 0},
         "permissions": ["review", "promote", "map", "merge", "deprecate", "export"],
         "generated_at": now_iso(),
         "stale": False,
@@ -3884,7 +3886,9 @@ def percent(part, total):
     return max(0, min(100, round((part / total) * 100)))
 
 
-def home_summary():
+def home_summary(params=None):
+    params = params or {}
+    requested_project = (params.get("project", [""])[0] or "").strip()
     totals = ch_data(
         """
         SELECT
@@ -3976,16 +3980,79 @@ def home_summary():
         {"label": "Contradictions", "count": claim_records, "hint": "claim checks"},
         {"label": "Assigned reviews", "count": int(review_counts.get("review_events") or 0), "hint": "decision work"},
     ]
+    # Resolve the active project from real data: the requested project if the
+    # caller named one, else the project with the most recent activity. Source
+    # the brief fields (name, question, scope, open questions) from the real,
+    # file-backed project brief instead of hardcoding them.
+    project_data = project_rows({"project": [requested_project]} if requested_project else {})
+    project_list = project_data.get("rows", [])
+    active_row = None
+    if requested_project:
+        active_row = next((r for r in project_list if (r.get("project_id") or "") == requested_project), None)
+    if active_row is None:
+        active_row = project_list[0] if project_list else None
+    active_brief = (active_row or {}).get("brief") or {}
+    project_id = (active_row or {}).get("project_id") or ""
+    project_name = (active_row or {}).get("name") or "(no project)"
+    project_description = (active_row or {}).get("scope") or active_brief.get("decision_supported") or ""
+    project_completion = int((active_row or {}).get("completion_percent") or 0)
+    project_updated = (active_row or {}).get("last_activity") or totals.get("last_ingested_at") or ""
+    research_question = active_brief.get("research_question") or "Collect and validate source-linked evidence"
+    scope_obj = active_brief.get("scope") or {}
+    scope_text = "; ".join(part for part in (
+        scope_obj.get("time_window"),
+        scope_obj.get("geography"),
+        scope_obj.get("population"),
+    ) if part) or "Captured sources, normalized artifacts, and review queues."
+    open_questions = [
+        {
+            "text": item.get("text") or "",
+            "owner": item.get("owner") or "unassigned",
+            "blocked": item.get("status") in ("blocked", "stuck"),
+        }
+        for item in (active_brief.get("open_questions") or [])
+    ]
+    # Contradiction candidates: real claim rows grouped by subject that carry
+    # more than one distinct value. Returns [] honestly when there are none
+    # (today: the corpus has a single smoke claim), instead of a fixed [] that
+    # would hide the contract gap.
+    contradictions = []
+    if claim_records:
+        contradictions = ch_data(
+            f"""
+            SELECT
+              subject AS subject,
+              groupUniqArray(value) AS values,
+              count() AS assertion_count
+            FROM
+            (
+              SELECT
+                claim_text,
+                multiIf(positionCaseInsensitive(claim_text, ' is ') > 0, substring(claim_text, 1, positionCaseInsensitive(claim_text, ' is ') - 1),
+                        positionCaseInsensitive(claim_text, ':') > 0, substring(claim_text, 1, positionCaseInsensitive(claim_text, ':') - 1),
+                        '') AS subject,
+                claim_text AS value
+              FROM claim_records FINAL
+              WHERE subject != ''
+            )
+            GROUP BY subject
+            HAVING length(values) > 1
+            ORDER BY assertion_count DESC
+            LIMIT 5
+            """,
+            fallback=[],
+        )
     return {
         "active_project": {
-            "name": "Open-weight frontier models",
-            "description": "Release claims, model evidence, benchmark details, and source-linked review.",
-            "completion_percent": min(92, max(12, round((capture_score + review_score) / 2))),
-            "updated_at": totals.get("last_ingested_at") or "",
+            "project_id": project_id,
+            "name": project_name,
+            "description": project_description,
+            "completion_percent": project_completion,
+            "updated_at": project_updated,
         },
         "brief": {
-            "question": "What evidence supports recent capability and efficiency claims?",
-            "scope": "Scope: announcements, model cards, papers, repositories, independent benchmarks, and source-linked social evidence.",
+            "question": research_question,
+            "scope": scope_text,
             "stats": [
                 {"label": "sources", "value": unique, "route": "library"},
                 {"label": "review records", "value": review_total, "route": "reviews"},
@@ -4001,18 +4068,14 @@ def home_summary():
         },
         "queue": queue,
         "recent_evidence": recent,
-        "contradictions": [],
+        "contradictions": contradictions,
         "coverage": {"rows": coverage_rows, "gaps": gaps},
         "publication": {
             "checks_passed": max(0, review_total - blockers),
             "checks_total": max(review_total + gaps, 1),
             "blockers": blockers,
         },
-        "open_questions": [
-            {"text": "Are reported scores reproducible?", "owner": "unassigned", "blocked": True},
-            {"text": "Which release uses the revised license?", "owner": "unassigned", "blocked": False},
-            {"text": "What hardware underlies the cost claims?", "owner": "unassigned", "blocked": False},
-        ],
+        "open_questions": open_questions,
     }
 
 
@@ -4759,7 +4822,7 @@ class ResearchUiHandler(BaseHTTPRequestHandler):
             if parsed.path == "/healthz":
                 return self.send_json({"ok": True, "service": "research-ui"})
             if parsed.path == "/api/home":
-                return self.send_json(home_summary())
+                return self.send_json(home_summary(params))
             if parsed.path == "/api/facets":
                 return self.send_json(facets())
             if parsed.path == "/api/inbox":

@@ -420,11 +420,35 @@ function openLibraryView({ q = '', kind = '', project = state.project || '', sco
   setRoute('library');
 }
 
-async function fetchJson(url) {
-  const response = await fetch(url, { cache: 'no-store' });
-  const data = await response.json();
-  if (!response.ok) throw new Error(data.error || response.statusText);
-  return data;
+// Read the response body, parsing JSON only when the server actually sent
+// JSON. A ClickHouse 502 or a reverse-proxy error page returns HTML, and
+// calling response.json() on it throws a useless "Unexpected token '<'" that
+// hides the real status. Fall back to the status text in that case.
+async function readResponse(response) {
+  const text = await response.text();
+  let data = null;
+  const contentType = response.headers.get('content-type') || '';
+  if (contentType.includes('application/json') || (text.trim().startsWith('{') || text.trim().startsWith('['))) {
+    try { data = JSON.parse(text); } catch (_) { data = null; }
+  }
+  if (!response.ok) {
+    const message = (data && (data.error || data.message)) || response.statusText || `HTTP ${response.status}`;
+    throw new Error(message);
+  }
+  return data !== null ? data : text;
+}
+
+// Monotonic sequence guard so a stale fetch (e.g. from an earlier keystroke in
+// the search box, or a refresh started before the user selected a different
+// source) cannot overwrite the UI with older data. makeFetchToken() starts a
+// new round; isCurrentFetchToken(token) returns false once a newer round began.
+let __fetchTokenCounter = 0;
+function makeFetchToken() { __fetchTokenCounter += 1; return __fetchTokenCounter; }
+function isCurrentFetchToken(token) { return token === __fetchTokenCounter; }
+
+async function fetchJson(url, signal) {
+  const response = await fetch(url, { cache: 'no-store', signal });
+  return readResponse(response);
 }
 
 async function postJson(url, payload) {
@@ -433,9 +457,7 @@ async function postJson(url, payload) {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload),
   });
-  const data = await response.json();
-  if (!response.ok) throw new Error(data.error || response.statusText);
-  return data;
+  return readResponse(response);
 }
 
 function activateTab(name) {
@@ -1875,7 +1897,7 @@ function renderEvidencePage(data) {
   $('routePage').innerHTML = `
     ${pageHeader('Evidence Ledger', 'Review evidence objects, candidates, anchors, derived observations, and claim links without collapsing their provenance layers.')}
     ${metricCards([
-      { label: 'Visible objects', value: summary.visible ?? rows.length },
+      { label: `Visible objects${rows.length >= Number(state.limit || 200) ? ' (truncated)' : ''}`, value: summary.visible ?? rows.length, hint: rows.length >= Number(state.limit || 200) ? 'showing first ' + rows.length + ' — refine to see all' : '' },
       { label: 'Selections', value: summary.selections ?? 0 },
       { label: 'Proposed facts', value: summary.proposed_facts ?? 0 },
       { label: 'Claim conflicts', value: summary.claim_conflicts ?? 0 },
@@ -4708,11 +4730,16 @@ async function loadRoutePage() {
   }
   const config = routeConfig[state.route];
   if (!config) return;
+  const routeKey = state.route;
   $('routePage').innerHTML = `${pageHeader(config.title, 'Loading route read model...')}<div class="empty-state panel"><h2>Loading</h2><p>Building the ${escapeHtml(config.title)} view.</p></div>`;
+  const token = makeFetchToken();
   try {
     const data = await fetchJson(`${config.endpoint}?${routeQuery()}`);
+    // Ignore stale responses (e.g. the user typed again or switched routes).
+    if (!isCurrentFetchToken(token) || state.route !== routeKey) return;
     renderRoutePage(state.route, data);
   } catch (error) {
+    if (!isCurrentFetchToken(token) || state.route !== routeKey) return;
     $('routePage').innerHTML = `${pageHeader(config.title, 'Could not load this read model.')}<div class="empty-state panel"><h2>${escapeHtml(config.title)} error</h2><p>${escapeHtml(error.message)}</p></div>`;
   }
 }
@@ -4728,7 +4755,7 @@ function renderInbox(rows) {
   const highPriority = rows.filter((row) => row.task_priority === 'high' || row.task_priority === 'blocking').length;
   $('inboxOpenTasks').textContent = `${rows.length} open task${rows.length === 1 ? '' : 's'}`;
   $('inboxHighPriority').textContent = `${highPriority} high priority`;
-  $('inboxVisibleCount').textContent = `${rows.length} visible task${rows.length === 1 ? '' : 's'}`;
+  $('inboxVisibleCount').textContent = `${rows.length} visible task${rows.length === 1 ? '' : 's'}${rows.length >= Number(state.limit || 200) ? ' (showing first ' + rows.length + ' — more may exist; refine the search or queue)' : ''}`;
   $('inboxLiveState').textContent = `updated ${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
   if (!rows.length) {
     $('inboxRows').innerHTML = `<div class="empty-state"><h2>No review tasks</h2><p>Try a different queue or search.</p></div>`;
@@ -5085,10 +5112,14 @@ async function loadInbox() {
   if (state.q) params.set('q', state.q);
   $('inboxRows').innerHTML = `<div class="empty-state"><h2>Loading</h2><p>Reading the evidence inbox.</p></div>`;
   $('inboxLiveState').textContent = 'refreshing...';
+  const token = makeFetchToken();
   try {
     const data = await fetchJson(`/api/inbox?${params.toString()}`);
+    // Ignore stale inbox responses (e.g. from an earlier search keystroke).
+    if (!isCurrentFetchToken(token)) return;
     renderInbox(data.rows || []);
   } catch (error) {
+    if (!isCurrentFetchToken(token)) return;
     $('inboxRows').innerHTML = `<div class="empty-state"><h2>Inbox error</h2><p>${escapeHtml(error.message)}</p></div>`;
     $('inboxLiveState').textContent = 'error';
     renderInboxPreview(null);
@@ -5798,7 +5829,12 @@ function renderReview(source) {
 }
 
 async function refreshReviewState() {
-  const source = await fetchJson(`/api/source?id=${encodeURIComponent(state.selectedId)}`);
+  const selectedId = state.selectedId;
+  const token = makeFetchToken();
+  const source = await fetchJson(`/api/source?id=${encodeURIComponent(selectedId)}`);
+  // Ignore if the user selected a different source while this refresh was in
+  // flight, or a newer refresh started.
+  if (!isCurrentFetchToken(token) || state.selectedId !== selectedId) return;
   state.currentSource = source;
   renderNormalized(source);
   renderReview(source);

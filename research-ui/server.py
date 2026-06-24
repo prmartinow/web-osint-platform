@@ -160,6 +160,49 @@ def make_id(prefix):
     return f"{prefix}/{uuid.uuid4().hex}"
 
 
+def cursor_page(rows, total, limit, order_key=""):
+    """CursorPage<T> (spec §28): {items, next_cursor?, total_estimate}.
+
+    next_cursor is an opaque keyset token (limit + sort key of the last emitted
+    item); absent on the final page so the UI knows when to stop fetching.
+    total_estimate is a bounded count of the full result set. A present
+    next_cursor means more rows match on the server (spec §7: no silent trunc).
+    """
+    items = list(rows[:limit])
+    next_cursor = None
+    # next_cursor is present iff the server holds more matching rows than we
+    # emitted on this page (total_estimate > items length). Deciding from the
+    # total — not len(rows) — keeps the helper correct whether or not the
+    # caller pre-sliced `rows` to the page.
+    if items and int(total or 0) > len(items):
+        anchor_value = ""
+        if order_key and isinstance(items[-1], dict):
+            anchor_value = str(items[-1].get(order_key) or "")
+        token = {"l": int(limit), "k": anchor_value}
+        padded = json.dumps(token, separators=(",", ":")).encode("utf-8")
+        next_cursor = base64.urlsafe_b64encode(padded).decode("ascii").rstrip("=")
+    return {
+        "items": items,
+        "next_cursor": next_cursor,
+        "total_estimate": int(total or 0),
+    }
+
+
+def read_envelope(data, version, generated_at, stale, permissions, **extra):
+    """ReadEnvelope<T> (spec §28), stamped onto a flat page read-model dict.
+
+    Envelope fields live at top level — the shape app.js reads today — rather
+    than nesting under `data`, so this is a non-breaking contract change.
+    """
+    result = dict(data) if isinstance(data, dict) else {"data": data}
+    result["version"] = version
+    result["generated_at"] = generated_at
+    result["stale"] = bool(stale)
+    result["permissions"] = list(permissions or [])
+    result.update(extra)
+    return result
+
+
 def json_text(value):
     return json.dumps(value if value is not None else {}, ensure_ascii=False, sort_keys=True, default=str)
 
@@ -1054,7 +1097,18 @@ def inbox(params):
     tasks = apply_review_task_decisions(tasks)
     filtered = [task for task in tasks if task_matches_filters(task, q, kind, project, queue)]
     filtered.sort(key=lambda task: (task_priority_rank(task.get("task_priority")), str(task.get("task_updated_at") or task.get("last_ingested_at") or "")), reverse=True)
-    return {"rows": filtered[:limit], "limit": limit, "queue": queue, "row_kind": "review_task"}
+    visible = filtered[:limit]
+    return {
+        "rows": visible,
+        "results": cursor_page(visible, len(filtered), limit),
+        "limit": limit,
+        "queue": queue,
+        "row_kind": "review_task",
+        "generated_at": now_iso(),
+        "stale": False,
+        "permissions": ["triage", "assign", "decide"],
+        "version": "inbox.v1",
+    }
 
 
 def review_hint(row):
@@ -1412,6 +1466,10 @@ def project_rows(params=None):
             "evidence": ["draft", "proposed", "accepted", "rejected", "superseded"],
             "claim": ["proposed", "under_review", "accepted", "disputed", "rejected", "superseded"],
         },
+        "generated_at": now_iso(),
+        "stale": False,
+        "permissions": ["navigate", "brief", "review"],
+        "version": "projects.v1",
     }
 
 
@@ -1768,7 +1826,7 @@ def library_search(params):
             {"id": "google-provenance", "label": "Google discovery provenance", "description": "SERP records separate from opened pages"},
         ],
         "facets": library_facets_for_where(where),
-        "results": {"rows": visible_rows, "limit": limit, "count": len(visible_rows), "has_more": len(rows) > len(visible_rows)},
+        "results": cursor_page(visible_rows, len(rows), limit),
         "rows": visible_rows,
         "preview": library_preview(selected_id),
         "selection": {
@@ -2245,11 +2303,13 @@ def evidence_ledger(params):
             "projects": evidence_facet_counts(all_rows, "source_project"),
             "anchor_types": evidence_facet_counts(all_rows, "anchor_type"),
         },
-        "results": {"rows": rows, "count": len(filtered), "limit": limit},
+        "results": cursor_page(rows, len(filtered), limit),
         "rows": rows,
         "selected_id": selected.get("ledger_id") if selected else "",
         "preview": evidence_preview(selected, source_map, facts_by_selection, facts_by_source, claims_by_selection, claims_by_source, corrections_by_source, annotations_by_selection, annotations_by_source),
         "generated_at": now_iso(),
+        "stale": False,
+        "permissions": ["review", "anchor", "annotate", "accept", "reject"],
         "version": "evidence-ledger.v2",
     }
 
@@ -2578,10 +2638,13 @@ def entity_directory(params):
             "source_kinds": evidence_facet_counts(rows, "source_kind"),
             "projects": evidence_facet_counts(rows, "source_project"),
         },
+        "results": cursor_page(visible, len(filtered), limit),
         "rows": visible,
         "selected_id": selected.get("entity_row_id") if selected else "",
         "preview": entity_preview(selected, curated, claims, source_map),
         "generated_at": now_iso(),
+        "stale": False,
+        "permissions": ["review", "merge", "split", "alias", "reject"],
         "version": "entity-directory.v2",
     }
 
@@ -2991,7 +3054,7 @@ def claims_ledger(params):
             "source_kinds": evidence_facet_counts(rows, "source_kind"),
             "projects": evidence_facet_counts(rows, "source_project"),
         },
-        "results": {"rows": visible, "count": len(filtered), "limit": limit},
+        "results": cursor_page(visible, len(filtered), limit),
         "rows": visible,
         "preview": claim_preview(selected, claims, evidence_by_source, facts_by_source, entities_by_source, events_by_subject, source_map),
         "selection": {"selected_id": selected.get("claim_row_id") if selected else "", "selected_ids": []},
@@ -3352,7 +3415,7 @@ def reviews_read_model(params):
             "epistemic_layers": evidence_facet_counts(rows, "epistemic_layer"),
             "projects": evidence_facet_counts(rows, "source_project"),
         },
-        "results": {"rows": visible, "count": len(filtered), "limit": limit},
+        "results": cursor_page(visible, len(filtered), limit),
         "rows": visible,
         "preview": review_preview(selected, events_by_subject, source_map),
         "selection": {
@@ -3611,7 +3674,7 @@ def publishing_read_model(params):
             "displayed_states": evidence_facet_counts(rows, "display_state"),
             "targets": evidence_facet_counts(rows, "target"),
         },
-        "results": {"rows": visible, "count": len(rows), "limit": limit},
+        "results": cursor_page(visible, len(rows), limit),
         "bundles": visible,
         "checks": all_checks,
         "preview": publishing_preview(selected),
@@ -3972,7 +4035,7 @@ def taxonomy_read_model(params):
             "review_states": evidence_facet_counts(rows, "review_state"),
             "row_kinds": evidence_facet_counts(rows, "row_kind"),
         },
-        "results": {"rows": visible, "count": len(filtered), "limit": limit},
+        "results": cursor_page(visible, len(filtered), limit),
         "rows": visible,
         "preview": taxonomy_preview(selected),
         "selection": {"selected_record_ids": [], "compatible_actions": ["promote", "map", "merge", "add_alias", "deprecate", "assign_review", "export"]},
@@ -4188,6 +4251,10 @@ def home_summary(params=None):
             "blockers": blockers,
         },
         "open_questions": open_questions,
+        "generated_at": now_iso(),
+        "stale": False,
+        "permissions": ["navigate", "capture", "review"],
+        "version": "home.v1",
     }
 
 

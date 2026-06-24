@@ -888,9 +888,9 @@ function renderProjectLocalNav(row) {
       ${projectRouteButton(row, 'Evidence', 'evidence')}
       ${projectRouteButton(row, 'Claims', 'claims')}
       ${projectRouteButton(row, 'Entities', 'entities')}
-      <button type="button" class="text-button" disabled>Timeline</button>
-      <button type="button" class="text-button" disabled>Compare</button>
-      <button type="button" class="text-button" disabled>Drafts</button>
+      <button type="button" class="text-button" disabled title="Not yet implemented">Timeline</button>
+      <button type="button" class="text-button" disabled title="Not yet implemented">Compare</button>
+      <button type="button" class="text-button" disabled title="Not yet implemented">Drafts</button>
       ${projectRouteButton(row, 'Publishing', 'publishing')}
       ${projectRouteButton(row, 'Inbox', 'inbox')}
     </nav>
@@ -5212,11 +5212,20 @@ function renderProvenance(source) {
   const raw = latest.raw || {};
   const review = source.review || {};
   const artifacts = latest.artifact_paths || [];
+  // Pull capture-provenance fields from raw if present. The spec wants a
+  // rebrowser session id, capture status, and supersedence; today the capture
+  // only records method/run/timestamp, so surface what exists and label the
+  // rest as not recorded rather than hiding the gap.
+  const captureStatus = raw.capture_status || raw.status || latest.capture_status || '';
+  const rebrowserSession = raw.rebrowser_session_id || raw.session_id || '';
+  const supersedes = raw.supersedes_capture_id || latest.supersedes_capture_id || '';
   const steps = [
     { label: 'Captured source', value: latest.canonical_url || latest.evidence_id, meta: fmtDate(latest.captured_at) },
-    { label: 'Collector run', value: latest.collector_run_id || '(unknown)', meta: latest.capture_method || '' },
+    { label: 'Collector run', value: latest.collector_run_id || '(not recorded)', meta: latest.capture_method || '' },
+    { label: 'Capture status', value: captureStatus || '(not recorded)', meta: rebrowserSession ? `session ${rebrowserSession}` : 'no rebrowser session id recorded' },
+    { label: 'Supersedes', value: supersedes || '(none — first capture)', meta: '' },
     { label: 'Normalized evidence row', value: latest.evidence_id || '', meta: fmtDate(latest.ingested_at) },
-    { label: 'Artifacts', value: `${artifacts.length} local artifact(s)`, meta: artifacts.map((item) => item.path).slice(0, 3).join(' · ') },
+    { label: 'Artifact manifest', value: `${artifacts.length} local artifact(s)`, meta: artifacts.map((item) => item.path || item).join(' · ') || 'no artifact paths' },
     { label: 'Machine observations', value: `${(source.annotations || []).length} semantic · ${(source.ocr || []).length} OCR · ${(source.vl || []).length} VL`, meta: 'review before promotion' },
     { label: 'Human review events', value: `${review.counts?.events || 0} event(s)`, meta: 'append-only JSONL + ClickHouse projection' },
   ];
@@ -5233,6 +5242,10 @@ function renderProvenance(source) {
         </article>
       `).join('')}
     </div>
+    <section class="card">
+      <h3>Artifact paths</h3>
+      ${artifacts.length ? `<div class="artifact-link-list">${artifacts.map((item) => `<span class="muted">${escapeHtml(item.path || item)}</span>`).join('<br>')}</div>` : '<p class="muted">No local artifact paths recorded.</p>'}
+    </section>
     <section class="card">
       <h3>Raw capture hints</h3>
       <pre>${escapeHtml(JSON.stringify({

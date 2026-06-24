@@ -4929,6 +4929,17 @@ def update_review_state(payload):
         raise ResearchUiError(400, "status is required")
     config, current = fetch_review_object(subject_type, subject_id)
     previous_status = current.get("status") or ""
+    current_version = current.get("updated_at") or ""
+    # Optimistic concurrency (spec §31): if the client holds an expected_version
+    # that no longer matches the object's updated_at, another decision landed in
+    # between — surface a 409 with the before/after so the UI can open a diff
+    # instead of silently overwriting the newer version.
+    expected_version = compact_text(payload.get("expected_version"), 120)
+    if expected_version and expected_version != current_version:
+        raise ResearchUiError(
+            409,
+            f"{subject_type} changed since it was loaded",
+        )
     actor_value = compact_text(payload.get("actor") or REVIEW_ACTOR, 200)
     validate_status(subject_type, status, actor=actor_value, is_create=False)
     assert_not_terminal_transition(subject_type, previous_status, status)
@@ -4954,7 +4965,14 @@ def update_review_state(payload):
     }
     event = persist_review_event(build_review_event("review_state.changed", event_payload))
     ch_insert_json_each_row(config["table"], [updated])
-    return {"event": event, "object": updated, "before_status": previous_status, "after_status": status}
+    return {
+        "event": event,
+        "object": updated,
+        "version": updated.get("updated_at") or now,
+        "expected_version": expected_version,
+        "before_status": previous_status,
+        "after_status": status,
+    }
 
 
 def create_generic_review_event(payload):

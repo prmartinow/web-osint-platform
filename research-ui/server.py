@@ -1389,13 +1389,14 @@ def sql_in_list(values):
     return "(" + ", ".join(quoted) + ")" if quoted else "('')"
 
 
-def library_count_map(ids, table, column="source_evidence_id"):
+def library_count_map(ids, table, column="source_evidence_id", final=True):
     if not ids:
         return {}
+    final_sql = " FINAL" if final else ""
     rows = ch_data(
         f"""
         SELECT {column} AS evidence_id, count() AS rows
-        FROM {table} FINAL
+        FROM {table}{final_sql}
         WHERE {column} IN {sql_in_list(ids)}
         GROUP BY {column}
         """,
@@ -1610,22 +1611,23 @@ def library_search(params):
         like = sql_string(q)
         clauses.append(
             "("
-            f"positionCaseInsensitive(title, {like}) > 0 OR "
-            f"positionCaseInsensitive(text, {like}) > 0 OR "
-            f"positionCaseInsensitive(canonical_url, {like}) > 0 OR "
-            f"positionCaseInsensitive(author_handle, {like}) > 0 OR "
-            f"positionCaseInsensitive(domain, {like}) > 0 OR "
-            f"positionCaseInsensitive(evidence_id, {like}) > 0"
+            f"positionCaseInsensitive(evidence_events.title, {like}) > 0 OR "
+            f"positionCaseInsensitive(evidence_events.text, {like}) > 0 OR "
+            f"positionCaseInsensitive(evidence_events.canonical_url, {like}) > 0 OR "
+            f"positionCaseInsensitive(evidence_events.author_handle, {like}) > 0 OR "
+            f"positionCaseInsensitive(evidence_events.domain, {like}) > 0 OR "
+            f"positionCaseInsensitive(evidence_events.source_project, {like}) > 0 OR "
+            f"positionCaseInsensitive(evidence_events.evidence_id, {like}) > 0"
             ")"
         )
     if kind:
-        clauses.append(f"source_kind = {sql_string(kind)}")
+        clauses.append(f"evidence_events.source_kind = {sql_string(kind)}")
     if project:
-        clauses.append(f"source_project = {sql_string(project)}")
+        clauses.append(f"evidence_events.source_project = {sql_string(project)}")
     if date_from:
-        clauses.append(f"toDate(ifNull(captured_at, ingested_at)) >= toDate({sql_string(date_from)})")
+        clauses.append(f"toDate(ifNull(evidence_events.captured_at, evidence_events.ingested_at)) >= toDate({sql_string(date_from)})")
     if date_to:
-        clauses.append(f"toDate(ifNull(captured_at, ingested_at)) <= toDate({sql_string(date_to)})")
+        clauses.append(f"toDate(ifNull(evidence_events.captured_at, evidence_events.ingested_at)) <= toDate({sql_string(date_to)})")
     where = " AND ".join(clauses)
     order_by = "last_ingested_at DESC"
     if sort == "captured_desc":
@@ -1668,8 +1670,8 @@ def library_search(params):
     correction_counts = library_count_map(ids, "normalized_corrections")
     entity_counts = library_count_map(ids, "entity_links")
     annotation_counts = library_annotation_counts(ids)
-    ocr_counts = library_count_map(ids, "media_ocr_results", "evidence_id")
-    vl_counts = library_count_map(ids, "media_vl_embeddings", "evidence_id")
+    ocr_counts = library_count_map(ids, "media_ocr_results", "evidence_id", final=False)
+    vl_counts = library_count_map(ids, "media_vl_embeddings", "evidence_id", final=False)
     latest_actions = library_latest_actions(ids)
     visible_rows = []
     for row in rows:
@@ -4680,8 +4682,16 @@ class ResearchUiHandler(BaseHTTPRequestHandler):
 
     def send_static(self, rel_path):
         clean = posixpath.normpath(urllib.parse.unquote(rel_path)).lstrip("/")
-        path = STATIC_DIR / clean
-        if not path.exists() or not path.is_file():
+        path = (STATIC_DIR / clean).resolve()
+        # Containment check: the resolved path must stay inside STATIC_DIR.
+        # normpath collapses ".." but does not prevent escaping the static root,
+        # so an encoded request like /static/%2e%2e%2f%2e%2e%2fetc%2fhostname
+        # would otherwise resolve outside STATIC_DIR and read arbitrary files.
+        try:
+            path.relative_to(STATIC_DIR.resolve())
+        except ValueError:
+            raise ResearchUiError(404, "Static file not found")
+        if not path.is_file():
             raise ResearchUiError(404, "Static file not found")
         content_type = mimetypes.guess_type(path.name)[0] or "application/octet-stream"
         data = path.read_bytes()

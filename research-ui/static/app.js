@@ -84,6 +84,17 @@ function escapeHtml(value) {
   })[char]);
 }
 
+// Allowlist URL schemes before interpolating a server-supplied URL into an
+// href/src attribute. escapeHtml alone does not stop "javascript:" URLs, so a
+// captured/normalized value like "javascript:alert(1)" would otherwise survive
+// and become a clickable XSS vector. Relative URLs (incl. the /api/artifact
+// links) and known-safe schemes pass through; anything else is neutralized.
+const SAFE_URL_SCHEMES = /^(https?:|mailto:|\/|$)/i;
+function safeUrl(value) {
+  const raw = String(value ?? '').trim();
+  return SAFE_URL_SCHEMES.test(raw) ? raw : '#';
+}
+
 function cssEscape(value) {
   if (window.CSS?.escape) return CSS.escape(value);
   return String(value ?? '').replace(/["\\]/g, '\\$&');
@@ -1395,7 +1406,7 @@ function renderLibraryPreview(preview) {
       <section class="preview-card">
         <h4>Discovery trail</h4>
         <p>${source.source_kind === 'google_search_page' || source.source_kind === 'search_result' ? 'This record is discovery provenance. The opened captured page should become the substantive source unless the search result itself is being studied.' : 'This record can be used as a substantive source if its capture and normalized extraction are sufficient.'}</p>
-        ${source.canonical_url ? `<a href="${escapeHtml(source.canonical_url)}" target="_blank" rel="noreferrer">${escapeHtml(source.canonical_url)}</a>` : ''}
+        ${source.canonical_url ? `<a href="${escapeHtml(safeUrl(source.canonical_url))}" target="_blank" rel="noreferrer">${escapeHtml(source.canonical_url)}</a>` : ''}
       </section>
     </section>
     <section class="${sectionClass('captures')}" data-library-preview-section="captures">
@@ -1424,7 +1435,7 @@ function renderLibraryPreview(preview) {
     <section class="${sectionClass('artifacts')}" data-library-preview-section="artifacts">
       <section class="preview-card">
         <h4>Artifact manifest</h4>
-        ${artifacts.length ? `<div class="artifact-link-list">${artifacts.slice(0, 10).map((item) => `<a href="${escapeHtml(item.url || '#')}" target="_blank" rel="noreferrer">${escapeHtml(item.path || item.url)}</a>`).join('')}</div>` : '<p>No artifact paths are linked to this source yet.</p>'}
+        ${artifacts.length ? `<div class="artifact-link-list">${artifacts.slice(0, 10).map((item) => `<a href="${escapeHtml(safeUrl(item.url || '#'))}" target="_blank" rel="noreferrer">${escapeHtml(item.path || item.url)}</a>`).join('')}</div>` : '<p>No artifact paths are linked to this source yet.</p>'}
         <div class="tag-line">
           <span class="pill">${escapeHtml(counts.ocr || 0)} OCR</span>
           <span class="pill">${escapeHtml(counts.vl || 0)} VL</span>
@@ -1753,7 +1764,7 @@ function renderEvidencePreview(data) {
         <span><strong>Source ID</strong>${escapeHtml(row.source_evidence_id || '')}</span>
         <span><strong>Object ID</strong>${escapeHtml(row.object_id || '')}</span>
       </div>
-      ${source.canonical_url ? `<p><a href="${escapeHtml(source.canonical_url)}" target="_blank" rel="noreferrer">${escapeHtml(source.canonical_url)}</a></p>` : ''}
+      ${source.canonical_url ? `<p><a href="${escapeHtml(safeUrl(source.canonical_url))}" target="_blank" rel="noreferrer">${escapeHtml(source.canonical_url)}</a></p>` : ''}
     </section>
 
     <section class="${sectionClass('observation')}" data-evidence-preview-section="observation">
@@ -2287,7 +2298,7 @@ function renderEntityPreview(data) {
           </article>
         `).join('')}
       </div>
-      ${preview.source?.canonical_url ? `<p><a href="${escapeHtml(preview.source.canonical_url)}" target="_blank" rel="noreferrer">${escapeHtml(preview.source.canonical_url)}</a></p>` : ''}
+      ${preview.source?.canonical_url ? `<p><a href="${escapeHtml(safeUrl(preview.source.canonical_url))}" target="_blank" rel="noreferrer">${escapeHtml(preview.source.canonical_url)}</a></p>` : ''}
     </section>
     <label class="preview-note">Resolution note
       <input id="entityDecisionNote" placeholder="Optional identity rationale, alias note, relation handoff, or merge context">
@@ -2776,7 +2787,7 @@ function renderClaimPreview(data) {
           </article>
         `).join('')}
       </div>
-      ${preview.source?.canonical_url ? `<p><a href="${escapeHtml(preview.source.canonical_url)}" target="_blank" rel="noreferrer">${escapeHtml(preview.source.canonical_url)}</a></p>` : ''}
+      ${preview.source?.canonical_url ? `<p><a href="${escapeHtml(safeUrl(preview.source.canonical_url))}" target="_blank" rel="noreferrer">${escapeHtml(preview.source.canonical_url)}</a></p>` : ''}
     </section>
     <section class="${sectionClass('history')}" data-claim-preview-section="history">
       <article class="claim-preview-card">
@@ -3265,7 +3276,7 @@ function renderReviewPreview(data) {
         <h4>Immutable source and anchor</h4>
         ${(preview.artifact_manifest || []).map((item) => `<p><strong>${escapeHtml(item.label || '')}</strong><br>${escapeHtml(item.value || '')}${item.meta ? `<br><em>${escapeHtml(item.meta)}</em>` : ''}</p>`).join('')}
       </article>
-      ${preview.source?.canonical_url ? `<p><a href="${escapeHtml(preview.source.canonical_url)}" target="_blank" rel="noreferrer">${escapeHtml(preview.source.canonical_url)}</a></p>` : ''}
+      ${preview.source?.canonical_url ? `<p><a href="${escapeHtml(safeUrl(preview.source.canonical_url))}" target="_blank" rel="noreferrer">${escapeHtml(preview.source.canonical_url)}</a></p>` : ''}
     </section>
     <section class="${sectionClass('proposed')}" data-review-preview-section="proposed">
       <div class="review-diff-pair">
@@ -4780,7 +4791,7 @@ function renderInboxPreview(row) {
           <p>${escapeHtml([sourceLabelFor(row), row.author_handle ? '@' + row.author_handle : row.domain, fmtDate(row.posted_at || row.captured_at)].filter(Boolean).join(' · '))}</p>
         </div>
       </div>
-      ${row.canonical_url ? `<a href="${escapeHtml(row.canonical_url)}" target="_blank" rel="noreferrer">${escapeHtml(row.canonical_url)}</a>` : ''}
+      ${row.canonical_url ? `<a href="${escapeHtml(safeUrl(row.canonical_url))}" target="_blank" rel="noreferrer">${escapeHtml(row.canonical_url)}</a>` : ''}
       <p>${escapeHtml(originalText || 'No source preview text available yet.')}</p>
     </section>
 
@@ -5036,7 +5047,7 @@ function renderNormalized(source) {
   const latest = source.latest || {};
   const review = source.review || {};
   const corrections = review.normalized_corrections || [];
-  const links = (latest.links || []).map((link) => `<a href="${escapeHtml(link)}" target="_blank" rel="noreferrer">${escapeHtml(link)}</a>`).join('<br>');
+  const links = (latest.links || []).map((link) => `<a href="${escapeHtml(safeUrl(link))}" target="_blank" rel="noreferrer">${escapeHtml(link)}</a>`).join('<br>');
   const raw = latest.raw || {};
   $('tab-normalized').innerHTML = `
     <div class="source-summary-grid">
@@ -5156,8 +5167,8 @@ function renderArtifacts(source) {
     return `
       <div class="card">
         <h3>${escapeHtml(artifact.path.split('/').pop())}</h3>
-        <p><a href="${escapeHtml(artifact.url)}" target="_blank" rel="noreferrer">${escapeHtml(artifact.path)}</a></p>
-        ${isImage ? `<img class="artifact-img" src="${escapeHtml(artifact.url)}" alt="">` : ''}
+        <p><a href="${escapeHtml(safeUrl(artifact.url))}" target="_blank" rel="noreferrer">${escapeHtml(artifact.path)}</a></p>
+        ${isImage ? `<img class="artifact-img" src="${escapeHtml(safeUrl(artifact.url))}" alt="">` : ''}
       </div>
     `;
   }).join('')}</div>`;
@@ -5278,7 +5289,7 @@ function renderEvidenceDocument(doc, docPath) {
               ${asset.width || asset.height ? `<span class="pill">${asset.width || 0}x${asset.height || 0}</span>` : ''}
             </div>
             ${asset.path ? `<p><a href="${escapeHtml(artifactUrl(asset.path))}" target="_blank" rel="noreferrer">${escapeHtml(asset.path)}</a></p>` : ''}
-            ${asset.url ? `<p><a href="${escapeHtml(asset.url)}" target="_blank" rel="noreferrer">${escapeHtml(asset.alt || asset.url)}</a></p>` : ''}
+            ${asset.url ? `<p><a href="${escapeHtml(safeUrl(asset.url))}" target="_blank" rel="noreferrer">${escapeHtml(asset.alt || asset.url)}</a></p>` : ''}
             ${asset.path && /\.(png|jpg|jpeg|gif|webp)$/i.test(asset.path) ? `<img class="artifact-img" src="${escapeHtml(artifactUrl(asset.path))}" alt="">` : ''}
           </div>
         `).join('') : '<p class="muted">No assets recorded.</p>'}
@@ -5315,7 +5326,7 @@ function renderEnrichment(source) {
       `).join('') : '<p class="muted">No annotations for this source yet.</p>'}</div>
       <div class="card"><h3>OCR outputs (${ocr.length})</h3>${ocr.length ? ocr.map((row) => `
         <p><strong>${escapeHtml(row.engine)} ${escapeHtml(row.engine_version)}</strong> · ${escapeHtml(row.status)} · ${row.text_chars} chars · confidence ${row.mean_confidence}</p>
-        ${row.text_artifact_path_url ? `<p><a href="${escapeHtml(row.text_artifact_path_url)}" target="_blank" rel="noreferrer">OCR text artifact</a></p>` : ''}
+        ${row.text_artifact_path_url ? `<p><a href="${escapeHtml(safeUrl(row.text_artifact_path_url))}" target="_blank" rel="noreferrer">OCR text artifact</a></p>` : ''}
       `).join('') : '<p class="muted">No OCR rows for this source yet.</p>'}</div>
       <div class="card"><h3>VL embeddings (${vl.length})</h3>${vl.length ? vl.map((row) => `
         <p><strong>${escapeHtml(row.model)}</strong> · ${escapeHtml(row.status)} · ${escapeHtml(row.vector_name)} · ${row.image_width}×${row.image_height}</p>

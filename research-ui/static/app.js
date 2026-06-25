@@ -10,6 +10,10 @@ const state = {
   routeScrollMemory: {},  // route -> scrollY, for back-nav scroll restoration
   entityDetailId: '',     // entity_row_id for the /entity-detail route
   entityDetailTab: 'overview',
+  conflictClusterId: '',
+  conflictResolution: 'leave_unresolved',
+  conflictReasonCode: 'unresolved',
+  conflictPreferredClaimId: '',
   rows: [],
   facets: null,
   home: null,
@@ -207,6 +211,7 @@ const routeConfig = {
   publishing: { title: 'Publishing', endpoint: '/api/publishing' },
   taxonomy: { title: 'Taxonomy', endpoint: '/api/taxonomy' },
   'entity-detail': { title: 'Entity Detail', endpoint: '' },
+  'conflict-detail': { title: 'Conflict Resolution', endpoint: '' },
 };
 
 function currentHashParts() {
@@ -305,6 +310,11 @@ function applyHashParams() {
     state.entityDetailId = params.get('id') || '';
     state.entityDetailTab = params.get('tab') || 'overview';
   }
+  if (route === 'conflict-detail') {
+    state.conflictClusterId = params.get('id') || '';
+    state.conflictResolution = params.get('resolution') || 'leave_unresolved';
+    state.conflictReasonCode = params.get('reason') || 'unresolved';
+  }
 }
 
 function routeHash() {
@@ -397,6 +407,14 @@ function routeHash() {
     if (state.entityDetailTab && state.entityDetailTab !== 'overview') params.set('tab', state.entityDetailTab);
     const query = params.toString();
     return `#entity-detail${query ? '?' + query : ''}`;
+  }
+  if (state.route === 'conflict-detail') {
+    const params = new URLSearchParams();
+    if (state.conflictClusterId) params.set('id', state.conflictClusterId);
+    if (state.conflictResolution && state.conflictResolution !== 'leave_unresolved') params.set('resolution', state.conflictResolution);
+    if (state.conflictReasonCode && state.conflictReasonCode !== 'unresolved') params.set('reason', state.conflictReasonCode);
+    const query = params.toString();
+    return `#conflict-detail${query ? '?' + query : ''}`;
   }
   if (state.route !== 'library') return `#${state.route}`;
   const params = new URLSearchParams();
@@ -4906,8 +4924,107 @@ function renderEntityDetailPage(data) {
   });
 }
 
+async function loadConflictDetail() {
+  const clusterId = state.conflictClusterId || '';
+  if (!clusterId) {
+    $('routePage').innerHTML = pageHeader('Conflict Resolution', 'No conflict selected.');
+    return;
+  }
+  const routeKey = 'conflict-detail';
+  $('routePage').innerHTML = pageHeader('Conflict Resolution', 'Loading conflict cluster...');
+  const token = makeFetchToken();
+  try {
+    const data = await fetchJson(`/api/conflicts/${encodeURIComponent(clusterId)}`);
+    if (!isCurrentFetchToken(token) || state.route !== routeKey) return;
+    renderConflictDetailPage(data);
+  } catch (error) {
+    if (!isCurrentFetchToken(token) || state.route !== routeKey) return;
+    $('routePage').innerHTML = pageHeader('Conflict Resolution', 'Could not load this conflict.') + `<div class="empty-state panel"><h2>Conflict error</h2><p>${escapeHtml(error.message)}</p></div>`;
+  }
+}
+
+function openConflictDetail(clusterId) {
+  if (!clusterId) return;
+  state.conflictClusterId = clusterId;
+  state.conflictResolution = 'leave_unresolved';
+  state.conflictReasonCode = 'unresolved';
+  state.conflictPreferredClaimId = '';
+  setRoute('conflict-detail');
+}
+
+async function persistConflictResolution(row) {
+  const status = $('conflictActionStatus');
+  try {
+    if (status) status.textContent = 'Recording resolution...';
+    const result = await postJson('/api/conflicts/resolve', {
+      cluster_id: state.conflictClusterId,
+      resolution: state.conflictResolution || 'leave_unresolved',
+      reason_code: state.conflictReasonCode || 'unresolved',
+      preferred_claim_id: state.conflictPreferredClaimId || '',
+      note: $('conflictReviewerNote')?.value || '',
+      actor: REVIEW_UI_ACTOR,
+      expected_version: expectedVersionForRow(row),
+    });
+    if (status) status.textContent = `Resolution recorded: ${result.resolution}${result.promoted ? ' (preferred promoted)' : ''}.`;
+  } catch (error) {
+    if (status) status.textContent = error.message;
+  }
+}
+
+function renderConflictDetailPage(data) {
+  const assertions = data.assertions || [];
+  const options = data.resolution_options || [];
+  const reasons = data.reason_codes || [];
+  const prior = data.prior_decisions || [];
+  const card = (a) => `
+    <article class="conflict-assertion-card ${a.review_state === 'accepted' ? 'preferred' : ''} ${a.review_state === 'rejected' || a.review_state === 'disputed' ? 'disputed' : ''}">
+      <header><strong>${escapeHtml(a.value || '')}</strong> <span class="status-badge ${a.contradiction_state === 'disputed' ? 'danger' : a.contradiction_state === 'supported' ? 'ok' : 'warn'}">${escapeHtml(titleCase((a.contradiction_state || 'under_review').replace(/_/g, ' ')))}</span></header>
+      <dl>
+        <dt>Source</dt><dd>${escapeHtml(a.source_title || a.source_evidence_id || '—')} <span class="pill">${escapeHtml(titleCase(a.source_kind || 'source'))}</span></dd>
+        <dt>Effective date</dt><dd>${escapeHtml(a.effective_date || '—')}</dd>
+        <dt>Relation</dt><dd>${escapeHtml(a.evidence_relation || '—')}</dd>
+        <dt>Qualifiers</dt><dd>${Object.entries(a.qualifiers || {}).map(([k, v]) => `<span class="pill">${escapeHtml(k)}=${escapeHtml(String(v))}</span>`).join(' ') || '—'}</dd>
+      </dl>
+      <label class="conflict-preferred-pick"><input type="radio" name="conflict-preferred" value="${escapeHtml(a.claim_id || '')}" ${state.conflictPreferredClaimId === a.claim_id ? 'checked' : ''}> Prefer this assertion</label>
+    </article>`;
+  $('routePage').innerHTML = `
+    ${pageHeader(`Conflict: ${data.subject || data.cluster_id}`, `${assertions.length} assertion(s) · resolves without deleting any assertion`)}
+    <div class="conflict-detail-shell">
+      <section class="panel conflict-assertions">
+        <h3>Assertions (vertical list — no assertion is deleted by resolving)</h3>
+        ${assertions.length ? assertions.map(card).join('') : '<p class="muted">No assertions in this cluster.</p>'}
+        ${prior.length ? `<details class="conflict-prior"><summary>Prior reviewer decisions (${prior.length})</summary><ul>${prior.map((p) => `<li>${escapeHtml(p.claim_id || '')} — ${escapeHtml(p.review_state)} / ${escapeHtml(p.contradiction_state)}</li>`).join('')}</ul></details>` : ''}
+      </section>
+      <section class="panel conflict-resolution-form">
+        <h3>Resolve</h3>
+        <label>Resolution</label>
+        <select id="conflictResolutionSelect">
+          ${options.map((o) => `<option value="${escapeHtml(o)}" ${state.conflictResolution === o ? 'selected' : ''}>${escapeHtml(titleCase(o.replace(/_/g, ' ')))}</option>`).join('')}
+        </select>
+        <label>Reason code</label>
+        <select id="conflictReasonSelect">
+          ${reasons.map((r) => `<option value="${escapeHtml(r)}" ${state.conflictReasonCode === r ? 'selected' : ''}>${escapeHtml(titleCase(r.replace(/_/g, ' ')))}</option>`).join('')}
+        </select>
+        <label>Reviewer note</label>
+        <textarea id="conflictReviewerNote" rows="3" placeholder="Why this resolution?"></textarea>
+        <button id="conflictResolveBtn" class="primary">Record resolution</button>
+        <p id="conflictActionStatus" class="muted"></p>
+      </section>
+    </div>`;
+  const resSel = $('conflictResolutionSelect');
+  const reasonSel = $('conflictReasonSelect');
+  if (resSel) resSel.addEventListener('change', () => { state.conflictResolution = resSel.value; replaceRouteHash(); });
+  if (reasonSel) reasonSel.addEventListener('change', () => { state.conflictReasonCode = reasonSel.value; replaceRouteHash(); });
+  document.querySelectorAll('input[name="conflict-preferred"]').forEach((radio) => {
+    radio.addEventListener('change', () => { state.conflictPreferredClaimId = radio.value; });
+  });
+  const btn = $('conflictResolveBtn');
+  if (btn) btn.addEventListener('click', () => persistConflictResolution({ optimistic_version: '', updated_at: '' }));
+}
+
 function renderRoutePage(route, data) {
   if (route === 'entity-detail') return renderEntityDetailPage(data);
+  if (route === 'conflict-detail') return renderConflictDetailPage(data);
   if (route === 'projects') return renderProjectsPage(data);
   if (route === 'library') return renderLibraryPage(data);
   if (route === 'evidence') return renderEvidencePage(data);
@@ -5005,6 +5122,10 @@ async function loadRoutePage() {
   }
   if (state.route === 'entity-detail') {
     await loadEntityDetail();
+    return;
+  }
+  if (state.route === 'conflict-detail') {
+    await loadConflictDetail();
     return;
   }
   const config = routeConfig[state.route];

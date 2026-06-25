@@ -4498,3 +4498,46 @@ pre {
 .pill.warn::before { content: "\26A0\00A0"; }
 .pill.task-priority.high::before { content: "\26A0\00A0"; }
 .pill.task-priority.blocking::before { content: "\2717\00A0"; }
+
+/* === Phase 8b: entity-detail page layout (spec section 16) === */
+.entity-detail-shell {
+  display: grid;
+  grid-template-columns: minmax(0, 1.6fr) minmax(280px, 1fr);
+  gap: 16px;
+  align-items: start;
+}
+.entity-header-card {
+  grid-column: 1 / -1;
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 20px;
+  flex-wrap: wrap;
+}
+.entity-identity h2 { margin: 0 0 6px; }
+.entity-meta { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+.entity-aliases { margin-top: 8px; display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+.entity-counts { display: flex; gap: 18px; }
+.entity-counts > div { display: flex; flex-direction: column; align-items: center; min-width: 56px; }
+.entity-counts strong { font-size: 20px; color: var(--accent); }
+.entity-counts .muted { font-size: 11px; text-transform: uppercase; }
+.entity-detail-tabs {
+  grid-column: 1 / -1;
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  border-bottom: 1px solid var(--line);
+  padding-bottom: 6px;
+}
+.entity-fact-ledger { grid-column: 1; }
+.entity-side { grid-column: 2; }
+.entity-mention-list, .entity-source-list { list-style: none; padding: 0; margin: 0 0 14px; display: flex; flex-direction: column; gap: 6px; }
+.entity-mention-list li, .entity-source-list li { padding: 8px; border: 1px solid var(--soft-line); border-radius: 8px; background: var(--panel-2); }
+.entity-detail-link-row { margin-top: 10px; }
+.ledger-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.ledger-table th, .ledger-table td { padding: 8px; border-bottom: 1px solid var(--soft-line); text-align: left; vertical-align: top; }
+.ledger-table th { font-size: 11px; text-transform: uppercase; color: var(--muted); }
+@media (max-width: 960px) {
+  .entity-detail-shell { grid-template-columns: 1fr; }
+  .entity-fact-ledger, .entity-side { grid-column: 1; }
+}

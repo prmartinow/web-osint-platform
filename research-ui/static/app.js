@@ -8,6 +8,8 @@ const state = {
   selectedId: '',
   previewTaskKey: '',
   routeScrollMemory: {},  // route -> scrollY, for back-nav scroll restoration
+  entityDetailId: '',     // entity_row_id for the /entity-detail route
+  entityDetailTab: 'overview',
   rows: [],
   facets: null,
   home: null,
@@ -204,6 +206,7 @@ const routeConfig = {
   reviews: { title: 'Reviews', endpoint: '/api/reviews' },
   publishing: { title: 'Publishing', endpoint: '/api/publishing' },
   taxonomy: { title: 'Taxonomy', endpoint: '/api/taxonomy' },
+  'entity-detail': { title: 'Entity Detail', endpoint: '' },
 };
 
 function currentHashParts() {
@@ -298,6 +301,10 @@ function applyHashParams() {
     const inboxInspect = params.get('inspect') || '';
     state.previewTaskKey = inboxInspect.startsWith('task:') ? inboxInspect.slice(5) : inboxInspect;
   }
+  if (route === 'entity-detail') {
+    state.entityDetailId = params.get('id') || '';
+    state.entityDetailTab = params.get('tab') || 'overview';
+  }
 }
 
 function routeHash() {
@@ -383,6 +390,13 @@ function routeHash() {
     if (state.previewTaskKey) params.set('inspect', `task:${state.previewTaskKey}`);
     const query = params.toString();
     return `#inbox${query ? '?' + query : ''}`;
+  }
+  if (state.route === 'entity-detail') {
+    const params = new URLSearchParams();
+    if (state.entityDetailId) params.set('id', state.entityDetailId);
+    if (state.entityDetailTab && state.entityDetailTab !== 'overview') params.set('tab', state.entityDetailTab);
+    const query = params.toString();
+    return `#entity-detail${query ? '?' + query : ''}`;
   }
   if (state.route !== 'library') return `#${state.route}`;
   const params = new URLSearchParams();
@@ -2352,6 +2366,7 @@ function renderEntityPreview(data) {
         <span class="pill">${escapeHtml(row.match_confidence || 'review')}</span>
         ${row.pending_relation_count ? `<span class="pill warn">${escapeHtml(row.pending_relation_count)} relation candidates</span>` : ''}
       </div>
+      <div class="entity-detail-link-row"><button class="secondary" data-entity-detail-link="${escapeHtml(row.entity_row_id || '')}">Open detail page</button></div>
     </section>
     <section class="${sectionClass('mentions')}" data-entity-preview-section="mentions">
       <article class="entity-preview-card">
@@ -2632,6 +2647,9 @@ function bindEntityKeyboard() {
 }
 
 function bindEntityPage(data) {
+  document.querySelectorAll('[data-entity-detail-link]').forEach((el) => {
+    el.addEventListener('click', () => openEntityDetail(el.dataset.entityDetailLink || ''));
+  });
   document.querySelectorAll('[data-entity-queue]').forEach((button) => {
     button.addEventListener('click', () => {
       state.entityQueue = button.dataset.entityQueue || 'all';
@@ -4798,7 +4816,98 @@ function bindTaxonomyPage(data) {
   bindTaxonomyKeyboard();
 }
 
+async function loadEntityDetail() {
+  const entityId = state.entityDetailId || '';
+  if (!entityId) {
+    $('routePage').innerHTML = pageHeader('Entity Detail', 'No entity selected.');
+    return;
+  }
+  const routeKey = 'entity-detail';
+  $('routePage').innerHTML = pageHeader('Entity Detail', 'Loading entity...');
+  const token = makeFetchToken();
+  try {
+    const data = await fetchJson(`/api/entity/${encodeURIComponent(entityId)}`);
+    if (!isCurrentFetchToken(token) || state.route !== routeKey) return;
+    renderEntityDetailPage(data);
+  } catch (error) {
+    if (!isCurrentFetchToken(token) || state.route !== routeKey) return;
+    $('routePage').innerHTML = pageHeader('Entity Detail', 'Could not load this entity.') + `<div class="empty-state panel"><h2>Entity error</h2><p>${escapeHtml(error.message)}</p></div>`;
+  }
+}
+
+function openEntityDetail(entityRowId) {
+  if (!entityRowId) return;
+  state.entityDetailId = entityRowId;
+  state.entityDetailTab = 'overview';
+  setRoute('entity-detail');
+}
+
+function renderEntityDetailPage(data) {
+  const h = data.header || {};
+  const facts = data.fact_ledger || [];
+  const mentions = data.mentions || [];
+  const sources = data.sources || [];
+  const tabs = data.tabs || ['overview', 'claims', 'sources'];
+  const tab = (id, label) => `<button class="secondary ${state.entityDetailTab === id ? 'active' : ''}" data-entity-detail-tab="${escapeHtml(id)}">${escapeHtml(label)}</button>`;
+  const factRow = (f) => `
+    <tr class="entity-fact-row">
+      <td><span class="pill">${escapeHtml(titleCase(f.property || 'claim'))}</span></td>
+      <td>${escapeHtml(f.value || '')}</td>
+      <td>${Object.entries(f.qualifiers || {}).map(([k, v]) => `<span class="pill">${escapeHtml(k)}=${escapeHtml(String(v))}</span>`).join(' ') || '<span class="muted">—</span>'}</td>
+      <td>
+        ${f.supporting ? '<span class="status-badge ok">supports</span>' : ''}
+        ${f.refuting ? '<span class="status-badge danger">refutes</span>' : ''}
+        ${!f.supporting && !f.refuting ? '<span class="muted">—</span>' : ''}
+      </td>
+      <td><span class="status-badge ${f.review_state === 'accepted' || f.review_state === 'published' ? 'ok' : f.review_state === 'rejected' || f.review_state === 'disputed' ? 'danger' : 'warn'}">${escapeHtml(f.review_state || 'under_review')}</span></td>
+      <td><span class="pill ${f.conflict_status === 'disputed' ? 'warn' : ''}">${escapeHtml(titleCase((f.conflict_status || 'under_review').replace(/_/g, ' ')))}</span></td>
+    </tr>`;
+  const mentionItem = (m) => `<li><strong>${escapeHtml(m.mention_text || m.canonical_name || '')}</strong> <span class="muted">${escapeHtml(m.source_title || '')}</span> ${m.status ? `<span class="pill">${escapeHtml(m.status)}</span>` : ''}</li>`;
+  const sourceItem = (s) => `<li><strong>${escapeHtml(s.title || s.source_evidence_id || '')}</strong> <span class="pill">${escapeHtml(titleCase(s.source_kind || 'source'))}</span></li>`;
+  $('routePage').innerHTML = `
+    ${pageHeader(h.canonical_name || 'Entity Detail', `${escapeHtml(titleCase(h.entity_type || 'entity'))} · ${h.source_count || 0} source(s) · ${h.claim_count || 0} claim(s) · ${h.conflict_count || 0} conflict(s)`)}
+    <div class="entity-detail-shell">
+      <section class="panel entity-header-card">
+        <div class="entity-identity">
+          <h2>${escapeHtml(h.canonical_name || '(unnamed)')}</h2>
+          <div class="entity-meta">
+            <span class="pill">${escapeHtml(titleCase(h.entity_type || 'entity'))}</span>
+            ${h.canonical_entity_id ? `<span class="pill">${escapeHtml(h.canonical_entity_id)}</span>` : ''}
+            <span class="status-badge ${h.review_state === 'accepted' || h.review_state === 'matched' ? 'ok' : h.review_state === 'rejected' ? 'danger' : 'warn'}">${escapeHtml(titleCase((h.review_state || 'unresolved').replace(/_/g, ' ')))}</span>
+          </div>
+          ${h.aliases && h.aliases.length ? `<div class="entity-aliases"><span class="muted">Aliases:</span> ${h.aliases.map((a) => `<span class="pill">${escapeHtml(a)}</span>`).join(' ')}</div>` : ''}
+        </div>
+        <div class="entity-counts">
+          <div><strong>${h.source_count || 0}</strong><span class="muted">sources</span></div>
+          <div><strong>${h.claim_count || 0}</strong><span class="muted">claims</span></div>
+          <div><strong>${h.supporting_count || 0}</strong><span class="muted">supporting</span></div>
+          <div><strong>${h.refuting_count || 0}</strong><span class="muted">refuting</span></div>
+          <div><strong>${h.conflict_count || 0}</strong><span class="muted">conflicts</span></div>
+        </div>
+      </section>
+      <nav class="entity-detail-tabs">${tabs.map((id) => tab(id, titleCase(id))).join('')}</nav>
+      <section class="panel entity-fact-ledger" data-entity-detail-section="claims">
+        <h3>Fact ledger</h3>
+        ${facts.length ? `<table class="ledger-table"><thead><tr><th>Property</th><th>Value</th><th>Qualifiers</th><th>Relation</th><th>Review</th><th>Conflict</th></tr></thead><tbody>${facts.map(factRow).join('')}</tbody></table>` : '<p class="muted">No claims touch this entity yet.</p>'}
+      </section>
+      <section class="panel entity-side" data-entity-detail-section="overview">
+        <h3>Mentions</h3>
+        ${mentions.length ? `<ul class="entity-mention-list">${mentions.map(mentionItem).join('')}</ul>` : '<p class="muted">No mentions recorded.</p>'}
+        <h3>Sources</h3>
+        ${sources.length ? `<ul class="entity-source-list">${sources.map(sourceItem).join('')}</ul>` : '<p class="muted">No sources linked.</p>'}
+      </section>
+    </div>`;
+  document.querySelectorAll('[data-entity-detail-tab]').forEach((button) => {
+    button.addEventListener('click', () => {
+      state.entityDetailTab = button.dataset.entityDetailTab || 'overview';
+      replaceRouteHash();
+      document.querySelectorAll('[data-entity-detail-tab]').forEach((b) => b.classList.toggle('active', b === button));
+    });
+  });
+}
+
 function renderRoutePage(route, data) {
+  if (route === 'entity-detail') return renderEntityDetailPage(data);
   if (route === 'projects') return renderProjectsPage(data);
   if (route === 'library') return renderLibraryPage(data);
   if (route === 'evidence') return renderEvidencePage(data);
@@ -4892,6 +5001,10 @@ async function loadRoutePage() {
   }
   if (state.route === 'inbox') {
     await loadInbox();
+    return;
+  }
+  if (state.route === 'entity-detail') {
+    await loadEntityDetail();
     return;
   }
   const config = routeConfig[state.route];

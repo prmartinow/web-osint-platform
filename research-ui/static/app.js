@@ -4005,6 +4005,72 @@ async function persistPublishingAction(row, action) {
   });
 }
 
+function movePublishingSelection(delta) {
+  if (state.route !== 'publishing') return;
+  const rows = state.publishingRows || [];
+  if (!rows.length) return;
+  const current = rows.findIndex((row) => publishingBundleKey(row) === state.publishingSelectedId);
+  const nextIndex = Math.max(0, Math.min(rows.length - 1, (current >= 0 ? current : 0) + delta));
+  state.publishingSelectedId = publishingBundleKey(rows[nextIndex]);
+  replaceRouteHash();
+  loadRoutePage();
+}
+
+function bindPublishingKeyboard() {
+  if (window.__webOsintPublishingKeyboardBound) return;
+  window.__webOsintPublishingKeyboardBound = true;
+  window.addEventListener('keydown', async (event) => {
+    if (state.route !== 'publishing') return;
+    const active = document.activeElement;
+    if (active && ['INPUT', 'TEXTAREA', 'SELECT', 'BUTTON'].includes(active.tagName)) return;
+    const key = event.key.toLowerCase();
+    if (key === 'j') { event.preventDefault(); movePublishingSelection(1); return; }
+    if (key === 'k') { event.preventDefault(); movePublishingSelection(-1); return; }
+    // Space toggles the bulk-selection checkbox for the focused bundle.
+    if (key === ' ') {
+      event.preventDefault();
+      const row = (state.publishingRows || []).find((item) => publishingBundleKey(item) === state.publishingSelectedId);
+      if (row) {
+        const key0 = publishingBundleKey(row);
+        state.taxonomySelectedIds = state.taxonomySelectedIds || new Set();
+        if (state.taxonomySelectedIds.has(key0)) state.taxonomySelectedIds.delete(key0);
+        else state.taxonomySelectedIds.add(key0);
+        loadRoutePage();
+      }
+      return;
+    }
+    if (['o', 'c', 'b', 's', 'r', 'e', 'p', 'h'].includes(key)) {
+      event.preventDefault();
+      const row = (state.publishingRows || []).find((item) => publishingBundleKey(item) === state.publishingSelectedId);
+      // Map key -> the existing publishing action vocabulary. Snapshot/publish
+      // respect disabled_actions (no-op when the row marks them unavailable).
+      const actionMap = { o: 'open_source', c: 'run_checks', b: 'blockers', s: 'create_snapshot', r: 'request_review', e: 'export', p: 'publish_snapshot', h: 'history' };
+      const action = actionMap[key];
+      const disabled = new Set(row?.disabled_actions || ['create_snapshot', 'request_review', 'create_handoff', 'publish_snapshot', 'supersede_release']);
+      if (['create_snapshot', 'publish_snapshot'].includes(action) && disabled.has(action)) {
+        const status = $('publishingActionStatus');
+        if (status) status.textContent = `${action} is not available for this bundle.`;
+        return;
+      }
+      try {
+        if (action === 'open_source' || action === 'history' || action === 'blockers' || action === 'export') {
+          // Read-only / preview actions: switch preview tab where one exists.
+          if (action === 'blockers') state.publishingPreviewTab = 'checks';
+          else if (action === 'history') state.publishingPreviewTab = 'audit';
+          else state.publishingPreviewTab = 'readiness';
+          replaceRouteHash();
+          loadRoutePage();
+        } else {
+          await persistPublishingAction(row, action);
+        }
+      } catch (error) {
+        const status = $('publishingActionStatus');
+        if (status) status.textContent = error.message;
+      }
+    }
+  });
+}
+
 function bindPublishingPage(data) {
   $('publishingSearchInput')?.addEventListener('input', () => {
     state.q = $('publishingSearchInput').value.trim();
@@ -4066,6 +4132,7 @@ function bindPublishingPage(data) {
       }
     });
   });
+  bindPublishingKeyboard();
 }
 
 function renderPublishingPage(data) {
@@ -4552,6 +4619,62 @@ async function applyBulkTaxonomyAction(action) {
   if (status) status.textContent = `${titleCase(action)} recorded for ${ids.length} row${ids.length === 1 ? '' : 's'}.`;
 }
 
+function moveTaxonomySelection(delta) {
+  if (state.route !== 'taxonomy') return;
+  const rows = state.taxonomyRows || [];
+  if (!rows.length) return;
+  const current = rows.findIndex((row) => taxonomyRecordKey(row) === state.taxonomySelectedId);
+  const nextIndex = Math.max(0, Math.min(rows.length - 1, (current >= 0 ? current : 0) + delta));
+  state.taxonomySelectedId = taxonomyRecordKey(rows[nextIndex]);
+  replaceRouteHash();
+  loadRoutePage();
+}
+
+function bindTaxonomyKeyboard() {
+  if (window.__webOsintTaxonomyKeyboardBound) return;
+  window.__webOsintTaxonomyKeyboardBound = true;
+  window.addEventListener('keydown', async (event) => {
+    if (state.route !== 'taxonomy') return;
+    const active = document.activeElement;
+    if (active && ['INPUT', 'TEXTAREA', 'SELECT', 'BUTTON'].includes(active.tagName)) return;
+    const key = event.key.toLowerCase();
+    if (key === 'j') { event.preventDefault(); moveTaxonomySelection(1); return; }
+    if (key === 'k') { event.preventDefault(); moveTaxonomySelection(-1); return; }
+    // Space toggles the row's bulk-selection checkbox.
+    if (key === ' ') {
+      event.preventDefault();
+      const row = (state.taxonomyRows || []).find((item) => taxonomyRecordKey(item) === state.taxonomySelectedId);
+      if (row) {
+        const rk = taxonomyRecordKey(row);
+        state.taxonomySelectedIds = state.taxonomySelectedIds || new Set();
+        if (state.taxonomySelectedIds.has(rk)) state.taxonomySelectedIds.delete(rk);
+        else state.taxonomySelectedIds.add(rk);
+        loadRoutePage();
+      }
+      return;
+    }
+    if (['m', 'p', 'r', 'e', 'o', 'h'].includes(key)) {
+      event.preventDefault();
+      const row = (state.taxonomyRows || []).find((item) => taxonomyRecordKey(item) === state.taxonomySelectedId);
+      const actionMap = { m: 'map', p: 'promote', r: 'reject', e: 'edit', o: 'usage', h: 'history' };
+      const action = actionMap[key];
+      try {
+        if (action === 'usage' || action === 'history' || action === 'edit') {
+          // Read-only / preview navigation.
+          state.taxonomyPreviewTab = (action === 'usage') ? 'usage' : (action === 'history' ? 'audit' : state.taxonomyPreviewTab);
+          replaceRouteHash();
+          loadRoutePage();
+        } else {
+          await applyTaxonomyAction(row, action);
+        }
+      } catch (error) {
+        const status = $('taxonomyActionStatus');
+        if (status) status.textContent = error.message;
+      }
+    }
+  });
+}
+
 function bindTaxonomyPage(data) {
   const commit = () => {
     state.taxonomySelectedIds.clear();
@@ -4672,6 +4795,7 @@ function bindTaxonomyPage(data) {
       }
     });
   });
+  bindTaxonomyKeyboard();
 }
 
 function renderRoutePage(route, data) {

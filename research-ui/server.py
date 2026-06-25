@@ -2536,6 +2536,147 @@ def entity_preview(row, entity_links, claims, source_map):
     }
 
 
+def conflict_cluster(params):
+    """ConflictClusterReadModel (spec section 18) for one cluster id.
+
+    clusterId is the parsed subject claims are grouped by (see
+    claim_subject_value). Projects the assertion cards, resolution options, and
+    prior reviewer decisions for that subject.
+    """
+    import urllib.parse
+    raw = (params.get("cluster_id", [""])[0] or "").strip()
+    cluster_id = urllib.parse.unquote(raw)
+    claims = ch_data(
+        f"""
+        SELECT claim_id, source_evidence_id, evidence_selection_id, claim_text,
+               claim_type, evidence_relation, qualifier_json, status, note,
+               actor, created_at, updated_at
+        FROM claim_records FINAL
+        ORDER BY updated_at DESC
+        LIMIT 1000
+        """,
+        fallback=[],
+    )
+    members = []
+    for claim in claims:
+        parsed = claim_subject_value(claim)
+        subject = parsed.get("subject") or ""
+        # Match by exact subject, or by claim_id when the cluster id is a single
+        # claim anchor (so a disputed claim resolves to its own cluster).
+        if subject and subject.lower() == cluster_id.lower():
+            members.append(claim)
+        elif claim.get("claim_id") == cluster_id:
+            members.append(claim)
+    source_ids = {c.get("source_evidence_id") for c in members if c.get("source_evidence_id")}
+    source_map = hydrate_source_rows(list(source_ids))
+    assertions = []
+    for c in members:
+        parsed = claim_subject_value(c)
+        relation = (c.get("evidence_relation") or "").lower()
+        status = c.get("status") or "under_review"
+        source = source_for_ledger_row(source_map, c.get("source_evidence_id") or "")
+        assertions.append({
+            "claim_id": c.get("claim_id"),
+            "value": parsed.get("value") or c.get("claim_text") or "",
+            "qualifiers": parse_raw_json(c.get("qualifier_json") or "{}"),
+            "effective_date": (c.get("updated_at") or "")[:10],
+            "source_evidence_id": c.get("source_evidence_id") or "",
+            "source_title": source.get("title") or "",
+            "source_kind": source.get("source_kind") or "",
+            "evidence_relation": c.get("evidence_relation") or "",
+            "review_state": status,
+            "contradiction_state": claim_contradiction_state(c, len(members)),
+        })
+    assertions.sort(key=lambda a: str(a.get("effective_date") or ""), reverse=True)
+    body = {
+        "cluster_id": cluster_id,
+        "subject": cluster_id,
+        "assertion_count": len(assertions),
+        "assertions": assertions,
+        "resolution_options": [
+            "genuine_contradiction", "different_scope", "different_version",
+            "superseded", "duplicate_assertion", "insufficient_evidence",
+            "leave_unresolved", "request_additional_evidence",
+        ],
+        "reason_codes": [
+            "newer_evidence", "stronger_source", "broader_scope", "methodology_flaw",
+            "source_bias", "temporal_change", "unresolved",
+        ],
+        "prior_decisions": [
+            {"claim_id": a["claim_id"], "review_state": a["review_state"],
+             "contradiction_state": a["contradiction_state"], "actor": ""}
+            for a in assertions if a["review_state"] in ("accepted", "rejected", "disputed", "superseded")
+        ],
+    }
+    return read_envelope(
+        body,
+        version="conflict-cluster.v1",
+        generated_at=now_iso(),
+        stale=False,
+        permissions=["resolve", "reopen", "request_evidence"],
+        scope={"cluster_id": cluster_id},
+    )
+
+
+def resolve_conflict(payload):
+    """Conflicts.Resolve (spec section 29): record a conflict resolution.
+
+    Honors spec section 18 ("No assertion is deleted by resolving a conflict"):
+    the resolution is a review event capturing the preferred assertion + reason;
+    claims are NOT mutated to a terminal state by this call. If a preference is
+    expressed, the preferred claim is promoted via the human review path
+    (update_review_state with a human actor) and the others are annotated.
+    """
+    cluster_id = compact_text(payload.get("cluster_id"), 300)
+    resolution = compact_text(payload.get("resolution"), 80)
+    reason_code = compact_text(payload.get("reason_code"), 80)
+    preferred_claim_id = compact_text(payload.get("preferred_claim_id"), 300)
+    reviewer_note = compact_text(payload.get("note"), 20000)
+    actor = compact_text(payload.get("actor") or REVIEW_ACTOR, 200)
+    if not cluster_id:
+        raise ResearchUiError(400, "cluster_id is required")
+    if not resolution:
+        raise ResearchUiError(400, "resolution is required")
+    allowed_resolutions = {
+        "genuine_contradiction", "different_scope", "different_version",
+        "superseded", "duplicate_assertion", "insufficient_evidence",
+        "leave_unresolved", "request_additional_evidence",
+    }
+    if resolution not in allowed_resolutions:
+        raise ResearchUiError(400, f"resolution {resolution!r} is not valid; allowed: {sorted(allowed_resolutions)}")
+    # If a preferred assertion is named and the resolution implies promoting it,
+    # route through the human review path (Phase 2 guards apply: terminal-state,
+    # machine-origin). This keeps the epistemic rule intact.
+    promoted = None
+    if preferred_claim_id and resolution in ("superseded", "duplicate_assertion", "different_version"):
+        try:
+            promoted = update_review_state({
+                "subject_type": "claim_stub",
+                "subject_id": preferred_claim_id,
+                "status": "accepted",
+                "actor": actor if actor_kind(actor) == "human" else REVIEW_ACTOR,
+                "note": f"conflict resolution: {resolution} ({reason_code or 'no reason'}) {reviewer_note}".strip(),
+                "expected_version": compact_text(payload.get("expected_version"), 120),
+            })
+        except ResearchUiError:
+            promoted = None  # preferred claim may be terminal already; resolution still records
+    event_payload = {
+        # Cluster-level events have no single source; synthesize a stable id so
+        # build_review_event's source_evidence_id requirement is satisfied.
+        "source_evidence_id": f"conflict:{cluster_id}",
+        "subject_type": "conflict_cluster",
+        "subject_id": cluster_id,
+        "cluster_id": cluster_id,
+        "resolution": resolution,
+        "reason_code": reason_code,
+        "preferred_claim_id": preferred_claim_id,
+        "note": reviewer_note,
+        "actor": actor,
+    }
+    event = persist_review_event(build_review_event("conflict.resolved", event_payload))
+    return {"event": event, "resolution": resolution, "reason_code": reason_code, "preferred_claim_id": preferred_claim_id, "promoted": promoted}
+
+
 def entity_detail(params):
     """EntityDetailReadModel (spec section 16) for one entity.
 
@@ -5277,6 +5418,10 @@ class ResearchUiHandler(BaseHTTPRequestHandler):
                 entity_id = urllib.parse.unquote(tail)
                 params["entity_id"] = [entity_id]
                 return self.send_json(entity_detail(params))
+            if parsed.path.startswith("/api/conflicts/"):
+                tail = parsed.path[len("/api/conflicts/"):]
+                params["cluster_id"] = [urllib.parse.unquote(tail)]
+                return self.send_json(conflict_cluster(params))
             if parsed.path == "/api/claims":
                 return self.send_json(claims_ledger(params))
             if parsed.path == "/api/reviews":
@@ -5315,6 +5460,8 @@ class ResearchUiHandler(BaseHTTPRequestHandler):
             payload = self.read_json_body()
             if parsed.path == "/api/review/events":
                 return self.send_json(create_generic_review_event(payload), status=201)
+            if parsed.path == "/api/conflicts/resolve":
+                return self.send_json(resolve_conflict(payload), status=201)
             if parsed.path == "/api/project-brief":
                 return self.send_json(update_project_brief(payload), status=201)
             if parsed.path == "/api/project-brief/review":

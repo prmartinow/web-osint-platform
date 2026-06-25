@@ -7,6 +7,7 @@ const state = {
   limit: '80',
   selectedId: '',
   previewTaskKey: '',
+  routeScrollMemory: {},  // route -> scrollY, for back-nav scroll restoration
   rows: [],
   facets: null,
   home: null,
@@ -291,6 +292,12 @@ function applyHashParams() {
     const inspect = params.get('inspect') || '';
     state.taxonomySelectedId = inspect.startsWith('taxonomy:') ? inspect.slice(9) : inspect;
   }
+  if (route === 'inbox') {
+    state.queue = params.get('queue') || state.queue || 'all';
+    state.q = params.get('q') || state.q || '';
+    const inboxInspect = params.get('inspect') || '';
+    state.previewTaskKey = inboxInspect.startsWith('task:') ? inboxInspect.slice(5) : inboxInspect;
+  }
 }
 
 function routeHash() {
@@ -369,6 +376,14 @@ function routeHash() {
     const query = params.toString();
     return `#taxonomy${query ? '?' + query : ''}`;
   }
+  if (state.route === 'inbox') {
+    const params = new URLSearchParams();
+    if (state.q) params.set('q', state.q);
+    if (state.queue && state.queue !== 'all') params.set('queue', state.queue);
+    if (state.previewTaskKey) params.set('inspect', `task:${state.previewTaskKey}`);
+    const query = params.toString();
+    return `#inbox${query ? '?' + query : ''}`;
+  }
   if (state.route !== 'library') return `#${state.route}`;
   const params = new URLSearchParams();
   if (state.q) params.set('q', state.q);
@@ -387,6 +402,10 @@ function routeHash() {
 
 function replaceRouteHash() {
   history.replaceState(null, '', routeHash());
+}
+
+function pushRouteHash() {
+  history.pushState(null, '', routeHash());
 }
 
 function sourceKindForCoverage(key) {
@@ -4769,7 +4788,9 @@ async function loadRoutePage() {
 
 function setRoute(route, push = true) {
   state.route = routeConfig[route] ? route : 'home';
-  if (push) replaceRouteHash();
+  // push=true (user-initiated nav) -> new history entry so Back returns here.
+  // push=false (hashchange replay) -> replace, no extra entry.
+  if (push) pushRouteHash(); else replaceRouteHash();
   loadRoutePage();
 }
 
@@ -6195,9 +6216,17 @@ function wireEvents() {
     tab.addEventListener('click', () => activateTab(tab.dataset.tab));
   });
   window.addEventListener('hashchange', () => {
+    const { route: previousRoute } = currentHashParts();
+    // Capture scroll of the outgoing route before the swap (spec section 4).
+    state.routeScrollMemory[previousRoute] = window.scrollY;
     const { route } = currentHashParts();
     applyHashParams();
     setRoute(route, false);
+    // Restore scroll of the incoming route if we have a memory entry.
+    const saved = state.routeScrollMemory[route];
+    if (typeof saved === 'number') {
+      requestAnimationFrame(() => window.scrollTo(0, saved));
+    }
   });
 }
 

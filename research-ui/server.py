@@ -2536,6 +2536,155 @@ def entity_preview(row, entity_links, claims, source_map):
     }
 
 
+def entity_detail(params):
+    """EntityDetailReadModel (spec section 16) for one entity.
+
+    Projects entity_links + claim_records + evidence_events for a single
+    canonical_entity_id / entity_row_id into the section-16 fact-ledger shape.
+    """
+    raw_id = (params.get("entity_id", [""])[0] or "").strip()
+    if raw_id.startswith("entity:"):
+        raw_id = raw_id.removeprefix("entity:")
+    # The directory mints composite ids (canonical_entity:<name>,
+    # entity_link:<id>, extracted_entity:<name>, merge_cluster:<name>). Resolve
+    # the canonical name + the underlying link rows for whichever id shape this is.
+    canonical_name = ""
+    link_filter_ids = []  # entity_link_id values to include
+    if raw_id.startswith("canonical_entity:"):
+        canonical_name = raw_id.removeprefix("canonical_entity:")
+    elif raw_id.startswith("entity_link:"):
+        link_filter_ids = [raw_id.removeprefix("entity_link:")]
+    elif raw_id.startswith("extracted_entity:") or raw_id.startswith("merge_cluster:"):
+        canonical_name = raw_id.split(":", 1)[1] if ":" in raw_id else raw_id
+    else:
+        # Bare id: treat as either a canonical name or a link id.
+        canonical_name = raw_id
+
+    curated = ch_data(
+        f"""
+        SELECT entity_link_id, source_evidence_id, evidence_selection_id, mention_text,
+               entity_type, canonical_entity_id, canonical_name, source_anchor_json,
+               status, note, actor, created_at, updated_at
+        FROM entity_links FINAL
+        ORDER BY updated_at DESC
+        LIMIT 500
+        """,
+        fallback=[],
+    )
+    # Resolve the canonical identity: prefer an explicit canonical_name match;
+    # fall back to the link rows whose ids were requested.
+    name_lower = canonical_name.lower()
+    identity_links = []
+    if link_filter_ids:
+        identity_links = [row for row in curated if row.get("entity_link_id") in link_filter_ids]
+    if not identity_links and name_lower:
+        identity_links = [
+            row for row in curated
+            if (row.get("canonical_name") or "").lower() == name_lower
+            or (row.get("mention_text") or "").lower() == name_lower
+        ]
+    if not identity_links and link_filter_ids:
+        identity_links = [row for row in curated if row.get("entity_link_id") in set(link_filter_ids)]
+
+    canonical_entity_id = next((row.get("canonical_entity_id") for row in identity_links if row.get("canonical_entity_id")), "")
+    canonical_name_resolved = next(
+        (first_nonempty(row.get("canonical_name"), row.get("mention_text")) for row in identity_links),
+        canonical_name,
+    )
+    entity_type = next((row.get("entity_type") for row in identity_links if row.get("entity_type")), "")
+    aliases = sorted({
+        first_nonempty(row.get("mention_text"), row.get("canonical_name"))
+        for row in identity_links
+        if first_nonempty(row.get("mention_text"), row.get("canonical_name"))
+    } - {canonical_name_resolved})
+    source_ids = {row.get("source_evidence_id") for row in identity_links if row.get("source_evidence_id")}
+    review_state = next((row.get("status") for row in identity_links if row.get("status")), "unresolved")
+
+    # Fact ledger: claims whose source or text touches this entity.
+    claims = ch_data(
+        f"""
+        SELECT claim_id, source_evidence_id, evidence_selection_id, claim_text,
+               claim_type, evidence_relation, qualifier_json, status, actor, updated_at
+        FROM claim_records FINAL
+        ORDER BY updated_at DESC
+        LIMIT 800
+        """,
+        fallback=[],
+    )
+    name_tokens = [token for token in canonical_name_resolved.lower().split() if len(token) > 2]
+    fact_rows = []
+    for claim in claims:
+        text_lower = (claim.get("claim_text") or "").lower()
+        touches = claim.get("source_evidence_id") in source_ids or any(tok in text_lower for tok in name_tokens)
+        if not touches:
+            continue
+        relation = (claim.get("evidence_relation") or "").lower()
+        status = claim.get("status") or "under_review"
+        fact_rows.append({
+            "claim_id": claim.get("claim_id"),
+            "property": claim.get("claim_type") or "claim",
+            "value": claim.get("claim_text") or "",
+            "qualifiers": parse_raw_json(claim.get("qualifier_json") or ""),
+            "evidence_relation": claim.get("evidence_relation") or "",
+            "supporting": relation in ("supports", "supporting", "supports_claim") and status in ("accepted", "published"),
+            "refuting": relation in ("refutes", "contradicts") or status == "disputed",
+            "review_state": status,
+            "conflict_status": "disputed" if status == "disputed" else ("supported" if status in ("accepted", "published") else "under_review"),
+            "source_evidence_id": claim.get("source_evidence_id") or "",
+            "updated_at": claim.get("updated_at") or "",
+        })
+    fact_rows.sort(key=lambda r: str(r.get("updated_at") or ""), reverse=True)
+
+    source_map = hydrate_source_rows(list(source_ids) + [r.get("source_evidence_id") for r in fact_rows])
+    supporting_count = sum(1 for r in fact_rows if r["supporting"])
+    refuting_count = sum(1 for r in fact_rows if r["refuting"])
+    conflict_count = sum(1 for r in fact_rows if r["conflict_status"] == "disputed")
+    source_count = len(source_ids)
+
+    header = {
+        "entity_row_id": raw_id,
+        "canonical_name": canonical_name_resolved,
+        "canonical_entity_id": canonical_entity_id,
+        "entity_type": entity_type or "topic",
+        "aliases": aliases[:30],
+        "review_state": review_state,
+        "source_count": source_count,
+        "claim_count": len(fact_rows),
+        "supporting_count": supporting_count,
+        "refuting_count": refuting_count,
+        "conflict_count": conflict_count,
+    }
+    mentions = [
+        {
+            "mention_text": row.get("mention_text"),
+            "canonical_name": row.get("canonical_name"),
+            "source_evidence_id": row.get("source_evidence_id"),
+            "source_title": source_for_ledger_row(source_map, row.get("source_evidence_id") or "").get("title"),
+            "status": row.get("status"),
+            "updated_at": row.get("updated_at"),
+        }
+        for row in identity_links[:60]
+    ]
+    body = {
+        "header": header,
+        "fact_ledger": fact_rows[:200],
+        "mentions": mentions,
+        "sources": [
+            {"source_evidence_id": sid, **{k: v for k, v in source_for_ledger_row(source_map, sid).items() if k in ("title", "source_kind", "canonical_url", "domain")}}
+            for sid in sorted(source_ids)
+        ][:80],
+        "tabs": ["overview", "claims", "sources", "relationships", "timeline", "artifacts", "notes", "audit"],
+    }
+    return read_envelope(
+        body,
+        version="entity-detail.v1",
+        generated_at=now_iso(),
+        stale=False,
+        permissions=["review", "merge", "split", "alias", "reject", "add_claim", "add_source"],
+        scope={"entity_id": raw_id},
+    )
+
+
 def entity_directory(params):
     limit = sql_int(params.get("limit", ["120"])[0], 120)
     fetch_limit = max(limit * 3, 180)
@@ -5121,6 +5270,13 @@ class ResearchUiHandler(BaseHTTPRequestHandler):
                 return self.send_json(evidence_ledger(params))
             if parsed.path == "/api/entities":
                 return self.send_json(entity_directory(params))
+            if parsed.path.startswith("/api/entity/"):
+                # The id carries ':' and '/' (e.g. entity_link:entity_link/<uuid>),
+                # which the browser URL-encodes; decode before resolving.
+                tail = parsed.path[len("/api/entity/"):]
+                entity_id = urllib.parse.unquote(tail)
+                params["entity_id"] = [entity_id]
+                return self.send_json(entity_detail(params))
             if parsed.path == "/api/claims":
                 return self.send_json(claims_ledger(params))
             if parsed.path == "/api/reviews":

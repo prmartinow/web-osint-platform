@@ -140,7 +140,8 @@ def http_json_post(url, body, headers=None, timeout=10):
     request_headers.update(headers or {})
     request = urllib.request.Request(url, data=payload, method="POST", headers=request_headers)
     try:
-        with urllib.request.urlopen(request, timeout=timeout) as response:
+        open_kwargs = {} if timeout is None else {"timeout": timeout}
+        with urllib.request.urlopen(request, **open_kwargs) as response:
             raw = response.read()
             return json.loads(raw.decode("utf-8")) if raw else {}
     except urllib.error.HTTPError as exc:
@@ -2072,7 +2073,8 @@ def embed_search_query(query, model="text"):
     data = http_json_post(
         f"{LOCAL_INFERENCE_URL}/embed",
         body,
-        timeout=RESEARCH_SEARCH_TIMEOUT_SECONDS,
+        headers={"X-Caller": "web-osint-dashboard-search"},
+        timeout=None,
     )
     rows = data.get("data") or []
     if not rows:
@@ -2154,7 +2156,8 @@ def apply_rerank(query, hits, rerank_limit):
     data = http_json_post(
         f"{LOCAL_INFERENCE_URL}/rerank",
         {"query": query, "documents": documents, "normalize": False},
-        timeout=RESEARCH_SEARCH_TIMEOUT_SECONDS,
+        headers={"X-Caller": "web-osint-dashboard-search"},
+        timeout=None,
     )
     for rank, item in enumerate(data.get("results", []), start=1):
         idx = item.get("index")

@@ -288,10 +288,12 @@ def task_from_message(topic: str, key: str, event: dict[str, Any]) -> EvidenceTa
 
 
 def embed_texts(texts: list[str]) -> list[list[float]]:
+    # Slow model API call: do not set an HTTP timeout. Progress/state comes from
+    # local-inference /healthz guardrails and /metrics, not from client retries.
     response = requests.post(
         f"{INFERENCE_URL}/embed",
         json={"model": "text", "inputs": texts, "normalize": True},
-        timeout=REQUEST_TIMEOUT,
+        headers={"X-Caller": "web-osint-embedding-worker"},
     )
     response.raise_for_status()
     payload = response.json()

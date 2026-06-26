@@ -729,10 +729,12 @@ def insert_vl_row(event: dict[str, Any], status: str, **values: Any) -> None:
 
 
 def embed_vl_image(path: Path) -> dict[str, Any]:
+    # Slow model API call: do not set an HTTP timeout. Progress/state comes from
+    # local-inference /healthz guardrails and /metrics, not from client retries.
     response = requests.post(
         f"{LOCAL_INFERENCE_URL}/embed",
         json={"model": "vl", "inputs": [{"image": str(path)}], "normalize": True, "batch_size": 1},
-        timeout=REQUEST_TIMEOUT,
+        headers={"X-Caller": "web-osint-media-vl-worker"},
     )
     response.raise_for_status()
     data = response.json()

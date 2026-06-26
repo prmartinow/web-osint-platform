@@ -111,10 +111,16 @@ The service enforces CPU-friendly guardrails at the API boundary:
 
 | Operation | Default policy |
 | --- | --- |
-| Offline/chunk embedding | concurrency `1`, queue `64`, queue wait `300s` |
-| Query embedding | concurrency `1`, queue `4`, queue wait `60s` |
-| Rerank | concurrency `1`, queue `2`, queue wait `240s`, max `5` candidates |
-| VL embedding | concurrency `1`, queue `16`, queue wait `300s` |
+| Offline/chunk embedding | concurrency `1`, queue `64`, no queue timeout |
+| Batch embedding | concurrency `1`, queue `1`, no queue timeout |
+| Query embedding | concurrency `1`, queue `4`, no queue timeout |
+| Rerank | concurrency `1`, queue `2`, no queue timeout, max `5` candidates |
+| VL embedding | concurrency `1`, queue `16`, no queue timeout |
+
+Slow transformer routes expose active/waiting state through `/healthz` and
+duration/queue metrics through `/metrics`. Do not treat slow model work as a
+timeout failure; inspect guardrail state to see whether the model is active,
+waiting, idle, or failing.
 
 CPU-heavy user services also run through `scripts/run_with_cpu_thread_guard.sh`. By default, `WEB_OSINT_CPU_RESERVED_THREADS=2`, so the wrapper detects host logical threads with `nproc --all`, clamps Torch/OpenMP/MKL/OpenBLAS/Paddle thread pools to at most host logical threads minus the reserve, and, when `taskset` is available, runs the process with a CPU affinity mask that leaves the last two logical CPUs outside the Web OSINT worker affinity. The Qwen systemd unit intentionally leaves `QWEN_INFERENCE_TORCH_THREADS`, `OMP_NUM_THREADS`, and `MKL_NUM_THREADS` unset so the wrapper can derive the correct effective pool from the current host. Override `WEB_OSINT_CPU_RESERVED_THREADS` only if the RPC node's service mix changes. The Qwen `/healthz` response includes `cpu_thread_guard` so operators can verify the effective thread cap.
 

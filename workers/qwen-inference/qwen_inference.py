@@ -70,21 +70,16 @@ def env_float(name: str, default: float) -> float:
 
 EMBED_CONCURRENCY = env_int("QWEN_EMBED_CONCURRENCY", 1)
 EMBED_QUEUE_LIMIT = env_int("QWEN_EMBED_QUEUE_LIMIT", 64)
-EMBED_QUEUE_TIMEOUT = env_float("QWEN_EMBED_QUEUE_TIMEOUT_SECONDS", 300)
 BATCH_EMBED_QUEUE_LIMIT = env_int("QWEN_BATCH_EMBED_QUEUE_LIMIT", 1)
 QUERY_EMBED_QUEUE_LIMIT = env_int("QWEN_QUERY_EMBED_QUEUE_LIMIT", 4)
-QUERY_EMBED_QUEUE_TIMEOUT = env_float("QWEN_QUERY_EMBED_QUEUE_TIMEOUT_SECONDS", 60)
 RERANK_CONCURRENCY = env_int("QWEN_RERANK_CONCURRENCY", 1)
 RERANK_QUEUE_LIMIT = env_int("QWEN_RERANK_QUEUE_LIMIT", 2)
-RERANK_QUEUE_TIMEOUT = env_float("QWEN_RERANK_QUEUE_TIMEOUT_SECONDS", 240)
 VL_CONCURRENCY = env_int("QWEN_VL_CONCURRENCY", 1)
 VL_QUEUE_LIMIT = env_int("QWEN_VL_QUEUE_LIMIT", 16)
-VL_QUEUE_TIMEOUT = env_float("QWEN_VL_QUEUE_TIMEOUT_SECONDS", 300)
 # Generative VL route runs on CPU; expect tens of seconds per image+prompt.
-# Single-flight with a small queue and generous timeout.
+# Single-flight with a small queue and no queue timeout.
 CHAT_CONCURRENCY = env_int("QWEN_CHAT_CONCURRENCY", 1)
 CHAT_QUEUE_LIMIT = env_int("QWEN_CHAT_QUEUE_LIMIT", 4)
-CHAT_QUEUE_TIMEOUT = env_float("QWEN_CHAT_QUEUE_TIMEOUT_SECONDS", 600)
 # Specialized solvers (reCAPTCHA classifier, OCR, slider gap). Small ONNX models,
 # CPU-fast (~50-300ms), so they can run at higher concurrency than the big
 # transformer routes above. Two dedicated guards so a slow VLM/rerank call never
@@ -423,12 +418,12 @@ class ModelRegistry:
 registry = ModelRegistry()
 metrics = InferenceMetrics()
 guardrails = {
-    "embed": Guardrail("embed", EMBED_CONCURRENCY, EMBED_QUEUE_LIMIT, EMBED_QUEUE_TIMEOUT),
+    "embed": Guardrail("embed", EMBED_CONCURRENCY, EMBED_QUEUE_LIMIT, None),
     "batch_embed": Guardrail("batch_embed", EMBED_CONCURRENCY, BATCH_EMBED_QUEUE_LIMIT, None),
-    "query_embed": Guardrail("query_embed", EMBED_CONCURRENCY, QUERY_EMBED_QUEUE_LIMIT, QUERY_EMBED_QUEUE_TIMEOUT),
-    "rerank": Guardrail("rerank", RERANK_CONCURRENCY, RERANK_QUEUE_LIMIT, RERANK_QUEUE_TIMEOUT),
-    "vl": Guardrail("vl", VL_CONCURRENCY, VL_QUEUE_LIMIT, VL_QUEUE_TIMEOUT),
-    "chat": Guardrail("chat", CHAT_CONCURRENCY, CHAT_QUEUE_LIMIT, CHAT_QUEUE_TIMEOUT),
+    "query_embed": Guardrail("query_embed", EMBED_CONCURRENCY, QUERY_EMBED_QUEUE_LIMIT, None),
+    "rerank": Guardrail("rerank", RERANK_CONCURRENCY, RERANK_QUEUE_LIMIT, None),
+    "vl": Guardrail("vl", VL_CONCURRENCY, VL_QUEUE_LIMIT, None),
+    "chat": Guardrail("chat", CHAT_CONCURRENCY, CHAT_QUEUE_LIMIT, None),
     "recaptcha": Guardrail("recaptcha", RECAPTCHA_CONCURRENCY, RECAPTCHA_QUEUE_LIMIT, RECAPTCHA_QUEUE_TIMEOUT),
     "ocr": Guardrail("ocr", OCR_CONCURRENCY, OCR_QUEUE_LIMIT, OCR_QUEUE_TIMEOUT),
     "slide": Guardrail("slide", SLIDE_CONCURRENCY, SLIDE_QUEUE_LIMIT, SLIDE_QUEUE_TIMEOUT),

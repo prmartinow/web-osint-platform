@@ -66,7 +66,7 @@ Processing
 Serving Stores
   Pebble: exact lookup
   Typesense: keyword and facet search
-  Qwen inference: CPU text embeddings, reranking, and experimental VL embeddings
+  Local inference API: CPU text embeddings, reranking, and VL/model helper calls
   Qdrant: semantic/vector retrieval
   ClickHouse: analytics and rollups
   Filesystem: media and OCR artifacts
@@ -329,7 +329,8 @@ v1.2:
   Redpanda Connect emits observed topics and media requests for proven stateless routing
   Go normalizer/materializer keeps stateful store writes from raw captures
   Go observed-topic emission and legacy media router remain fallback paths
-  Python Qwen/OCR/VL services keep direct Redpanda topic consumers
+  Python enrichment workers keep direct Redpanda topic consumers and call
+  local-inference for shared model APIs
 ```
 
 See [Redpanda Native Architecture](REDPANDA_NATIVE_ARCHITECTURE.md) and

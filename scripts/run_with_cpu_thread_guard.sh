@@ -44,7 +44,6 @@ export WEB_OSINT_CPU_TOTAL_THREADS="$detected_total"
 export WEB_OSINT_CPU_RESERVED_THREADS="$reserved"
 export WEB_OSINT_CPU_EFFECTIVE_THREADS="$effective"
 
-clamp_thread_var QWEN_INFERENCE_TORCH_THREADS "${QWEN_INFERENCE_TORCH_THREADS:-$effective}"
 clamp_thread_var OMP_NUM_THREADS "${OMP_NUM_THREADS:-$effective}"
 clamp_thread_var MKL_NUM_THREADS "${MKL_NUM_THREADS:-$effective}"
 clamp_thread_var OPENBLAS_NUM_THREADS "${OPENBLAS_NUM_THREADS:-$effective}"
@@ -64,7 +63,7 @@ if [[ "$affinity_enabled" =~ ^(1|true|yes|on)$ ]] && command -v taskset >/dev/nu
   fi
 fi
 
-echo "[web-osint-cpu-guard] total=$WEB_OSINT_CPU_TOTAL_THREADS reserved=$WEB_OSINT_CPU_RESERVED_THREADS effective=$WEB_OSINT_CPU_EFFECTIVE_THREADS affinity=${affinity_range:-none} qwen_torch=$QWEN_INFERENCE_TORCH_THREADS omp=$OMP_NUM_THREADS mkl=$MKL_NUM_THREADS openblas=$OPENBLAS_NUM_THREADS paddle=$PADDLE_NUM_THREADS" >&2
+echo "[web-osint-cpu-guard] total=$WEB_OSINT_CPU_TOTAL_THREADS reserved=$WEB_OSINT_CPU_RESERVED_THREADS effective=$WEB_OSINT_CPU_EFFECTIVE_THREADS affinity=${affinity_range:-none} omp=$OMP_NUM_THREADS mkl=$MKL_NUM_THREADS openblas=$OPENBLAS_NUM_THREADS paddle=$PADDLE_NUM_THREADS" >&2
 
 if [[ -n "$affinity_range" ]]; then
   exec taskset -c "$affinity_range" "$@"

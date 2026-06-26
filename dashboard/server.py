@@ -32,12 +32,14 @@ QDRANT_URL = os.environ.get("QDRANT_URL", "http://web-osint-qdrant:6333").rstrip
 QDRANT_COLLECTION = os.environ.get("QDRANT_COLLECTION", "web_osint_evidence_v1")
 REDPANDA_PROXY_URL = os.environ.get("REDPANDA_PROXY_URL", "http://web-osint-redpanda:8082").rstrip("/")
 REDPANDA_ADMIN_URL = os.environ.get("REDPANDA_ADMIN_URL", "http://web-osint-redpanda:9644").rstrip("/")
-QWEN_INFERENCE_URL = os.environ.get("QWEN_INFERENCE_URL", "http://127.0.0.1:18200").rstrip("/")
+LOCAL_INFERENCE_URL = os.environ.get(
+    "LOCAL_INFERENCE_URL",
+    os.environ.get("QWEN_INFERENCE_URL", "http://127.0.0.1:18200"),
+).rstrip("/")
 EMBEDDING_WORKER_URL = os.environ.get("EMBEDDING_WORKER_URL", "http://127.0.0.1:18201").rstrip("/")
 MEDIA_ROUTER_URL = os.environ.get("MEDIA_ROUTER_URL", "http://127.0.0.1:18211").rstrip("/")
 MEDIA_OCR_WORKER_URL = os.environ.get("MEDIA_OCR_WORKER_URL", "http://127.0.0.1:18212").rstrip("/")
 MEDIA_VL_WORKER_URL = os.environ.get("MEDIA_VL_WORKER_URL", "http://127.0.0.1:18213").rstrip("/")
-MODELS_ROOT = Path(os.environ.get("WEB_OSINT_MODELS_DIR", "/mnt/data/web-osint-platform/models")).resolve()
 RESEARCH_SEARCH_TIMEOUT_SECONDS = int(os.environ.get("RESEARCH_SEARCH_TIMEOUT_SECONDS", "300"))
 RESEARCH_QUERY_EMBEDDING_PROMPT = os.environ.get(
     "RESEARCH_QUERY_EMBEDDING_PROMPT",
@@ -437,7 +439,7 @@ def live_dashboard(params):
             "redpanda": service_json("redpanda", lambda: http_json(f"{REDPANDA_PROXY_URL}/brokers")),
             "normalizer": service_json("normalizer", lambda: http_json(f"{NORMALIZER_URL}/stats")),
             "research_planner": service_json("research_planner", lambda: http_json(f"{RESEARCH_PLANNER_URL}/stats")),
-            "qwen": service_json("qwen", lambda: http_json(f"{QWEN_INFERENCE_URL}/healthz")),
+            "qwen": service_json("qwen", lambda: http_json(f"{LOCAL_INFERENCE_URL}/healthz")),
             "typesense": service_json("typesense", lambda: http_json(
                 f"{TYPESENSE_URL}/collections/evidence_posts",
                 headers={"X-TYPESENSE-API-KEY": TYPESENSE_KEY},
@@ -1146,29 +1148,6 @@ def qdrant_stage(params):
     }
 
 
-def safe_dir_size(path_value):
-    if not path_value:
-        return {"bytes": None, "files": None, "accessible": False}
-    path = Path(path_value).resolve()
-    try:
-        path.relative_to(MODELS_ROOT.parent)
-    except ValueError:
-        return {"bytes": None, "files": None, "accessible": False}
-    if not path.exists() or not path.is_dir():
-        return {"bytes": None, "files": None, "accessible": False}
-    total_bytes = 0
-    total_files = 0
-    for dirpath, dirnames, filenames in os.walk(path):
-        for filename in filenames:
-            try:
-                stat = (Path(dirpath) / filename).stat()
-            except OSError:
-                continue
-            total_files += 1
-            total_bytes += stat.st_size
-    return {"bytes": total_bytes, "files": total_files, "accessible": True}
-
-
 def host_cpu_info():
     info = {
         "model_name": "",
@@ -1307,7 +1286,7 @@ def model_inventory(qwen_health, ocr_status):
         {
             "id": "text",
             "name": "Qwen3-Embedding-8B",
-            "repo": os.environ.get("WEB_OSINT_TEXT_EMBEDDING_MODEL", "Qwen/Qwen3-Embedding-8B"),
+            "repo": "Qwen/Qwen3-Embedding-8B",
             "role": "default text embedding",
             "modality": "text",
             "precision": "bf16 safetensors",
@@ -1320,7 +1299,7 @@ def model_inventory(qwen_health, ocr_status):
         {
             "id": "reranker",
             "name": "Qwen3-Reranker-8B",
-            "repo": os.environ.get("WEB_OSINT_RERANKER_MODEL", "Qwen/Qwen3-Reranker-8B"),
+            "repo": "Qwen/Qwen3-Reranker-8B",
             "role": "precision reranking",
             "modality": "text pairs",
             "precision": "bf16 safetensors",
@@ -1333,7 +1312,7 @@ def model_inventory(qwen_health, ocr_status):
         {
             "id": "vl",
             "name": "Qwen3-VL-Embedding-8B",
-            "repo": os.environ.get("WEB_OSINT_VL_EMBEDDING_MODEL", "Qwen/Qwen3-VL-Embedding-8B"),
+            "repo": "Qwen/Qwen3-VL-Embedding-8B",
             "role": "image/screenshot embedding",
             "modality": "image + text",
             "precision": "bf16 safetensors",
@@ -1346,8 +1325,7 @@ def model_inventory(qwen_health, ocr_status):
     ]
     inventory = []
     for spec in model_specs:
-        path = paths.get(spec["id"], str(MODELS_ROOT / spec["name"]))
-        size = safe_dir_size(path)
+        path = paths.get(spec["id"], "")
         if spec["id"] in loaded:
             status = "loaded"
         elif exists.get(spec["id"]):
@@ -1359,8 +1337,8 @@ def model_inventory(qwen_health, ocr_status):
             "status": status,
             "path": path,
             "path_exists": bool(exists.get(spec["id"])),
-            "size_bytes": size["bytes"],
-            "files": size["files"],
+            "size_bytes": None,
+            "files": None,
             "loaded_for_seconds": (loaded.get(spec["id"]) or {}).get("loaded_for_seconds"),
         })
     ocr_data = (ocr_status or {}).get("data") or {}
@@ -1388,7 +1366,7 @@ def model_inventory(qwen_health, ocr_status):
 
 def model_stage(params):
     frame = params.get("frame", ["24h"])[0]
-    qwen_status = service_json("qwen", lambda: http_json(f"{QWEN_INFERENCE_URL}/healthz", timeout=8))
+    qwen_status = service_json("qwen", lambda: http_json(f"{LOCAL_INFERENCE_URL}/healthz", timeout=8))
     embedding_status = service_json("embedding_worker", lambda: http_json(f"{EMBEDDING_WORKER_URL}/stats", timeout=8))
     router_status = service_json("media_router", lambda: http_json(f"{MEDIA_ROUTER_URL}/stats", timeout=8))
     ocr_status = service_json("media_ocr", lambda: http_json(f"{MEDIA_OCR_WORKER_URL}/stats", timeout=8))
@@ -1403,7 +1381,7 @@ def model_stage(params):
     request_totals = qwen_request_totals(request_metrics)
 
     worker_statuses = [
-        ("qwen-inference", "model API", qwen_status),
+        ("local-inference", "model API", qwen_status),
         ("embedding-worker", "text embedding", embedding_status),
         ("media-router", "media routing", router_status),
         ("media-ocr-worker", "OCR", ocr_status),
@@ -1565,7 +1543,7 @@ def model_stage(params):
         "histogram": activity_rows(frame),
         "cpu_thread_guard": cpu_guard,
         "host_cpu": host_cpu,
-        "model_root": str(MODELS_ROOT),
+        "model_root": "local-inference:/healthz",
     }
 
 
@@ -2092,13 +2070,13 @@ def embed_search_query(query, model="text"):
         "batch_size": 1,
     }
     data = http_json_post(
-        f"{QWEN_INFERENCE_URL}/embed",
+        f"{LOCAL_INFERENCE_URL}/embed",
         body,
         timeout=RESEARCH_SEARCH_TIMEOUT_SECONDS,
     )
     rows = data.get("data") or []
     if not rows:
-        raise DashboardError(502, "Qwen embedding service returned no vectors")
+        raise DashboardError(502, "local-inference embedding service returned no vectors")
     return rows[0].get("embedding"), data
 
 
@@ -2174,7 +2152,7 @@ def apply_rerank(query, hits, rerank_limit):
     slice_hits = hits[:rerank_limit]
     documents = [document_for_rerank(hit) for hit in slice_hits]
     data = http_json_post(
-        f"{QWEN_INFERENCE_URL}/rerank",
+        f"{LOCAL_INFERENCE_URL}/rerank",
         {"query": query, "documents": documents, "normalize": False},
         timeout=RESEARCH_SEARCH_TIMEOUT_SECONDS,
     )

@@ -18,7 +18,10 @@ CLICKHOUSE_URL = os.environ.get("CLICKHOUSE_URL", "http://127.0.0.1:18123").rstr
 CLICKHOUSE_DATABASE = os.environ.get("CLICKHOUSE_DATABASE", "web_osint")
 CLICKHOUSE_USER = os.environ.get("CLICKHOUSE_USER", "web_osint")
 CLICKHOUSE_PASSWORD = os.environ.get("CLICKHOUSE_PASSWORD", "")
-QWEN_INFERENCE_URL = os.environ.get("QWEN_INFERENCE_URL", "http://127.0.0.1:18200").rstrip("/")
+LOCAL_INFERENCE_URL = os.environ.get(
+    "LOCAL_INFERENCE_URL",
+    os.environ.get("QWEN_INFERENCE_URL", "http://127.0.0.1:18200"),
+).rstrip("/")
 QDRANT_URL = os.environ.get("QDRANT_URL", "http://127.0.0.1:16333").rstrip("/")
 QDRANT_COLLECTION = os.environ.get("QDRANT_COLLECTION", "web_osint_evidence_v1")
 LIMIT = int(os.environ.get("BACKFILL_LIMIT", "0"))
@@ -132,7 +135,7 @@ def vector_name(row: dict[str, Any]) -> str:
 def embed(texts: list[str]) -> list[list[float]]:
     body = json.dumps({"model": "text", "inputs": texts, "normalize": True}).encode("utf-8")
     req = urllib.request.Request(
-        QWEN_INFERENCE_URL + "/embed",
+        LOCAL_INFERENCE_URL + "/embed",
         data=body,
         method="POST",
         headers={"Content-Type": "application/json"},

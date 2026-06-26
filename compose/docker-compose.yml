@@ -163,12 +163,11 @@ services:
       TYPESENSE_URL: http://127.0.0.1:18108
       QDRANT_URL: http://127.0.0.1:16333
       QDRANT_COLLECTION: web_osint_evidence_v1
-      QWEN_INFERENCE_URL: ${QWEN_INFERENCE_URL:-http://127.0.0.1:18200}
+      LOCAL_INFERENCE_URL: ${LOCAL_INFERENCE_URL:-http://127.0.0.1:18200}
       EMBEDDING_WORKER_URL: ${EMBEDDING_WORKER_URL:-http://127.0.0.1:18201}
       MEDIA_ROUTER_URL: ${MEDIA_ROUTER_URL:-http://127.0.0.1:18211}
       MEDIA_OCR_WORKER_URL: ${MEDIA_OCR_WORKER_URL:-http://127.0.0.1:18212}
       MEDIA_VL_WORKER_URL: ${MEDIA_VL_WORKER_URL:-http://127.0.0.1:18213}
-      WEB_OSINT_MODELS_DIR: ${WEB_OSINT_MODELS_DIR:-/mnt/data/web-osint-platform/models}
       NORMALIZER_URL: http://127.0.0.1:18090
       RESEARCH_PLANNER_URL: http://127.0.0.1:18091
       REDPANDA_PROXY_URL: http://127.0.0.1:18082
@@ -180,7 +179,6 @@ services:
     network_mode: host
     volumes:
       - ${WEB_OSINT_DATA_ROOT:-/mnt/data/web-osint-platform}:${WEB_OSINT_DATA_ROOT:-/mnt/data/web-osint-platform}:ro
-      - ${WEB_OSINT_MODELS_DIR:-/mnt/data/web-osint-platform/models}:${WEB_OSINT_MODELS_DIR:-/mnt/data/web-osint-platform/models}:ro
     depends_on:
       - redpanda
       - typesense

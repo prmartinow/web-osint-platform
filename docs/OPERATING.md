@@ -290,42 +290,38 @@ docker compose --env-file .env -f compose/docker-compose.yml run --rm research-p
 
 The dashboard includes a `Meaning` tab backed by `/api/stage/meaning`. It is read-only and surfaces annotation activity, label families, recent annotations, research questions, autonomous tasks, and research signals from ClickHouse. Empty tables are treated as an empty Meaning Layer so the dashboard can run before the new schema is initialized.
 
-## Local Inference Models
+## Local Inference Interface
 
-The default local retrieval model set is:
+Model serving and model downloads live in the separate `local-inference` repo.
+Web OSINT only calls the API through `LOCAL_INFERENCE_URL`, defaulting to
+`http://127.0.0.1:18200`.
 
-- `Qwen/Qwen3-Embedding-8B` for 4096-dimensional text embeddings.
-- `Qwen/Qwen3-Reranker-8B` for reranking dense/BM25/metadata candidate sets.
-- `Qwen/Qwen3-VL-Embedding-8B` for experimental screenshot, chart, UI, benchmark-table, and image embeddings.
-
-Download these models asynchronously with the user-systemd service:
+Check model service state from the local-inference side:
 
 ```bash
-sudo chown -R ops:ops /mnt/data/web-osint-platform
-mkdir -p ~/.config/systemd/user
-cp systemd/user/web-osint-qwen-model-downloads.service ~/.config/systemd/user/
-systemctl --user daemon-reload
-systemctl --user enable --now web-osint-qwen-model-downloads.service
+systemctl --user status local-inference.service --no-pager
+curl -fsS "${LOCAL_INFERENCE_URL:-http://127.0.0.1:18200}/healthz" | python3 -m json.tool
+curl -fsS "${LOCAL_INFERENCE_URL:-http://127.0.0.1:18200}/metrics"
 ```
 
-The service writes models, Hugging Face caches, and its isolated downloader venv under `/mnt/data/web-osint-platform`, keeping the root filesystem clean.
-It authenticates with the first `hf_...` token found in `/home/ops/dev/huggingface.md` without printing or passing the token on the command line.
-
-Check progress:
+Web OSINT owns only the client workers that call the API:
 
 ```bash
-systemctl --user status web-osint-qwen-model-downloads.service --no-pager
-systemctl --user status web-osint-qwen-model-download-progress.service --no-pager
-tail -F /mnt/data/web-osint-platform/logs/model-downloads/latest-progress.log
+systemctl --user status web-osint-embedding-worker.service --no-pager
+systemctl --user status web-osint-media-vl-worker.service --no-pager
+curl -fsS http://127.0.0.1:18201/stats
+curl -fsS http://127.0.0.1:18213/stats
 ```
 
-See `docs/LOCAL_INFERENCE.md` for vector layout and recovery notes.
+See `docs/LOCAL_INFERENCE.md` for the Web OSINT client contract and the
+`prmartinow/local-inference` repo for model inventory, downloads, guardrails,
+and candidate model manifests.
 
-CPU-heavy Web OSINT user services should be launched through `scripts/run_with_cpu_thread_guard.sh`. The default `WEB_OSINT_CPU_RESERVED_THREADS=2` keeps at least two logical CPUs outside the worker affinity mask for other RPC services while also clamping common numeric thread-pool variables. Check the active Qwen cap with:
-
-```bash
-curl -fsS http://127.0.0.1:18200/healthz | python3 -m json.tool | sed -n '1,40p'
-```
+CPU-heavy Web OSINT user services should be launched through
+`scripts/run_with_cpu_thread_guard.sh`. The default
+`WEB_OSINT_CPU_RESERVED_THREADS=2` keeps at least two logical CPUs outside the
+worker affinity mask for other RPC services while clamping common numeric
+thread-pool variables for client workers.
 
 ## End-To-End Canary
 

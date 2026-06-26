@@ -299,7 +299,7 @@ publication snapshots are frozen
 | Source Workbench | Research UI screens, review APIs, entity links, claims, review-task Inbox | capture, extractor, metrics, eval | `research_review_event.v1` and review tables |
 | Capture/EvidenceDocument | capture bundles, EvidenceDocument v2, source-native adapters, omitted-content records | UI, extractors, metrics | capture envelope, artifact manifest, block/anchor schema |
 | Deterministic Extraction | URL/handle/repo/HF/arXiv/version/hardware/metric extractors | UI, capture, eval | observation/proposed-fact output into review layer |
-| Model Preparation | async model downloads, isolated venvs, service wrappers, smoke tests | docs, UI, metrics, eval | no canonical writes until review/eval gates exist |
+| Model Preparation | local-inference-owned downloads, runtime envs, service wrappers, smoke tests | docs, UI, metrics, eval | Web OSINT only consumes model APIs and stores reviewable outputs |
 | Private Evaluation | retrieval, structured extraction, entity, OCR/chart/table, visual eval sets | all tracks | promotion gates for neural/model lanes |
 | Metrics Maturity | Redpanda/Pebble/Typesense/Qdrant/ClickHouse/model panels | all tracks | ops dashboard only; no research UI coupling |
 
@@ -310,9 +310,8 @@ Recommended order of execution:
    anchors and artifact provenance.
 3. Start deterministic extractors early because they are low-risk and feed the
    same review layer.
-4. Download and smoke-test candidate models asynchronously under `/mnt/data`,
-   but wire them into production only after private evals and review targets
-   exist.
+4. Prepare and smoke-test candidate models through `local-inference`, then wire
+   Web OSINT client workers only after private evals and review targets exist.
 5. Build private eval corpora before neural sparse, late-interaction, visual
    reranking, or schema-extraction model adoption.
 6. Improve metrics independently in the operations dashboard.
@@ -448,7 +447,7 @@ Implement frozen output workflows:
 | 09 | Relation/event extraction | not implemented | relation/event candidate workers after entity mentions |
 | 10 | Structured extraction | proposed facts table/UI exists | schema extractors, validation, review promotion |
 | 11 | NLI/entailment | not implemented | claim-passage verifier assessments |
-| 12 | Document VLMs | Qwen3-VL/PaddleOCR services exist | hard-case document parser queue and model-run provenance |
+| 12 | Document VLMs | local-inference Qwen3-VL API and PaddleOCR enrichment path exist | hard-case document parser queue and model-run provenance |
 | 13 | Chart/table VLMs | table blocks partially represented | grounded chart/table extraction with visible region provenance |
 | 14 | Visual OCR/layout OCR | PaddleOCR path exists | PP-StructureV3-style artifact contract and overlay UI |
 | 15 | Visual retrievers/rerankers | Qwen3-VL embedding path exists | visual reranker and late-interaction experiments behind eval |

@@ -1,8 +1,8 @@
 [Unit]
 Description=Web OSINT Qwen3-VL media embedding worker
 Documentation=file:/home/ops/dev/x-research/docs/LOCAL_INFERENCE.md
-After=network-online.target web-osint-qwen-inference.service web-osint-media-router.service
-Wants=network-online.target web-osint-qwen-inference.service
+After=network-online.target local-inference.service web-osint-media-router.service
+Wants=network-online.target local-inference.service
 
 [Service]
 Type=simple
@@ -16,7 +16,7 @@ Environment=KAFKA_BROKERS=127.0.0.1:19092
 Environment=CLICKHOUSE_URL=http://127.0.0.1:18123
 Environment=CLICKHOUSE_DATABASE=web_osint
 Environment=CLICKHOUSE_USER=web_osint
-Environment=QWEN_INFERENCE_URL=http://127.0.0.1:18200
+Environment=LOCAL_INFERENCE_URL=http://127.0.0.1:18200
 Environment=QDRANT_URL=http://127.0.0.1:16333
 Environment=QDRANT_COLLECTION=web_osint_evidence_v1
 Environment=MEDIA_WORKER_ROLE=vl

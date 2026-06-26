@@ -56,7 +56,7 @@ CLICKHOUSE_URL = env("CLICKHOUSE_URL", "http://127.0.0.1:18123").rstrip("/")
 CLICKHOUSE_DATABASE = env("CLICKHOUSE_DATABASE", "web_osint")
 CLICKHOUSE_USER = env("CLICKHOUSE_USER", "web_osint")
 CLICKHOUSE_PASSWORD = env("CLICKHOUSE_PASSWORD", "")
-QWEN_INFERENCE_URL = env("QWEN_INFERENCE_URL", "http://127.0.0.1:18200").rstrip("/")
+LOCAL_INFERENCE_URL = env("LOCAL_INFERENCE_URL", env("QWEN_INFERENCE_URL", "http://127.0.0.1:18200")).rstrip("/")
 QDRANT_URL = env("QDRANT_URL", "http://127.0.0.1:16333").rstrip("/")
 QDRANT_COLLECTION = env("QDRANT_COLLECTION", "web_osint_evidence_v1")
 
@@ -792,7 +792,7 @@ def insert_vl_row(event: dict[str, Any], status: str, **values: Any) -> None:
 
 def embed_vl_image(path: Path) -> dict[str, Any]:
     response = requests.post(
-        f"{QWEN_INFERENCE_URL}/embed",
+        f"{LOCAL_INFERENCE_URL}/embed",
         json={"model": "vl", "inputs": [{"image": str(path)}], "normalize": True, "batch_size": 1},
         timeout=REQUEST_TIMEOUT,
     )

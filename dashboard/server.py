@@ -34,7 +34,7 @@ REDPANDA_PROXY_URL = os.environ.get("REDPANDA_PROXY_URL", "http://web-osint-redp
 REDPANDA_ADMIN_URL = os.environ.get("REDPANDA_ADMIN_URL", "http://web-osint-redpanda:9644").rstrip("/")
 LOCAL_INFERENCE_URL = os.environ.get(
     "LOCAL_INFERENCE_URL",
-    os.environ.get("QWEN_INFERENCE_URL", "http://127.0.0.1:18200"),
+    "http://127.0.0.1:18200",
 ).rstrip("/")
 EMBEDDING_WORKER_URL = os.environ.get("EMBEDDING_WORKER_URL", "http://127.0.0.1:18201").rstrip("/")
 MEDIA_ROUTER_URL = os.environ.get("MEDIA_ROUTER_URL", "http://127.0.0.1:18211").rstrip("/")

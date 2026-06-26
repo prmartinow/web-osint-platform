@@ -20,7 +20,7 @@ CLICKHOUSE_USER = os.environ.get("CLICKHOUSE_USER", "web_osint")
 CLICKHOUSE_PASSWORD = os.environ.get("CLICKHOUSE_PASSWORD", "")
 LOCAL_INFERENCE_URL = os.environ.get(
     "LOCAL_INFERENCE_URL",
-    os.environ.get("QWEN_INFERENCE_URL", "http://127.0.0.1:18200"),
+    "http://127.0.0.1:18200",
 ).rstrip("/")
 QDRANT_URL = os.environ.get("QDRANT_URL", "http://127.0.0.1:16333").rstrip("/")
 QDRANT_COLLECTION = os.environ.get("QDRANT_COLLECTION", "web_osint_evidence_v1")
@@ -138,9 +138,13 @@ def embed(texts: list[str]) -> list[list[float]]:
         LOCAL_INFERENCE_URL + "/embed",
         data=body,
         method="POST",
-        headers={"Content-Type": "application/json"},
+        headers={
+            "Content-Type": "application/json",
+            "X-Caller": "web-osint-qdrant-embedding-backfill",
+            "X-Workload": "batch",
+        },
     )
-    with urllib.request.urlopen(req, timeout=REQUEST_TIMEOUT) as response:
+    with urllib.request.urlopen(req) as response:
         payload = json.loads(response.read().decode("utf-8"))
     return [item["embedding"] for item in payload["data"]]
 

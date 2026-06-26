@@ -17,8 +17,8 @@ The Web OSINT interface is the HTTP API URL:
 LOCAL_INFERENCE_URL=http://127.0.0.1:18200
 ```
 
-`QWEN_INFERENCE_URL` remains a compatibility fallback for older deployments.
-New Web OSINT configuration should use `LOCAL_INFERENCE_URL`.
+Do not add `QWEN_INFERENCE_URL` compatibility paths back into Web OSINT. Older
+Qwen-branded service names are migration history only.
 
 ## Client Responsibilities
 
@@ -121,3 +121,9 @@ journalctl --user -fu web-osint-qdrant-embedding-backfill.service -o cat
 
 The backfill service is idempotent because Qdrant point IDs are deterministic
 from evidence IDs and source-specific prefixes.
+
+Embedding, VL embedding, rerank, and embedding backfill requests do not set HTTP
+timeouts. Slow model state must be inspected through local-inference
+`/healthz` guardrails and `/metrics`; Web OSINT clients should not retry while
+the model may still be actively working. Backfill requests include
+`X-Workload: batch` so local-inference routes them through the batch guardrail.

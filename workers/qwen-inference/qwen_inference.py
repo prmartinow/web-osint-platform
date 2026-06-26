@@ -71,6 +71,7 @@ def env_float(name: str, default: float) -> float:
 EMBED_CONCURRENCY = env_int("QWEN_EMBED_CONCURRENCY", 1)
 EMBED_QUEUE_LIMIT = env_int("QWEN_EMBED_QUEUE_LIMIT", 64)
 EMBED_QUEUE_TIMEOUT = env_float("QWEN_EMBED_QUEUE_TIMEOUT_SECONDS", 300)
+BATCH_EMBED_QUEUE_LIMIT = env_int("QWEN_BATCH_EMBED_QUEUE_LIMIT", 1)
 QUERY_EMBED_QUEUE_LIMIT = env_int("QWEN_QUERY_EMBED_QUEUE_LIMIT", 4)
 QUERY_EMBED_QUEUE_TIMEOUT = env_float("QWEN_QUERY_EMBED_QUEUE_TIMEOUT_SECONDS", 60)
 RERANK_CONCURRENCY = env_int("QWEN_RERANK_CONCURRENCY", 1)
@@ -246,11 +247,11 @@ class InferenceMetrics:
 
 
 class Guardrail:
-    def __init__(self, name: str, concurrency: int, queue_limit: int, queue_timeout: float) -> None:
+    def __init__(self, name: str, concurrency: int, queue_limit: int, queue_timeout: float | None) -> None:
         self.name = name
         self.concurrency = max(1, concurrency)
         self.queue_limit = max(0, queue_limit)
-        self.queue_timeout = max(0.0, queue_timeout)
+        self.queue_timeout = None if queue_timeout is None else max(0.0, queue_timeout)
         self._semaphore = threading.BoundedSemaphore(self.concurrency)
         self._lock = threading.Lock()
         self._waiting = 0
@@ -263,7 +264,10 @@ class Guardrail:
             if self._waiting >= self.queue_limit:
                 raise HTTPException(status_code=429, detail=f"{self.name} queue is full")
             self._waiting += 1
-        acquired = self._semaphore.acquire(timeout=self.queue_timeout)
+        if self.queue_timeout is None:
+            acquired = self._semaphore.acquire()
+        else:
+            acquired = self._semaphore.acquire(timeout=self.queue_timeout)
         wait_seconds = time.time() - queued_at
         with self._lock:
             self._waiting -= 1
@@ -420,6 +424,7 @@ registry = ModelRegistry()
 metrics = InferenceMetrics()
 guardrails = {
     "embed": Guardrail("embed", EMBED_CONCURRENCY, EMBED_QUEUE_LIMIT, EMBED_QUEUE_TIMEOUT),
+    "batch_embed": Guardrail("batch_embed", EMBED_CONCURRENCY, BATCH_EMBED_QUEUE_LIMIT, None),
     "query_embed": Guardrail("query_embed", EMBED_CONCURRENCY, QUERY_EMBED_QUEUE_LIMIT, QUERY_EMBED_QUEUE_TIMEOUT),
     "rerank": Guardrail("rerank", RERANK_CONCURRENCY, RERANK_QUEUE_LIMIT, RERANK_QUEUE_TIMEOUT),
     "vl": Guardrail("vl", VL_CONCURRENCY, VL_QUEUE_LIMIT, VL_QUEUE_TIMEOUT),
@@ -451,6 +456,13 @@ def caller_from(request: Request | None) -> str:
     if request is None:
         return "internal"
     return request.headers.get("x-caller") or request.headers.get("user-agent", "unknown").split(" ", 1)[0][:60]
+
+
+def is_batch_embedding_request(request: Request | None) -> bool:
+    if request is None:
+        return False
+    workload = (request.headers.get("x-workload") or request.headers.get("x-qwen-workload") or "").strip().lower()
+    return workload in {"batch", "offline", "backfill"}
 
 
 def input_char_count(inputs: list[str | dict[str, Any]]) -> int:
@@ -675,6 +687,8 @@ def embed(request: EmbeddingRequest, http_request: Request) -> dict[str, Any]:
     operation = "vl" if served_name == "Qwen3-VL-Embedding-8B" else "embed"
     if request.prompt or request.prompt_name:
         operation = "vl" if operation == "vl" else "query_embed"
+    elif operation == "embed" and is_batch_embedding_request(http_request):
+        operation = "batch_embed"
 
     def run_encode() -> dict[str, Any]:
         kwargs: dict[str, Any] = {

@@ -25,8 +25,6 @@ import requests
 from confluent_kafka import Consumer, KafkaError, Producer
 from PIL import Image, ImageDraw, ImageFont
 
-os.environ.setdefault("PADDLE_PDX_ENABLE_MKLDNN_BYDEFAULT", "0")
-
 SCRIPT_DIR = Path(__file__).resolve().parents[2] / "scripts"
 sys.path.insert(0, str(SCRIPT_DIR))
 
@@ -486,91 +484,35 @@ def run_router() -> None:
         time.sleep(ROUTER_INTERVAL)
 
 
-def init_paddleocr():
-    from paddleocr import PaddleOCR
-
-    kwargs = {"lang": env("MEDIA_OCR_LANG", "en")}
-    with contextlib.suppress(TypeError):
-        return PaddleOCR(use_textline_orientation=True, **kwargs)
-    with contextlib.suppress(TypeError):
-        return PaddleOCR(use_angle_cls=True, **kwargs)
-    return PaddleOCR(**kwargs)
-
-
-def parse_paddle_result(result: Any) -> list[dict[str, Any]]:
-    blocks: list[dict[str, Any]] = []
-
-    def add(text: Any, score: Any = None, box: Any = None) -> None:
-        clean = safe_text(text)
-        if not clean:
-            return
-        try:
-            conf = float(score) if score is not None else 0.0
-        except (TypeError, ValueError):
-            conf = 0.0
-        blocks.append({"text": clean, "confidence": conf, "box": box})
-
-    def walk(value: Any) -> None:
-        if value is None:
-            return
-        if isinstance(value, dict):
-            texts = value.get("rec_texts") or value.get("texts")
-            scores = value.get("rec_scores") or value.get("scores") or []
-            boxes = value.get("dt_polys") or value.get("rec_boxes") or value.get("boxes") or []
-            if isinstance(texts, list):
-                for idx, text in enumerate(texts):
-                    add(text, scores[idx] if idx < len(scores) else None, boxes[idx] if idx < len(boxes) else None)
-                return
-            for item in value.values():
-                walk(item)
-            return
-        if isinstance(value, (list, tuple)):
-            if len(value) >= 2 and isinstance(value[1], (list, tuple)) and len(value[1]) >= 2 and isinstance(value[1][0], str):
-                add(value[1][0], value[1][1], value[0])
-                return
-            for item in value:
-                walk(item)
-
-    walk(result)
-    return blocks
-
-
-def run_ocr_engine(path: Path) -> tuple[list[dict[str, Any]], str]:
-    ocr = run_ocr_engine._ocr  # type: ignore[attr-defined]
-    if ocr is None:
-        ocr = init_paddleocr()
-        run_ocr_engine._ocr = ocr  # type: ignore[attr-defined]
-    if hasattr(ocr, "predict"):
-        result = ocr.predict(str(path))
-    else:
-        result = ocr.ocr(str(path), cls=True)
-    return parse_paddle_result(result), type(ocr).__module__
-
-
-run_ocr_engine._ocr = None  # type: ignore[attr-defined]
-
-
 def normalized_ocr_text(value: str) -> str:
     return "".join(ch for ch in value.upper() if ch.isalnum())
 
 
-def ocr_runtime_info() -> dict[str, str]:
-    import importlib.metadata as md
-
-    def package_version(package: str) -> str:
-        try:
-            return md.version(package)
-        except Exception:
-            return ""
-
-    return {
-        "paddleocr_version": paddleocr_version(),
-        "paddlepaddle_version": package_version("paddlepaddle"),
-        "paddlex_version": package_version("paddlex"),
+def ocr_runtime_info() -> dict[str, Any]:
+    info: dict[str, Any] = {
+        "engine_owner": "local-inference",
+        "local_inference_url": LOCAL_INFERENCE_URL,
         "python_version": sys.version.split()[0],
-        "paddle_pdx_enable_mkldnn_bydefault": env("PADDLE_PDX_ENABLE_MKLDNN_BYDEFAULT", ""),
-        "paddle_pdx_cache_home": env("PADDLE_PDX_CACHE_HOME", ""),
     }
+    with contextlib.suppress(Exception):
+        health = request_json(f"{LOCAL_INFERENCE_URL}/healthz", timeout=3)
+        info["local_inference_ok"] = bool(health.get("ok"))
+        info["paddleocr_runtime"] = health.get("paddleocr_runtime") or {}
+        info["paddleocr_guardrail"] = (health.get("guardrails") or {}).get("paddleocr") or {}
+    return info
+
+
+def call_media_ocr(path: Path) -> dict[str, Any]:
+    # Slow model API call: do not set an HTTP timeout. Progress/state comes from
+    # local-inference /healthz guardrails and /metrics, not from client retries.
+    response = requests.post(
+        f"{LOCAL_INFERENCE_URL}/media/ocr",
+        json={"image_path": str(path), "lang": env("MEDIA_OCR_LANG", "en")},
+        headers={"X-Caller": "web-osint-media-ocr-worker"},
+    )
+    if response.status_code >= 400:
+        raise RuntimeError(f"local inference media OCR HTTP {response.status_code}: {response.text[:2000]}")
+    return response.json()
 
 
 def run_ocr_startup_selftest() -> None:
@@ -583,8 +525,9 @@ def run_ocr_startup_selftest() -> None:
         font = ImageFont.load_default()
     draw.text((40, 88), OCR_SELFTEST_TOKEN, fill="black", font=font)
     image.save(test_path)
-    blocks, _engine_module = run_ocr_engine(test_path)
-    text = "\n".join(block["text"] for block in blocks)
+    result = call_media_ocr(test_path)
+    blocks = result.get("blocks") or []
+    text = safe_text(result.get("text")) or "\n".join(safe_text(block.get("text")) for block in blocks)
     if OCR_SELFTEST_EXPECTED not in normalized_ocr_text(text):
         raise RuntimeError(f"OCR startup self-test failed; expected {OCR_SELFTEST_EXPECTED}, got {text[:200]!r}")
     print(
@@ -681,11 +624,15 @@ def handle_ocr_event(producer: Producer, event: dict[str, Any]) -> None:
     out_dir = ensure_dir(OCR_ROOT / sha[:2])
     json_path = out_dir / f"{ocr_id}.json"
     text_path = out_dir / f"{ocr_id}.txt"
-    blocks, engine_module = run_ocr_engine(path)
-    text = "\n".join(block["text"] for block in blocks)
+    ocr_result = call_media_ocr(path)
+    blocks = ocr_result.get("blocks") or []
+    engine_module = safe_text(ocr_result.get("engine_module"))
+    text = safe_text(ocr_result.get("text")) or "\n".join(safe_text(block.get("text")) for block in blocks)
     confidences = [float(block.get("confidence") or 0.0) for block in blocks]
-    mean_conf = statistics.fmean(confidences) if confidences else 0.0
-    min_conf = min(confidences) if confidences else 0.0
+    mean_conf = float(ocr_result.get("mean_confidence") or (statistics.fmean(confidences) if confidences else 0.0))
+    min_conf = float(ocr_result.get("min_confidence") or (min(confidences) if confidences else 0.0))
+    engine_version = safe_text(ocr_result.get("engine_version"))
+    runtime = ocr_result.get("runtime") or ocr_runtime_info()
     payload = {
         "ocr_id": ocr_id,
         "source_event": event,
@@ -693,8 +640,8 @@ def handle_ocr_event(producer: Producer, event: dict[str, Any]) -> None:
         "blocks": blocks,
         "engine": "paddleocr",
         "engine_module": engine_module,
-        "engine_version": paddleocr_version(),
-        "runtime": ocr_runtime_info(),
+        "engine_version": engine_version,
+        "runtime": runtime,
         "params_hash": params_hash,
         "created_at": now_iso(),
     }
@@ -704,7 +651,7 @@ def handle_ocr_event(producer: Producer, event: dict[str, Any]) -> None:
         event,
         "completed",
         ocr_id=ocr_id,
-        engine_version=paddleocr_version(),
+        engine_version=engine_version,
         json_artifact_path=str(json_path),
         text_artifact_path=str(text_path),
         text=text,
@@ -728,15 +675,6 @@ def handle_ocr_event(producer: Producer, event: dict[str, Any]) -> None:
     publish_ocr_capture(producer, event, ocr_id, text, json_path, text_path)
     stats.incr("completed")
     stats.event(completed)
-
-
-def paddleocr_version() -> str:
-    try:
-        import importlib.metadata as md
-
-        return md.version("paddleocr")
-    except Exception:
-        return ""
 
 
 def vl_completed_for(sha: str, params_hash: str) -> bool:

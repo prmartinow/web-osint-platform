@@ -9,7 +9,6 @@ Type=simple
 WorkingDirectory=/home/ops/dev/x-research
 EnvironmentFile=-/home/ops/dev/x-research/.env
 Environment=OSINT_DATA_ROOT=/mnt/data/x-research
-Environment=WEB_OSINT_MODEL_ROOT=/mnt/data/web-osint-platform
 Environment=REDPANDA_BROKERS=127.0.0.1:19092
 Environment=KAFKA_BROKERS=127.0.0.1:19092
 Environment=CLICKHOUSE_URL=http://127.0.0.1:18123
@@ -17,9 +16,6 @@ Environment=CLICKHOUSE_DATABASE=web_osint
 Environment=CLICKHOUSE_USER=web_osint
 Environment=MEDIA_WORKER_ROLE=router
 Environment=MEDIA_ROUTER_HTTP_ADDR=127.0.0.1:18211
-Environment=PADDLEOCR_HOME=/mnt/data/web-osint-platform/paddleocr
-Environment=PADDLE_PDX_CACHE_HOME=/mnt/data/web-osint-platform/paddleocr/paddlex-cache
-Environment=PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK=True
 Environment=TOKENIZERS_PARALLELISM=false
 ExecStartPre=/home/ops/dev/x-research/scripts/init_media_enrichment_venv.sh
 ExecStart=/mnt/data/web-osint-platform/.venv-media-enrichment/bin/python /home/ops/dev/x-research/workers/media-enrichment/media_enrichment_worker.py router

@@ -308,10 +308,17 @@ Web OSINT owns only the client workers that call the API:
 
 ```bash
 systemctl --user status web-osint-embedding-worker.service --no-pager
+systemctl --user status web-osint-media-ocr-worker.service --no-pager
 systemctl --user status web-osint-media-vl-worker.service --no-pager
 curl -fsS http://127.0.0.1:18201/stats
+curl -fsS http://127.0.0.1:18212/stats
 curl -fsS http://127.0.0.1:18213/stats
 ```
+
+PaddleOCR is served by local-inference through `POST /media/ocr`; the Web
+OSINT media OCR worker only consumes OCR request topics and writes artifacts,
+ClickHouse rows, and capture events. Do not install PaddleOCR/PaddleX/
+PaddlePaddle or configure Paddle cache paths in Web OSINT worker venvs.
 
 See `docs/LOCAL_INFERENCE.md` for the Web OSINT client contract and the
 `prmartinow/local-inference` repo for model inventory, downloads, guardrails,

@@ -26,7 +26,7 @@ Web OSINT may:
 
 - choose when evidence should be embedded, reranked, or visually embedded;
 - validate request sizes before sending work to the model API;
-- write model outputs into Qdrant, ClickHouse, review objects, and audit topics;
+- write model outputs into Qdrant, ClickHouse, review objects, artifacts, and audit topics;
 - display `/healthz` and `/metrics` from local-inference in operations views.
 
 Web OSINT must not:
@@ -35,6 +35,7 @@ Web OSINT must not:
 - install or own model-serving Python environments;
 - mount model directories into application containers;
 - start `web-osint-qwen-*` model service units;
+- install PaddleOCR/PaddleX/PaddlePaddle in Web OSINT worker venvs;
 - read model files directly to infer availability.
 
 ## Local Inference Routes Used
@@ -47,6 +48,7 @@ POST /rerank
 POST /v1/chat/completions
 POST /classify_recaptcha
 POST /ocr
+POST /media/ocr
 POST /slide_gap
 ```
 
@@ -58,15 +60,19 @@ guardrails, slow-model no-timeout semantics, and candidate model manifests.
 | Service | Port | Role |
 | --- | ---: | --- |
 | `web-osint-embedding-worker.service` | `127.0.0.1:18201` | Consumes observed evidence, calls `POST /embed`, and upserts named vectors into Qdrant |
+| `web-osint-media-ocr-worker.service` | `127.0.0.1:18212` | Consumes OCR requests, calls `POST /media/ocr`, and writes OCR artifacts/projections |
 | `web-osint-media-vl-worker.service` | `127.0.0.1:18213` | Calls `POST /embed model=vl` for media artifacts |
 | `web-osint-qdrant-embedding-backfill.service` | n/a | One-shot ClickHouse-to-Qdrant backfill through `POST /embed` |
 | Dashboard search coordinator | dashboard process | Calls `POST /embed` and optional `POST /rerank` for interactive search |
 
-The embedding worker and backfill use a Web OSINT client venv, not the
-local-inference service venv:
+The embedding and media workers use Web OSINT client venvs, not the
+local-inference service venv. These venvs contain pipeline dependencies such as
+Kafka/HTTP/Qdrant/ClickHouse clients and image IO helpers; they must not contain
+model runtimes such as PaddleOCR or transformer stacks:
 
 ```bash
 scripts/init_embedding_worker_venv.sh
+scripts/init_media_enrichment_venv.sh
 ```
 
 ## Vector Layout
@@ -98,8 +104,10 @@ Check Web OSINT client workers:
 
 ```bash
 systemctl --user status web-osint-embedding-worker.service --no-pager
+systemctl --user status web-osint-media-ocr-worker.service --no-pager
 systemctl --user status web-osint-media-vl-worker.service --no-pager
 curl -fsS http://127.0.0.1:18201/stats
+curl -fsS http://127.0.0.1:18212/stats
 curl -fsS http://127.0.0.1:18213/stats
 ```
 

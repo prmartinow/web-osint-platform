@@ -1278,7 +1278,7 @@ def model_status_counts(inventory):
     return {**counts, "usable": usable}
 
 
-def model_inventory(qwen_health, ocr_status):
+def model_inventory(qwen_health):
     paths = (qwen_health or {}).get("model_paths") or {}
     exists = (qwen_health or {}).get("model_path_exists") or {}
     loaded = (qwen_health or {}).get("loaded") or {}
@@ -1341,7 +1341,7 @@ def model_inventory(qwen_health, ocr_status):
             "files": None,
             "loaded_for_seconds": (loaded.get(spec["id"]) or {}).get("loaded_for_seconds"),
         })
-    ocr_data = (ocr_status or {}).get("data") or {}
+    paddle_loaded = next((value for key, value in loaded.items() if str(key).startswith("paddleocr")), None)
     inventory.append({
         "id": "paddleocr",
         "name": "PaddleOCR",
@@ -1351,15 +1351,15 @@ def model_inventory(qwen_health, ocr_status):
         "precision": "CPU runtime",
         "dimension": "",
         "vector_name": "ocr_dense downstream",
-        "endpoint": f"{MEDIA_OCR_WORKER_URL}/stats",
-        "worker": "web-osint-media-ocr-worker",
+        "endpoint": "POST /media/ocr",
+        "worker": "local-inference",
         "output": "media_ocr_results + OCR artifacts",
-        "status": "ready" if ocr_status.get("ok") and ocr_data.get("ok", True) else "down",
-        "path": "",
-        "path_exists": "",
+        "status": "loaded" if paddle_loaded else ("available" if exists.get("paddleocr_home") else "missing"),
+        "path": paths.get("paddleocr_home", ""),
+        "path_exists": bool(exists.get("paddleocr_home")),
         "size_bytes": None,
         "files": None,
-        "loaded_for_seconds": "",
+        "loaded_for_seconds": (paddle_loaded or {}).get("loaded_for_seconds"),
     })
     return inventory
 
@@ -1376,7 +1376,7 @@ def model_stage(params):
     guardrails = []
     for operation, cfg in (qwen_health.get("guardrails") or {}).items():
         guardrails.append({"operation": operation, **(cfg or {})})
-    inventory = model_inventory(qwen_health, ocr_status)
+    inventory = model_inventory(qwen_health)
     request_metrics = qwen_request_rows(qwen_health)
     request_totals = qwen_request_totals(request_metrics)
 

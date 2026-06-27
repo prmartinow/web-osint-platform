@@ -44,7 +44,7 @@ The remaining work is production depth, visual QA, and Web OSINT repo consolidat
 
 | ID | Area | Status | Acceptance Gate | Next Action |
 | --- | --- | --- | --- | --- |
-| RUI-01 | Browser/UI design audit QA | Todo | Desktop and mobile screenshots of Home, Projects, Timeline, Compare, Draft, Publishing, Publication Detail, Source Workbench show no broken layout, overlap, unreadable controls, or missing primary actions. | Install/use browser automation or preserved browser inspection, capture screenshots, fix layout issues. |
+| RUI-01 | Browser/UI design audit QA | Done | Desktop and mobile screenshots of Home, Projects, Timeline, Compare, Draft, Publishing, Publication Detail, Source Workbench show no broken layout, overlap, unreadable controls, missing primary actions, or desktop content capped to a narrow slice of the available window. | Keep the screenshot audit in the verification loop when later UI phases change layout. |
 | RUI-02 | Timeline controls | Partial | Timeline supports date range, lane, date type, confidence, review state, source kind, and saved view controls without fabricating precise dates. | Add controls to frontend and server filters. |
 | RUI-03 | Compare evidence workflow | Partial | Every non-empty comparison cell exposes exact supporting evidence and opens a source/evidence drawer; missing/NA/vendor/independent/reproduced/disputed/stale/incomparable states are derived honestly. | Add evidence drawer and improve semantic state derivation from facts/claims. |
 | RUI-04 | Draft Editor persistence | Partial | Drafts persist revisions, object-linked citations, citation insertion, unsupported-paragraph checks, stale citation warnings, and proposed AI diffs without storing free-floating source URLs as citations. | Add draft table/event model and write APIs. |
@@ -102,6 +102,7 @@ Migration steps:
 - 2026-06-27: Created an ignored local `.env` at the canonical repo root from the existing deployment env without committing or printing values; rebuilt Research UI from the canonical repo compose path; health and timeline endpoint probes returned OK.
 - 2026-06-27: Live-vs-canonical inventory found that the tracked repo already has the newer local-inference boundary for model ownership; stale model-serving/download variables from the legacy deployment example must not be reintroduced.
 - 2026-06-27: Added missing public environment variable names to `.env.example` for container naming, ClickHouse database/user selection, Research UI bind selection, and observed-topic emission. Model root, model name, model download, and model-serving variables remain intentionally excluded.
+- 2026-06-27: Completed the first browser/UI design audit pass. Fixed desktop page-width overflow, removed the desktop main-surface width cap so the workspace fills wide windows, replaced the mobile full-height rail with a compact top icon strip, forced mobile home panels back into one column, wrapped long page-header text, and kept benchmark tables scrolling inside their panel.
 
 ## Verification Record
 
@@ -112,8 +113,9 @@ Latest verified state:
 - Live endpoint probes returned expected versions for Timeline, Compare, Draft Editor, Benchmark Detail, Publishing, and Publication Detail.
 - `python3 -m py_compile research-ui/server.py` passed.
 - `node --check research-ui/static/app.js` passed.
-- Browser automation was not installed in the repo environment at the time of this record.
+- Browser/CDP screenshot audit captured desktop and mobile views for Home, Projects, Timeline, Compare, Draft, Publishing, Publication Detail, Source Workbench, Topic Detail, and Benchmark Detail.
+- Final route check found no page-level horizontal scroll, load error text, loading-stuck text, or browser console/page errors across those desktop and mobile views; a wide-viewport screenshot verified that the main workspace fills the available browser width.
 
 ## Next Checkpoint
 
-Continue with `REPO-02`: compare the active deployment env shape against `.env.example` without copying values, then add only public variable names and safe placeholders to the repo.
+Continue with `RUI-02`: add timeline date range, lane, date type, confidence, review state, source kind, and saved-view controls, with server filters that do not fabricate precise dates.

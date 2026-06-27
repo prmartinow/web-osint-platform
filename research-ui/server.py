@@ -693,6 +693,50 @@ def ensure_review_tables():
         ORDER BY (project, draft_id, paragraph_id, diff_id)
         """,
         """
+        CREATE TABLE IF NOT EXISTS benchmark_methodologies
+        (
+            methodology_id String,
+            benchmark_id String,
+            project String,
+            dataset String,
+            prompting String,
+            harness String,
+            scoring String,
+            hardware String,
+            notes String,
+            source_evidence_id String,
+            source_version String,
+            status LowCardinality(String),
+            actor String,
+            created_at DateTime64(3, 'UTC'),
+            updated_at DateTime64(3, 'UTC')
+        )
+        ENGINE = ReplacingMergeTree(updated_at)
+        PARTITION BY toYYYYMM(created_at)
+        ORDER BY (project, benchmark_id, methodology_id)
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS benchmark_result_groups
+        (
+            group_id String,
+            benchmark_id String,
+            project String,
+            config_key String,
+            group_label String,
+            config_json String,
+            compatible UInt8,
+            default_ranked UInt8,
+            source_evidence_id String,
+            status LowCardinality(String),
+            actor String,
+            created_at DateTime64(3, 'UTC'),
+            updated_at DateTime64(3, 'UTC')
+        )
+        ENGINE = ReplacingMergeTree(updated_at)
+        PARTITION BY toYYYYMM(created_at)
+        ORDER BY (project, benchmark_id, config_key, group_id)
+        """,
+        """
         CREATE TABLE IF NOT EXISTS publication_snapshots
         (
             snapshot_id String,
@@ -4859,6 +4903,54 @@ def compare_view(params):
     }, "compare-view.v1", now_iso(), False, ["navigate", "open_source", "review"])
 
 
+def benchmark_methodology_row(project, benchmark_id):
+    rows = ch_data(
+        f"""
+        SELECT methodology_id, benchmark_id, project, dataset, prompting,
+          harness, scoring, hardware, notes, source_evidence_id, source_version,
+          status, actor, created_at, updated_at
+        FROM benchmark_methodologies FINAL
+        WHERE project = {sql_string(project)}
+          AND benchmark_id = {sql_string(benchmark_id)}
+          AND status != 'removed'
+        ORDER BY updated_at DESC
+        LIMIT 1
+        """,
+        fallback=[],
+    )
+    return rows[0] if rows else {}
+
+
+def benchmark_group_rows(project, benchmark_id):
+    rows = ch_data(
+        f"""
+        SELECT group_id, benchmark_id, project, config_key, group_label,
+          config_json, compatible, default_ranked, source_evidence_id,
+          status, actor, created_at, updated_at
+        FROM benchmark_result_groups FINAL
+        WHERE project = {sql_string(project)}
+          AND benchmark_id = {sql_string(benchmark_id)}
+          AND status != 'removed'
+        ORDER BY updated_at DESC
+        LIMIT 240
+        """,
+        fallback=[],
+    )
+    latest = {}
+    for row in rows:
+        latest.setdefault(row.get("config_key") or "", row)
+    return latest
+
+
+def benchmark_config_key(qualifier):
+    return hashlib.sha1(json_text(qualifier).encode("utf-8")).hexdigest()[:12]
+
+
+def benchmark_methodology_complete(row):
+    required = ("dataset", "prompting", "harness", "scoring", "source_evidence_id")
+    return all(compact_text(row.get(key), 2000) for key in required)
+
+
 def benchmark_detail(params):
     benchmark_id = ((params.get("benchmark_id", [""])[0] or "") or (params.get("id", [""])[0] or "") or "benchmark").strip()
     project = resolve_project_id((params.get("project", [""])[0] or "").strip())
@@ -4866,48 +4958,156 @@ def benchmark_detail(params):
         row for row in scoped_claim_rows(project, 240, benchmark_id if benchmark_id != "benchmark" else "benchmark")
         if "benchmark" in str(row.get("claim_type") or row.get("claim_text") or "").lower()
     ]
+    methodology = benchmark_methodology_row(project, benchmark_id)
+    groups = benchmark_group_rows(project, benchmark_id)
     results = []
     for row in claims:
         qualifier = row.get("qualifier") or {}
-        config_key = json_text(qualifier)
+        config_key = benchmark_config_key(qualifier)
+        persisted_group = groups.get(config_key) or {}
         incompatible = bool(qualifier.get("incompatible") or qualifier.get("different_setup"))
+        compatible = bool(int(persisted_group.get("compatible") or 0)) if persisted_group else not incompatible
+        default_ranked = bool(int(persisted_group.get("default_ranked") or 0)) if persisted_group else not incompatible
+        if not compatible:
+            default_ranked = False
         results.append({
             "result_id": row.get("claim_id"),
             "model": row.get("subject") if row.get("subject_scoped") else row.get("title") or row.get("source_evidence_id"),
             "metric": row.get("property") or row.get("claim_type") or "benchmark_result",
             "value": row.get("value") or row.get("claim_text"),
             "config": qualifier,
-            "config_key": hashlib.sha1(config_key.encode("utf-8")).hexdigest()[:12],
-            "compatible": not incompatible,
-            "default_ranked": not incompatible,
+            "config_key": config_key,
+            "group_id": persisted_group.get("group_id") or "",
+            "group_label": persisted_group.get("group_label") or title_case_label(row.get("claim_type") or "default"),
+            "compatible": compatible,
+            "default_ranked": default_ranked,
             "review_state": row.get("review_state"),
             "source_evidence_id": row.get("source_evidence_id"),
         })
-    methodology_missing = not any(row.get("source_evidence_id") for row in claims)
+    methodology_missing = not benchmark_methodology_complete(methodology)
     return read_envelope({
         "header": {
             "benchmark_id": benchmark_id,
             "label": title_case_label(benchmark_id),
             "project": project,
-            "methodology_state": "missing" if methodology_missing else "source_linked",
+            "methodology_state": "source_linked" if not methodology_missing else "missing",
             "publication_blocked": methodology_missing,
         },
         "methodology": {
-            "dataset": "",
-            "prompting": "",
-            "harness": "",
-            "scoring": "",
-            "hardware": "",
-            "notes": "Methodology fields must be filled from source-linked evidence before leaderboard publication.",
+            "methodology_id": methodology.get("methodology_id") or "",
+            "dataset": methodology.get("dataset") or "",
+            "prompting": methodology.get("prompting") or "",
+            "harness": methodology.get("harness") or "",
+            "scoring": methodology.get("scoring") or "",
+            "hardware": methodology.get("hardware") or "",
+            "notes": methodology.get("notes") or "Methodology fields must be filled from source-linked evidence before leaderboard publication.",
+            "source_evidence_id": methodology.get("source_evidence_id") or "",
+            "source_version": methodology.get("source_version") or "",
+            "status": methodology.get("status") or "draft",
+            "updated_at": methodology.get("updated_at") or "",
         },
+        "result_groups": list(groups.values()),
         "results": results,
         "excluded_from_default_ranking": [row for row in results if not row.get("default_ranked")],
         "checks": [
-            {"id": "methodology", "state": "blocked" if methodology_missing else "pass", "label": "Methodology source exists"},
-            {"id": "compatible_configs", "state": "pass", "label": "Incompatible configs excluded from default ranking"},
-            {"id": "source_links", "state": "pass" if results else "needs_work", "label": "Every result exposes source evidence"},
+            {"id": "methodology", "state": "blocked" if methodology_missing else "pass", "label": "Methodology fields are source-linked"},
+            {"id": "compatible_configs", "state": "pass" if all(row.get("compatible") or not row.get("default_ranked") for row in results) else "blocked", "label": "Incompatible configs excluded from default ranking"},
+            {"id": "source_links", "state": "pass" if results and all(row.get("source_evidence_id") for row in results) else "needs_work", "label": "Every result exposes source evidence"},
         ],
-    }, "benchmark-detail.v1", now_iso(), False, ["navigate", "review", "open_source"])
+    }, "benchmark-detail.v2", now_iso(), methodology_missing, ["navigate", "review", "open_source"])
+
+
+def benchmark_params_from_payload(payload):
+    project = resolve_project_id(compact_text(payload.get("project") or payload.get("project_id"), 300))
+    benchmark_id = compact_text(payload.get("benchmark_id") or "benchmark", 300)
+    if not project:
+        raise ResearchUiError(400, "project is required")
+    return project, benchmark_id
+
+
+def save_benchmark_methodology(payload):
+    project, benchmark_id = benchmark_params_from_payload(payload)
+    source_id = compact_text(payload.get("source_evidence_id"), 1000)
+    if source_id.lower().startswith(("http://", "https://")):
+        raise ResearchUiError(400, "Methodology source must be a platform source ID")
+    source_map = hydrate_source_rows([source_id])
+    source_version = compact_text(payload.get("source_version"), 500)
+    if source_id and not source_version:
+        source_version = draft_source_version(source_for_ledger_row(source_map, source_id))
+    actor = compact_text(payload.get("actor") or REVIEW_ACTOR, 200)
+    now = now_iso()
+    methodology_id = compact_text(payload.get("methodology_id"), 300) or f"benchmark_methodology/{hashlib.sha1((project + '|' + benchmark_id).encode('utf-8')).hexdigest()[:24]}"
+    row = {
+        "methodology_id": methodology_id,
+        "benchmark_id": benchmark_id,
+        "project": project,
+        "dataset": compact_text(payload.get("dataset"), 20000),
+        "prompting": compact_text(payload.get("prompting"), 20000),
+        "harness": compact_text(payload.get("harness"), 20000),
+        "scoring": compact_text(payload.get("scoring"), 20000),
+        "hardware": compact_text(payload.get("hardware"), 20000),
+        "notes": compact_text(payload.get("notes"), 20000),
+        "source_evidence_id": source_id,
+        "source_version": source_version,
+        "status": compact_text(payload.get("status") or "active", 80),
+        "actor": actor,
+        "created_at": payload.get("created_at") or now,
+        "updated_at": now,
+    }
+    ch_insert_json_each_row("benchmark_methodologies", [row])
+    event = persist_review_event(build_review_event("benchmark.methodology.saved", {
+        "source_evidence_id": project_source_evidence_id(project),
+        "project": project,
+        "subject_type": "benchmark_methodology",
+        "subject_id": methodology_id,
+        "benchmark_id": benchmark_id,
+        "actor": actor,
+        "idempotency_key": compact_text(payload.get("idempotency_key"), 500),
+        "source_anchor": {"kind": "benchmark_methodology", "benchmark_id": benchmark_id},
+    }))
+    return {"event": event, "benchmark": benchmark_detail({"project": [project], "benchmark_id": [benchmark_id]})}
+
+
+def save_benchmark_result_group(payload):
+    project, benchmark_id = benchmark_params_from_payload(payload)
+    config_key = compact_text(payload.get("config_key"), 120)
+    if not config_key:
+        raise ResearchUiError(400, "config_key is required")
+    actor = compact_text(payload.get("actor") or REVIEW_ACTOR, 200)
+    now = now_iso()
+    group_id = compact_text(payload.get("group_id"), 300) or f"benchmark_group/{hashlib.sha1((project + '|' + benchmark_id + '|' + config_key).encode('utf-8')).hexdigest()[:24]}"
+    compatible = 1 if bool(payload.get("compatible")) else 0
+    default_ranked = 1 if bool(payload.get("default_ranked")) and compatible else 0
+    row = {
+        "group_id": group_id,
+        "benchmark_id": benchmark_id,
+        "project": project,
+        "config_key": config_key,
+        "group_label": compact_text(payload.get("group_label") or config_key, 500),
+        "config_json": json_text(payload.get("config") if isinstance(payload.get("config"), dict) else {}),
+        "compatible": compatible,
+        "default_ranked": default_ranked,
+        "source_evidence_id": compact_text(payload.get("source_evidence_id"), 1000),
+        "status": compact_text(payload.get("status") or "active", 80),
+        "actor": actor,
+        "created_at": payload.get("created_at") or now,
+        "updated_at": now,
+    }
+    ch_insert_json_each_row("benchmark_result_groups", [row])
+    event = persist_review_event(build_review_event("benchmark.result_group.saved", {
+        "source_evidence_id": project_source_evidence_id(project),
+        "project": project,
+        "subject_type": "benchmark_result_group",
+        "subject_id": group_id,
+        "benchmark_id": benchmark_id,
+        "config_key": config_key,
+        "compatible": compatible,
+        "default_ranked": default_ranked,
+        "actor": actor,
+        "idempotency_key": compact_text(payload.get("idempotency_key"), 500),
+        "source_anchor": {"kind": "benchmark_result_group", "benchmark_id": benchmark_id, "config_key": config_key},
+    }))
+    return {"event": event, "benchmark": benchmark_detail({"project": [project], "benchmark_id": [benchmark_id]})}
 
 
 ALLOWED_DRAFT_OBJECT_TYPES = {"claim_stub", "source_record", "evidence_selection", "proposed_fact", "entity_link", "taxonomy_term"}
@@ -7261,6 +7461,10 @@ class ResearchUiHandler(BaseHTTPRequestHandler):
                 return self.send_json(insert_draft_citation(payload), status=201)
             if parsed.path == "/api/drafts/proposed-diff":
                 return self.send_json(create_draft_proposed_diff(payload), status=201)
+            if parsed.path == "/api/benchmark/methodology":
+                return self.send_json(save_benchmark_methodology(payload), status=201)
+            if parsed.path == "/api/benchmark/result-group":
+                return self.send_json(save_benchmark_result_group(payload), status=201)
             if parsed.path == "/api/library/actions":
                 return self.send_json(create_library_action(payload), status=201)
             if parsed.path == "/api/evidence/selections":

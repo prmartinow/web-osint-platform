@@ -5581,23 +5581,115 @@ async function loadBenchmarkPage() {
   }
 }
 
+function benchmarkMethodologyPayload(data) {
+  const h = data.header || {};
+  return {
+    project: h.project || state.project || '',
+    benchmark_id: h.benchmark_id || state.benchmarkId || 'benchmark',
+    methodology_id: data.methodology?.methodology_id || '',
+    dataset: document.querySelector('[data-benchmark-methodology="dataset"]')?.value || '',
+    prompting: document.querySelector('[data-benchmark-methodology="prompting"]')?.value || '',
+    harness: document.querySelector('[data-benchmark-methodology="harness"]')?.value || '',
+    scoring: document.querySelector('[data-benchmark-methodology="scoring"]')?.value || '',
+    hardware: document.querySelector('[data-benchmark-methodology="hardware"]')?.value || '',
+    notes: document.querySelector('[data-benchmark-methodology="notes"]')?.value || '',
+    source_evidence_id: document.querySelector('[data-benchmark-methodology="source_evidence_id"]')?.value || '',
+    actor: REVIEW_UI_ACTOR,
+    idempotency_key: idempotencyKey('benchmark-methodology', h.project || state.project || '', h.benchmark_id || state.benchmarkId || ''),
+  };
+}
+
+async function saveBenchmarkMethodology(data) {
+  const status = $('benchmarkSaveStatus');
+  try {
+    if (status) status.textContent = 'Saving methodology...';
+    const result = await postJson('/api/benchmark/methodology', benchmarkMethodologyPayload(data));
+    if (status) status.textContent = 'Methodology saved.';
+    renderBenchmarkPage(result.benchmark || data);
+  } catch (error) {
+    if (status) status.textContent = error.message;
+  }
+}
+
+async function saveBenchmarkGroup(data, row) {
+  const status = $('benchmarkSaveStatus');
+  const key = row.config_key || '';
+  try {
+    if (status) status.textContent = 'Saving result group...';
+    const result = await postJson('/api/benchmark/result-group', {
+      project: data.header?.project || state.project || '',
+      benchmark_id: data.header?.benchmark_id || state.benchmarkId || 'benchmark',
+      config_key: key,
+      group_id: row.group_id || '',
+      group_label: document.querySelector(`[data-benchmark-group-label="${cssEscape(key)}"]`)?.value || row.group_label || key,
+      config: row.config || {},
+      compatible: document.querySelector(`[data-benchmark-compatible="${cssEscape(key)}"]`)?.checked || false,
+      default_ranked: document.querySelector(`[data-benchmark-default-ranked="${cssEscape(key)}"]`)?.checked || false,
+      source_evidence_id: row.source_evidence_id || '',
+      actor: REVIEW_UI_ACTOR,
+      idempotency_key: idempotencyKey('benchmark-group', data.header?.project || state.project || '', data.header?.benchmark_id || state.benchmarkId || '', key),
+    });
+    if (status) status.textContent = 'Result group saved.';
+    renderBenchmarkPage(result.benchmark || data);
+  } catch (error) {
+    if (status) status.textContent = error.message;
+  }
+}
+
 function renderBenchmarkPage(data) {
   const h = data.header || {};
   const rows = data.results || [];
+  const methodology = data.methodology || {};
   $('routePage').innerHTML = `
-    ${pageHeader(h.label || 'Benchmark Detail', `${escapeHtml(rows.length)} result(s) · ${escapeHtml(h.methodology_state || '')}`)}
-    <section class="benchmark-shell panel">
+    ${pageHeader(h.label || 'Benchmark Detail', `${escapeHtml(rows.length)} result(s) - ${escapeHtml(h.methodology_state || '')}`, `
+      <button type="button" id="benchmarkSaveMethodology">Save methodology</button>
+      <span id="benchmarkSaveStatus" class="status-badge">${escapeHtml(methodology.status || 'draft')}</span>
+    `)}
+    <section class="benchmark-shell">
       <div class="review-layer-stack">
         ${(data.checks || []).map((check) => `<div><span>${escapeHtml(check.label)}</span><strong>${escapeHtml(check.state)}</strong></div>`).join('')}
       </div>
-      <table class="ledger-table">
-        <thead><tr><th>Model</th><th>Metric</th><th>Value</th><th>Config</th><th>Ranking</th><th>Evidence</th></tr></thead>
-        <tbody>
-          ${rows.length ? rows.map((row) => `<tr><td>${escapeHtml(row.model || '')}</td><td>${escapeHtml(row.metric || '')}</td><td>${escapeHtml(row.value || '')}</td><td><code>${escapeHtml(row.config_key || '')}</code></td><td>${statusBadge(row.default_ranked ? 'ranked' : 'incomparable')}</td><td>${row.source_evidence_id ? `<button class="text-button" data-id="${escapeHtml(row.source_evidence_id)}">Open</button>` : '<span class="muted">None</span>'}</td></tr>`).join('') : '<tr><td colspan="6">No benchmark claims match this view.</td></tr>'}
-        </tbody>
-      </table>
+      <section class="panel benchmark-methodology">
+        <div class="pane-title"><h2>Methodology</h2>${statusBadge(h.publication_blocked ? 'blocked' : 'source_linked')}</div>
+        <div class="benchmark-methodology-grid">
+          <label><span>Dataset</span><textarea data-benchmark-methodology="dataset" rows="3">${escapeHtml(methodology.dataset || '')}</textarea></label>
+          <label><span>Prompting</span><textarea data-benchmark-methodology="prompting" rows="3">${escapeHtml(methodology.prompting || '')}</textarea></label>
+          <label><span>Harness</span><textarea data-benchmark-methodology="harness" rows="3">${escapeHtml(methodology.harness || '')}</textarea></label>
+          <label><span>Scoring</span><textarea data-benchmark-methodology="scoring" rows="3">${escapeHtml(methodology.scoring || '')}</textarea></label>
+          <label><span>Hardware</span><textarea data-benchmark-methodology="hardware" rows="3">${escapeHtml(methodology.hardware || '')}</textarea></label>
+          <label><span>Source ID</span><input data-benchmark-methodology="source_evidence_id" value="${escapeHtml(methodology.source_evidence_id || '')}" placeholder="source evidence ID"></label>
+          <label class="wide"><span>Notes</span><textarea data-benchmark-methodology="notes" rows="3">${escapeHtml(methodology.notes || '')}</textarea></label>
+        </div>
+      </section>
+      <section class="panel benchmark-results">
+        <div class="pane-title"><h2>Results</h2><span class="count">${escapeHtml(rows.length)}</span></div>
+        <div class="benchmark-table-wrap">
+          <table class="ledger-table">
+            <thead><tr><th>Model</th><th>Metric</th><th>Value</th><th>Group</th><th>Compatible</th><th>Default</th><th>Evidence</th><th></th></tr></thead>
+            <tbody>
+              ${rows.length ? rows.map((row) => `
+                <tr>
+                  <td>${escapeHtml(row.model || '')}</td>
+                  <td>${escapeHtml(row.metric || '')}</td>
+                  <td>${escapeHtml(row.value || '')}</td>
+                  <td><input data-benchmark-group-label="${escapeHtml(row.config_key || '')}" value="${escapeHtml(row.group_label || row.config_key || '')}"><br><code>${escapeHtml(row.config_key || '')}</code></td>
+                  <td><input type="checkbox" data-benchmark-compatible="${escapeHtml(row.config_key || '')}" ${row.compatible ? 'checked' : ''}></td>
+                  <td><input type="checkbox" data-benchmark-default-ranked="${escapeHtml(row.config_key || '')}" ${row.default_ranked ? 'checked' : ''}></td>
+                  <td>${row.source_evidence_id ? `<button class="text-button" data-id="${escapeHtml(row.source_evidence_id)}">Open</button>` : '<span class="muted">None</span>'}</td>
+                  <td><button class="secondary" type="button" data-benchmark-save-group="${escapeHtml(row.config_key || '')}">Save group</button></td>
+                </tr>
+              `).join('') : '<tr><td colspan="8">No benchmark claims match this view.</td></tr>'}
+            </tbody>
+          </table>
+        </div>
+      </section>
     </section>
   `;
+  $('benchmarkSaveMethodology')?.addEventListener('click', () => saveBenchmarkMethodology(data));
+  document.querySelectorAll('[data-benchmark-save-group]').forEach((button) => button.addEventListener('click', () => {
+    const row = rows.find((item) => item.config_key === button.dataset.benchmarkSaveGroup);
+    if (row) saveBenchmarkGroup(data, row);
+  }));
   bindObjectRows();
 }
 

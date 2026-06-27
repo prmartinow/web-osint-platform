@@ -8,6 +8,8 @@ import (
 	"github.com/redpanda-data/benthos/v4/public/service"
 )
 
+const testMediaPath = "/srv/web-osint-platform/data/test-fixtures/connect-shadow/media-1.png"
+
 func TestMediaBuilderAppendsShadowRequest(t *testing.T) {
 	msg := service.NewMessage(nil)
 	msg.SetStructured(map[string]any{
@@ -24,7 +26,7 @@ func TestMediaBuilderAppendsShadowRequest(t *testing.T) {
 			"captured_at":      "2026-06-18T00:00:00Z",
 			"media_id":         "media-1",
 			"media_kind":       "screenshot",
-			"local_path":       "/mnt/data/x-research/canaries/connect-shadow/media-1.png",
+			"local_path":       testMediaPath,
 			"sha256":           "sha",
 			"caption":          "hello",
 			"raw": map[string]any{
@@ -71,7 +73,7 @@ func TestMediaBuilderProductionModeFansOutRequests(t *testing.T) {
 		"captured_at":      "2026-06-18T00:00:00Z",
 		"media_id":         "media-1",
 		"media_kind":       "screenshot",
-		"local_path":       "/mnt/data/x-research/canaries/connect-shadow/media-1.png",
+		"local_path":       testMediaPath,
 		"sha256":           "sha",
 		"caption":          "hello",
 		"raw": map[string]any{

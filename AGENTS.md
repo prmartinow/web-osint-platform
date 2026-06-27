@@ -10,26 +10,26 @@ This repository is the sanitized control plane for the local Web OSINT evidence 
 
 ## Storage
 
-- Code/control belongs under `/home/ops/dev`.
-- Durable evidence/data belongs under `/mnt/data/x-research` in the live deployment.
-- Model/inference files belong under `/mnt/data/web-osint-platform`.
+- Code/control belongs in this repository.
+- Durable evidence/data belongs under `WEB_OSINT_DATA_ROOT` or another explicit external data root supplied by local deployment env.
+- Model files, model caches, model downloads, and model-serving runtime state belong outside Web OSINT; Web OSINT calls local inference through env-configured service endpoints.
 - Sanitized defaults may use `web_osint` names, but code must keep live database, collection, and root paths environment-configurable.
 - New workers that write durable files must validate resolved paths at startup and fail closed unless an explicit test override is set.
 
-## Live Names
+## Config Names
 
-- Live ClickHouse database: `x_research`.
-- Live Qdrant collection: `x_research_evidence_v1`.
 - Sanitized defaults: `web_osint` and `web_osint_evidence_v1`.
+- Production database names, collection names, and endpoint values must come from env or ignored deployment config.
 - Do not create a second production database or Qdrant collection to paper over a config mismatch.
 
 ## Inference
 
-- Use the guarded Qwen inference service for embeddings and reranking.
+- Use the local-inference API for embeddings, reranking, OCR, and visual embeddings.
+- Do not add model-serving, model-download, model-cache, or model-maintenance ownership back into Web OSINT.
 - Do not bypass queue/concurrency limits.
 - Default dashboard search must not synchronously rerank.
 - Rerank is explicit precision mode only, with a hard cap of 5 candidates. Broad rerank requests should reject, not silently truncate.
-- PaddleOCR 3.7 is the OCR/layout source of truth. Qwen3-VL-Embedding is for visual embeddings, not OCR.
+- PaddleOCR is the OCR/layout source of truth behind local-inference. Qwen3-VL-Embedding is for visual embeddings, not OCR.
 
 ## Redpanda
 

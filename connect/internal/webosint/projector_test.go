@@ -6,6 +6,8 @@ import (
 	"time"
 )
 
+const testMediaPath = "/srv/web-osint-platform/data/test-fixtures/connect-shadow/parity.png"
+
 func TestProjectObservedForP1Kinds(t *testing.T) {
 	event := testCaptureEvent(t)
 	projected := ProjectObserved(event)
@@ -84,7 +86,7 @@ func TestBuildMediaRequestFromProjectedMedia(t *testing.T) {
 	if !ok {
 		t.Fatal("expected media request")
 	}
-	wantEventID := "media_req_" + stableHash("parity-media-1", "abc123", "/mnt/data/x-research/canaries/connect-shadow/parity.png")[:24]
+	wantEventID := "media_req_" + stableHash("parity-media-1", "abc123", testMediaPath)[:24]
 	if request.Request["event_id"] != wantEventID {
 		t.Fatalf("event_id = %v want %s", request.Request["event_id"], wantEventID)
 	}
@@ -152,7 +154,7 @@ func testCaptureEvent(t *testing.T) CaptureEvent {
 	    {
 	      "media_id": "parity-media-1",
 	      "media_kind": "screenshot",
-	      "local_path": "/mnt/data/x-research/canaries/connect-shadow/parity.png",
+	      "local_path": "` + testMediaPath + `",
 	      "sha256": "abc123",
 	      "mime_type": "image/png",
 	      "width": 2,

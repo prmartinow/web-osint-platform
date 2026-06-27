@@ -21,26 +21,38 @@ MEDIA_ROOT = Path(os.environ.get("MEDIA_ROOT", str(DATA_ROOT / "media"))).resolv
 OCR_ROOT = Path(os.environ.get("OCR_ROOT", str(DATA_ROOT / "ocr"))).resolve()
 WEB_ROOT = Path(os.environ.get("WEB_ROOT", str(MEDIA_ROOT.parent / "web"))).resolve()
 
-CLICKHOUSE_URL = os.environ.get("CLICKHOUSE_URL", "http://web-osint-clickhouse:8123").rstrip("/")
+def require_env(name):
+    value = os.environ.get(name, "").strip()
+    if not value:
+        raise SystemExit(f"Missing {name}")
+    return value
+
+
+def require_any_env(*names):
+    for name in names:
+        value = os.environ.get(name, "").strip()
+        if value:
+            return value
+    raise SystemExit(f"Missing {' or '.join(names)}")
+
+
+CLICKHOUSE_URL = require_env("CLICKHOUSE_URL").rstrip("/")
 CLICKHOUSE_DB = os.environ.get("CLICKHOUSE_DATABASE", "web_osint")
 CLICKHOUSE_USER = os.environ.get("CLICKHOUSE_USER", "web_osint")
 CLICKHOUSE_PASSWORD = os.environ.get("CLICKHOUSE_PASSWORD", "")
-TYPESENSE_URL = os.environ.get("TYPESENSE_URL", "http://web-osint-typesense:8108").rstrip("/")
+TYPESENSE_URL = require_env("TYPESENSE_URL").rstrip("/")
 TYPESENSE_KEY = os.environ.get("TYPESENSE_API_KEY", "")
-NORMALIZER_URL = os.environ.get("NORMALIZER_URL", "http://web-osint-normalizer:8090").rstrip("/")
-RESEARCH_PLANNER_URL = os.environ.get("RESEARCH_PLANNER_URL", "http://web-osint-research-planner:8092").rstrip("/")
-QDRANT_URL = os.environ.get("QDRANT_URL", "http://web-osint-qdrant:6333").rstrip("/")
+NORMALIZER_URL = require_env("NORMALIZER_URL").rstrip("/")
+RESEARCH_PLANNER_URL = require_env("RESEARCH_PLANNER_URL").rstrip("/")
+QDRANT_URL = require_env("QDRANT_URL").rstrip("/")
 QDRANT_COLLECTION = os.environ.get("QDRANT_COLLECTION", "web_osint_evidence_v1")
-REDPANDA_PROXY_URL = os.environ.get("REDPANDA_PROXY_URL", "http://web-osint-redpanda:8082").rstrip("/")
-REDPANDA_ADMIN_URL = os.environ.get("REDPANDA_ADMIN_URL", "http://web-osint-redpanda:9644").rstrip("/")
-LOCAL_INFERENCE_URL = os.environ.get(
-    "LOCAL_INFERENCE_URL",
-    "http://127.0.0.1:18200",
-).rstrip("/")
-EMBEDDING_WORKER_URL = os.environ.get("EMBEDDING_WORKER_URL", "http://127.0.0.1:18201").rstrip("/")
-MEDIA_ROUTER_URL = os.environ.get("MEDIA_ROUTER_URL", "http://127.0.0.1:18211").rstrip("/")
-MEDIA_OCR_WORKER_URL = os.environ.get("MEDIA_OCR_WORKER_URL", "http://127.0.0.1:18212").rstrip("/")
-MEDIA_VL_WORKER_URL = os.environ.get("MEDIA_VL_WORKER_URL", "http://127.0.0.1:18213").rstrip("/")
+REDPANDA_PROXY_URL = require_any_env("REDPANDA_PROXY_URL", "PANDAPROXY_URL").rstrip("/")
+REDPANDA_ADMIN_URL = require_env("REDPANDA_ADMIN_URL").rstrip("/")
+LOCAL_INFERENCE_URL = require_env("LOCAL_INFERENCE_URL").rstrip("/")
+EMBEDDING_WORKER_URL = require_env("EMBEDDING_WORKER_URL").rstrip("/")
+MEDIA_ROUTER_URL = require_env("MEDIA_ROUTER_URL").rstrip("/")
+MEDIA_OCR_WORKER_URL = require_env("MEDIA_OCR_WORKER_URL").rstrip("/")
+MEDIA_VL_WORKER_URL = require_env("MEDIA_VL_WORKER_URL").rstrip("/")
 MEDIA_ROUTER_OPTIONAL = os.environ.get("MEDIA_ROUTER_OPTIONAL", "true").lower() in {"1", "true", "yes", "on"}
 RESEARCH_SEARCH_TIMEOUT_SECONDS = int(os.environ.get("RESEARCH_SEARCH_TIMEOUT_SECONDS", "300"))
 RESEARCH_QUERY_EMBEDDING_PROMPT = os.environ.get(

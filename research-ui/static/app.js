@@ -4425,6 +4425,17 @@ function taxonomyRecordKey(row) {
   return row?.record_id || row?.stable_id || row?.term || '';
 }
 
+function openTopicDetail(rowOrId) {
+  const topicId = typeof rowOrId === 'string'
+    ? rowOrId
+    : (rowOrId?.stable_id || rowOrId?.record_id || rowOrId?.term || '');
+  if (!topicId) return;
+  state.topicDetailId = topicId;
+  state.topicDetailTab = 'overview';
+  if (!state.project && state.home?.active_project?.project_id) state.project = state.home.active_project.project_id;
+  setRoute('topic-detail');
+}
+
 function taxonomyGlyph(row) {
   const vocabulary = row?.vocabulary || '';
   if (vocabulary === 'model_facets') return 'MOD';
@@ -4638,6 +4649,7 @@ function renderTaxonomyPreview(data) {
     </label>
     <div id="taxonomyActionStatus" class="review-status muted"></div>
     <div class="taxonomy-preview-actions">
+      ${row.vocabulary === 'topics' ? `<button type="button" data-topic-open="${escapeHtml(taxonomyRecordKey(row))}">Open topic</button>` : ''}
       <button class="secondary" data-taxonomy-action="assign_review">Assign</button>
       <button class="secondary" data-taxonomy-action="add_alias">Add alias</button>
       <button class="secondary" data-taxonomy-action="map">Map</button>
@@ -4732,6 +4744,7 @@ function renderTaxonomyPage(data) {
                 </div>
                 <div class="taxonomy-row-side">
                   <span class="status-badge ${escapeHtml(taxonomyStateClass(row.review_state))}">${escapeHtml(taxonomyStateLabel(row.review_state))}</span>
+                  ${row.vocabulary === 'topics' ? `<button class="text-button" type="button" data-topic-open="${escapeHtml(rowKey)}">Open topic</button>` : ''}
                   <em>${escapeHtml(row.owner || '')}</em>
                   <em>${escapeHtml(row.priority || '')}</em>
                   <em>${escapeHtml(fmtDate(row.updated_at) || '')}</em>
@@ -4922,7 +4935,13 @@ function bindTaxonomyPage(data) {
   });
   document.querySelectorAll('.taxonomy-row').forEach((row) => {
     row.addEventListener('click', () => {
-      state.taxonomySelectedId = row.dataset.taxonomyRowId || '';
+      const id = row.dataset.taxonomyRowId || '';
+      const match = state.taxonomyRows.find((item) => taxonomyRecordKey(item) === id);
+      if (match?.vocabulary === 'topics') {
+        openTopicDetail(match);
+        return;
+      }
+      state.taxonomySelectedId = id;
       replaceRouteHash();
       loadRoutePage();
     });
@@ -4932,6 +4951,14 @@ function bindTaxonomyPage(data) {
       if (!id) return;
       if (event.currentTarget.checked) state.taxonomySelectedIds.add(id);
       else state.taxonomySelectedIds.delete(id);
+    });
+  });
+  document.querySelectorAll('[data-topic-open]').forEach((button) => {
+    button.addEventListener('click', (event) => {
+      event.stopPropagation();
+      const id = button.dataset.topicOpen || '';
+      const match = state.taxonomyRows.find((row) => taxonomyRecordKey(row) === id);
+      openTopicDetail(match || id);
     });
   });
   document.querySelectorAll('[data-taxonomy-preview-tab]').forEach((button) => {
@@ -5287,6 +5314,7 @@ function renderTimelinePage(data) {
               <p>${escapeHtml([titleCase(item.event_type || ''), item.selected_date_type ? `${titleCase(item.selected_date_type)} date` : '', item.date_precision, item.review_state, item.conflict_state, item.confidence_state, item.source_label].filter(Boolean).join(' · '))}</p>
               <div class="tag-line">
                 ${(item.entities || []).slice(0, 4).map((value) => `<span class="pill">${escapeHtml(value)}</span>`).join('')}
+                ${(item.topics || []).slice(0, 4).map((value) => `<button class="text-button" type="button" data-topic-chip="${escapeHtml(value)}">${escapeHtml(value)}</button>`).join('')}
                 ${(item.source_ids || []).slice(0, 2).map((value) => `<button class="text-button" type="button" data-id="${escapeHtml(value)}">${escapeHtml(value)}</button>`).join('')}
               </div>
             </div>
@@ -5299,6 +5327,9 @@ function renderTimelinePage(data) {
   document.querySelectorAll('[data-route-target]').forEach((button) => button.addEventListener('click', () => {
     state.project = button.dataset.project || state.project;
     setRoute(button.dataset.routeTarget || 'projects');
+  }));
+  document.querySelectorAll('[data-topic-chip]').forEach((button) => button.addEventListener('click', () => {
+    openTopicDetail(button.dataset.topicChip || '');
   }));
   document.querySelectorAll('[data-timeline-filter]').forEach((control) => control.addEventListener('change', () => {
     const key = control.dataset.timelineFilter;

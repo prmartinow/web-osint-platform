@@ -11,11 +11,14 @@ from pathlib import Path
 from typing import Any
 
 
-ROOT = Path(__file__).resolve().parents[1]
-PENDING = ROOT / "outbox" / "pending"
-ACKED = ROOT / "outbox" / "acked"
-FAILED = ROOT / "outbox" / "failed"
-DEFAULT_PANDAPROXY = os.environ.get("WEB_OSINT_PANDAPROXY", "http://127.0.0.1:18082")
+DEFAULT_OUTBOX_ROOT = os.environ.get("WEB_OSINT_OUTBOX_ROOT", "")
+if not DEFAULT_OUTBOX_ROOT and os.environ.get("WEB_OSINT_DATA_ROOT"):
+    DEFAULT_OUTBOX_ROOT = str(Path(os.environ["WEB_OSINT_DATA_ROOT"]) / "outbox")
+DEFAULT_PANDAPROXY = (
+    os.environ.get("PANDAPROXY_URL")
+    or os.environ.get("REDPANDA_PROXY_URL")
+    or os.environ.get("WEB_OSINT_PANDAPROXY", "")
+)
 
 
 def stable_json(value: Any) -> str:
@@ -55,8 +58,15 @@ def infer_key(topic: str, value: dict[str, Any]) -> str:
     return sha256_text(stable_json(value))
 
 
-def spool(topic: str, value: dict[str, Any], key: str | None) -> Path:
-    PENDING.mkdir(parents=True, exist_ok=True)
+def resolve_outbox_root(value: str) -> Path:
+    if not value:
+        raise SystemExit("Missing WEB_OSINT_OUTBOX_ROOT, WEB_OSINT_DATA_ROOT, or --outbox-root")
+    return Path(value).expanduser().resolve()
+
+
+def spool(topic: str, value: dict[str, Any], key: str | None, outbox_root: Path) -> Path:
+    pending = outbox_root / "pending"
+    pending.mkdir(parents=True, exist_ok=True)
     key = key or infer_key(topic, value)
     record = {
         "topic": topic,
@@ -65,7 +75,7 @@ def spool(topic: str, value: dict[str, Any], key: str | None) -> Path:
         "spooled_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
     }
     filename = f"{int(time.time() * 1000)}_{topic}_{sha256_text(key)[:16]}.json"
-    path = PENDING / filename
+    path = pending / filename
     path.write_text(json.dumps(record, ensure_ascii=False, indent=2) + "\n")
     return path
 
@@ -86,20 +96,23 @@ def post_record(pandaproxy: str, record: dict[str, Any]) -> None:
         response.read()
 
 
-def flush(pandaproxy: str, limit: int | None) -> int:
-    ACKED.mkdir(parents=True, exist_ok=True)
-    FAILED.mkdir(parents=True, exist_ok=True)
+def flush(pandaproxy: str, limit: int | None, outbox_root: Path) -> int:
+    pending = outbox_root / "pending"
+    acked = outbox_root / "acked"
+    failed = outbox_root / "failed"
+    acked.mkdir(parents=True, exist_ok=True)
+    failed.mkdir(parents=True, exist_ok=True)
     count = 0
-    for path in sorted(PENDING.glob("*.json")):
+    for path in sorted(pending.glob("*.json")):
         if limit is not None and count >= limit:
             break
         record = load_json(path)
         try:
             post_record(pandaproxy, record)
-            path.rename(ACKED / path.name)
+            path.rename(acked / path.name)
             count += 1
         except Exception as exc:
-            failure_path = FAILED / path.name
+            failure_path = failed / path.name
             record["flush_error"] = str(exc)
             failure_path.write_text(json.dumps(record, ensure_ascii=False, indent=2) + "\n")
             path.unlink()
@@ -115,9 +128,11 @@ def main() -> int:
     spool_cmd.add_argument("--topic", required=True)
     spool_cmd.add_argument("--key")
     spool_cmd.add_argument("--value-file", required=True)
+    spool_cmd.add_argument("--outbox-root", default=DEFAULT_OUTBOX_ROOT)
 
     flush_cmd = sub.add_parser("flush")
     flush_cmd.add_argument("--pandaproxy", default=DEFAULT_PANDAPROXY)
+    flush_cmd.add_argument("--outbox-root", default=DEFAULT_OUTBOX_ROOT)
     flush_cmd.add_argument("--limit", type=int)
 
     args = parser.parse_args()
@@ -126,13 +141,15 @@ def main() -> int:
         value = load_json(Path(args.value_file))
         if not isinstance(value, dict):
             raise SystemExit("value-file must contain a JSON object")
-        path = spool(args.topic, value, args.key)
+        path = spool(args.topic, value, args.key, resolve_outbox_root(args.outbox_root))
         print(path)
         return 0
 
     if args.command == "flush":
+        if not args.pandaproxy:
+            raise SystemExit("Missing PANDAPROXY_URL, REDPANDA_PROXY_URL, WEB_OSINT_PANDAPROXY, or --pandaproxy")
         try:
-            count = flush(args.pandaproxy, args.limit)
+            count = flush(args.pandaproxy, args.limit, resolve_outbox_root(args.outbox_root))
         except urllib.error.URLError as exc:
             print(f"flush failed: {exc}", file=sys.stderr)
             return 2

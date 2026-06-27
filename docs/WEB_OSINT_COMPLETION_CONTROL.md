@@ -124,6 +124,7 @@ Migration steps:
 - 2026-06-27: Converted Python worker endpoint defaults away from baked loopback service URLs. Embedding, webpage extraction, media enrichment, and research planner workers now take brokers, Pandaproxy, ClickHouse, Qdrant, and local-inference endpoints from env, with generic bind-address defaults for their stats servers.
 - 2026-06-27: Converted dashboard and Research UI service endpoints away from baked loopback defaults. The servers now require configured ClickHouse/search/vector/worker/local-inference/Redpanda endpoint env as applicable, and compose passes the documented env names into the host-network dashboard and Research UI services.
 - 2026-06-27: Converted the normalizer worker away from baked loopback broker/search/vector/ClickHouse defaults. The normalizer now fails during config load when required broker and service endpoint env is absent, before opening Pebble or Kafka resources.
+- 2026-06-27: Converted the producer outbox and flush path away from repo-local state and baked Pandaproxy defaults. Producer spooling now requires `WEB_OSINT_OUTBOX_ROOT`, `WEB_OSINT_DATA_ROOT`, or `--outbox-root`; flushing requires env/CLI Pandaproxy config, and README examples use the documented env names.
 
 ## Verification Record
 
@@ -157,6 +158,7 @@ Latest verified state:
 - Python-worker endpoint cleanup checks: `python3 -m py_compile workers/embedding-worker/embedding_worker.py workers/webpage-extraction/webpage_extraction_worker.py workers/media-enrichment/media_enrichment_worker.py workers/research-planner/research_planner.py` passed; research planner missing-config probe returned before network side effects. Direct startup probes for embedding/media/webpage workers require their worker venv dependencies, which were not installed in this shell.
 - Dashboard/Research UI endpoint cleanup checks: `python3 -m py_compile dashboard/server.py research-ui/server.py` and `docker compose --env-file .env.example -f compose/docker-compose.yml config` passed; missing endpoint config probes for both servers returned before startup; additions-only sanitizer found no new local paths, local endpoints, secrets, or model-owner variables.
 - Normalizer endpoint cleanup checks: `gofmt -w main.go`, `go test ./...`, and `go build -o /tmp/web-osint-normalizer-config-check .` under `workers/normalizer` passed; an empty-env binary startup probe exited with `configuration: missing REDPANDA_BROKERS or KAFKA_BROKERS`; targeted scan found no normalizer hardcoded loopback endpoints or local deployment paths.
+- Producer outbox cleanup checks: `python3 -m py_compile producer/web_osint_producer.py` passed; missing Pandaproxy and missing outbox config probes failed before network writes; explicit temp-outbox spool smoke wrote only under `/tmp` and the temp artifact was removed; additions-only sanitizer found no new local paths, local endpoints, secrets, or model-owner variables.
 
 ## Next Checkpoint
 

@@ -60,15 +60,18 @@ Produce a synthetic sample event:
 ```bash
 producer/web_osint_producer.py spool \
   --topic evidence.capture.events.v1 \
-  --value-file samples/capture_event_full_smoke.json
+  --value-file samples/capture_event_full_smoke.json \
+  --outbox-root "${WEB_OSINT_OUTBOX_ROOT:?set WEB_OSINT_OUTBOX_ROOT}"
 
-producer/web_osint_producer.py flush
+producer/web_osint_producer.py flush \
+  --pandaproxy "${PANDAPROXY_URL:?set PANDAPROXY_URL}" \
+  --outbox-root "${WEB_OSINT_OUTBOX_ROOT:?set WEB_OSINT_OUTBOX_ROOT}"
 ```
 
 Look up the sample post:
 
 ```bash
-curl 'http://127.0.0.1:18090/lookup?key=post/1234567890'
+curl "${NORMALIZER_URL:?set NORMALIZER_URL}/lookup?key=post/1234567890"
 ```
 
 ## Documentation

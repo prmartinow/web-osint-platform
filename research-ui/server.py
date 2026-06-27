@@ -6114,12 +6114,95 @@ def supersede_publication_release(payload):
     return result
 
 
+def nested_value(data, *paths):
+    for path in paths:
+        current = data
+        found = True
+        for part in str(path).split("."):
+            if isinstance(current, dict) and part in current:
+                current = current.get(part)
+            else:
+                found = False
+                break
+        if found and current not in (None, ""):
+            return current
+    return ""
+
+
+def normalize_rebrowser_launch_response(body):
+    body = body if isinstance(body, dict) else {}
+    session_id = compact_text(nested_value(
+        body,
+        "session_id",
+        "rebrowser_session_id",
+        "session.id",
+        "session.session_id",
+        "launch.session_id",
+        "capture.rebrowser_session_id",
+    ), 300)
+    open_url = compact_text(nested_value(
+        body,
+        "open_url",
+        "session_url",
+        "rebrowser_url",
+        "launch_url",
+        "url",
+        "session.url",
+        "launch.url",
+    ), 2000)
+    capture_event_id = compact_text(nested_value(
+        body,
+        "capture_event_id",
+        "capture.event_id",
+        "capture.capture_event_id",
+        "event.event_id",
+    ), 300)
+    capture_id = compact_text(nested_value(
+        body,
+        "capture_id",
+        "capture.id",
+        "capture.capture_id",
+    ), 300)
+    source_evidence_id = compact_text(nested_value(
+        body,
+        "source_evidence_id",
+        "source_id",
+        "capture.source_evidence_id",
+        "capture.source_id",
+    ), 1000)
+    collector_run_id = compact_text(nested_value(
+        body,
+        "collector_run_id",
+        "capture.collector_run_id",
+        "run.collector_run_id",
+    ), 300)
+    status = compact_text(nested_value(
+        body,
+        "status",
+        "capture_status",
+        "session.status",
+        "capture.status",
+    ) or "launched", 80)
+    committed = bool(capture_event_id or capture_id or status in ("committed", "complete", "captured", "published"))
+    return {
+        "session_id": session_id,
+        "open_url": open_url,
+        "capture_status": "committed" if committed else status,
+        "capture_event_id": capture_event_id,
+        "capture_id": capture_id,
+        "source_evidence_id": source_evidence_id,
+        "collector_run_id": collector_run_id,
+        "committed": committed,
+    }
+
+
 def launch_rebrowser_capture(payload):
     project = compact_text(payload.get("project_id") or payload.get("project") or "", 300)
     seed_url = compact_text(payload.get("seed_url") or payload.get("url") or "", 2000)
     source_id = compact_text(payload.get("source_id") or payload.get("source_evidence_id") or "", 1000)
     if not seed_url and not source_id:
         raise ResearchUiError(400, "seed_url or source_id is required")
+    source_evidence_id = source_id or project_source_evidence_id(project)
     launch_payload = {
         "project_id": project,
         "seed_url": seed_url,
@@ -6131,12 +6214,14 @@ def launch_rebrowser_capture(payload):
     event = persist_review_event(build_review_event("rebrowser.capture.launch_requested", {
         **payload,
         "project": project,
-        "source_evidence_id": source_id,
+        "source_evidence_id": source_evidence_id,
         "subject_type": "rebrowser_capture_intent",
         "subject_id": source_id or seed_url,
-        "source_anchor": {"kind": "rebrowser_launch", "source_id": source_id, "seed_url": seed_url},
+        "source_anchor": {"kind": "rebrowser_launch", "source_id": source_id, "seed_url": seed_url, "return_route": launch_payload["return_route"]},
     }))
     response_body = {}
+    normalized = {}
+    result_event = {}
     status = "queued"
     configured = bool(REBROWSER_LAUNCH_URL)
     if configured:
@@ -6154,6 +6239,31 @@ def launch_rebrowser_capture(payload):
                 except Exception:
                     response_body = {"body": text[:2000]}
                 status = "launched"
+                normalized = normalize_rebrowser_launch_response(response_body)
+                result_event_type = "rebrowser.capture.committed" if normalized.get("committed") else "rebrowser.capture.launch_result"
+                result_event = persist_review_event(build_review_event(result_event_type, {
+                    "project": project,
+                    "source_evidence_id": source_evidence_id,
+                    "subject_type": "rebrowser_capture_session",
+                    "subject_id": normalized.get("session_id") or normalized.get("capture_id") or source_id or seed_url,
+                    "seed_url": seed_url,
+                    "source_id": source_id,
+                    "returned_source_evidence_id": normalized.get("source_evidence_id") or "",
+                    "return_route": launch_payload["return_route"],
+                    "session": normalized,
+                    "actor": launch_payload["actor"],
+                    "source_anchor": {
+                        "kind": "rebrowser_launch_result",
+                        "source_id": source_id,
+                        "source_evidence_id": source_evidence_id,
+                        "returned_source_evidence_id": normalized.get("source_evidence_id") or "",
+                        "seed_url": seed_url,
+                        "return_route": launch_payload["return_route"],
+                        "session_id": normalized.get("session_id") or "",
+                        "capture_event_id": normalized.get("capture_event_id") or "",
+                        "collector_run_id": normalized.get("collector_run_id") or "",
+                    },
+                }))
         except urllib.error.HTTPError as exc:
             detail = exc.read().decode("utf-8", errors="replace")[:1000]
             raise ResearchUiError(502, f"Rebrowser launch failed ({exc.code}): {detail}")
@@ -6163,8 +6273,11 @@ def launch_rebrowser_capture(payload):
         "configured": configured,
         "status": status,
         "launch": response_body,
+        "session": normalized,
+        "open_url": normalized.get("open_url") if normalized else "",
         "event_id": event.get("event_id"),
-        "message": "Capture launch recorded" if not configured else "Capture launch submitted",
+        "event_ids": [item for item in (event.get("event_id"), result_event.get("event_id")) if item],
+        "message": "Capture launch recorded" if not configured else ("Capture committed" if normalized.get("committed") else "Capture session opened"),
     }
 
 

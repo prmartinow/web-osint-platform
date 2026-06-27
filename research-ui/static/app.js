@@ -122,6 +122,16 @@ function safeUrl(value) {
   return SAFE_URL_SCHEMES.test(raw) ? raw : '#';
 }
 
+function setCaptureLaunchStatus(message) {
+  state.captureLaunchStatus = message || '';
+  const status = $('captureLaunchStatus');
+  if (status) status.textContent = state.captureLaunchStatus;
+  ['captureTopButton', 'captureSourceButton'].forEach((id) => {
+    const button = $(id);
+    if (button) button.title = state.captureLaunchStatus || 'Launch Rebrowser capture';
+  });
+}
+
 // Build a stable idempotency key per logical mutation. A retry of the exact
 // same action (same object + action + current status) produces the same key,
 // so the backend can dedupe a double-submit; a genuine new action (e.g. a
@@ -7576,7 +7586,9 @@ async function selectSource(id) {
 async function launchCaptureFlow(seed = '') {
   const seedUrl = seed || window.prompt('Capture URL', '') || '';
   if (!seedUrl.trim()) return;
-  state.captureLaunchStatus = 'Launching capture...';
+  setCaptureLaunchStatus('Launching capture...');
+  const pendingWindow = window.open('about:blank', '_blank');
+  if (pendingWindow) pendingWindow.opener = null;
   try {
     const result = await postJson('/api/rebrowser/launch-capture', {
       project_id: state.project || state.home?.active_project?.project_id || '',
@@ -7584,12 +7596,25 @@ async function launchCaptureFlow(seed = '') {
       return_route: routeHash(),
       actor: REVIEW_UI_ACTOR,
     });
-    state.captureLaunchStatus = result.message || 'Capture launch recorded.';
-    window.alert(state.captureLaunchStatus);
+    const launchUrl = safeUrl(
+      result.open_url
+      || result.session?.open_url
+      || result.launch?.open_url
+      || result.launch?.session_url
+      || result.launch?.url
+      || ''
+    );
+    if (launchUrl && launchUrl !== '#') {
+      if (pendingWindow) pendingWindow.location.href = launchUrl;
+      else window.open(launchUrl, '_blank', 'noopener,noreferrer');
+    } else if (pendingWindow) {
+      pendingWindow.close();
+    }
+    setCaptureLaunchStatus(result.message || 'Capture launch recorded.');
     await loadInbox();
   } catch (error) {
-    state.captureLaunchStatus = error.message;
-    window.alert(error.message);
+    if (pendingWindow) pendingWindow.close();
+    setCaptureLaunchStatus(error.message);
   }
 }
 

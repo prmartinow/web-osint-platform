@@ -36,7 +36,7 @@ The Research UI route scaffolding for the interrupted audit stream has landed:
 - Draft Editor read model and page: implemented.
 - Publication Review detail page: implemented.
 - Publication snapshot/release persistence: implemented first cut.
-- Rebrowser launch bridge: implemented first cut through `REBROWSER_LAUNCH_URL`.
+- Rebrowser launch bridge: normalized launch/result path implemented through `REBROWSER_LAUNCH_URL`; real live helper configuration remains pending in ignored deployment env.
 
 The remaining work is production depth, visual QA, and Web OSINT repo consolidation.
 
@@ -51,7 +51,7 @@ The remaining work is production depth, visual QA, and Web OSINT repo consolidat
 | RUI-05 | Benchmark Detail persistence | Done | Benchmark methodology fields and result groups persist; incompatible configs are excluded from default ranking; missing methodology blocks publication. | Reverify result-row group controls when populated benchmark claims exist. |
 | RUI-06 | Topic Detail deep links | Done | Taxonomy/topic rows and topic mentions open Topic Detail directly, preserving project scope. | Keep taxonomy-to-topic and timeline-topic chip checks in UI regression. |
 | RUI-07 | Publication handoff/export | Done | Approved snapshot can create explicit handoff/export artifacts with manifest hash, frozen object IDs, public config, and no private runtime values. | Keep handoff export in the publishing regression loop while wiring Rebrowser LaunchCapture. |
-| RUI-08 | Rebrowser LaunchCapture final wiring | Partial | `REBROWSER_LAUNCH_URL` points to the real launch helper; UI opens/records returned session; committed capture events link back to requested project/source/route. | Configure bridge and verify a real capture session. |
+| RUI-08 | Rebrowser LaunchCapture final wiring | Partial | `REBROWSER_LAUNCH_URL` points to the real launch helper; UI opens/records returned session; committed capture events link back to requested project/source/route; Research UI fills the active browser viewport in screenshots. | Set the real launch helper endpoint in ignored deployment env and verify a real capture session. |
 | REPO-01 | Single canonical Web OSINT repo | Partial | Runtime/deployment can be launched from `web-osint-platform` without relying on a separate editable live source tree. | Migrate remaining services/deploy commands from the legacy live tree to the canonical repo and retire the legacy tree as editable source. |
 | REPO-02 | Environment-only deployment config | Partial | All sensitive/local deployment values are supplied by env vars or ignored local files; repo contains `.env.example` and documented variable names only. | Compare active `.env` shape against tracked examples without copying secrets; add missing public variable names only. |
 | REPO-03 | Deployment data separation | Todo | Durable state remains under external data roots supplied by env vars; repo contains no durable data or generated runtime state. | Audit compose, scripts, and worker defaults for data-root assumptions. |
@@ -109,6 +109,7 @@ Migration steps:
 - 2026-06-27: Added Benchmark Detail persistence with methodology and result-group tables plus save APIs. The UI now edits source-linked methodology fields and can persist result-group compatibility/default-ranking settings; incompatible groups cannot remain default-ranked.
 - 2026-06-27: Wired Topic Detail deep links from taxonomy topic rows, taxonomy preview actions, and timeline topic chips. Topic navigation preserves the active project scope in the route hash.
 - 2026-06-27: Added publication handoff/export persistence with sanitized handoff artifacts. Approved snapshots can now create `public_export_manifest` rows that store manifest hash, frozen object IDs, object counts, public target config, and a narrow artifact envelope without private runtime paths or endpoint values; Publishing and Publication Detail now show generated artifact lists.
+- 2026-06-27: Normalized Rebrowser LaunchCapture responses, recorded returned launch sessions as review events tied to the requested project/source/route, opened returned session URLs from the UI, replaced launch alerts with inline status, added the public `REBROWSER_LAUNCH_URL` example name, and tightened viewport sizing so the Research UI fills the browser window instead of rendering as a partial-width/partial-height shell.
 
 ## Verification Record
 
@@ -127,7 +128,8 @@ Latest verified state:
 - Benchmark Detail write/readback smoke saved source-linked methodology and an incompatible result group; readback showed methodology no longer blocks publication and the incompatible group is not default-ranked. Browser/CDP desktop and mobile checks verified methodology fields, save action, responsive layout, no page-level horizontal scroll, and no browser console/page errors. The active project has no populated benchmark result claims, so row-level group buttons remain to be rechecked on populated data.
 - Topic link browser check opened Topic Detail from a taxonomy topic control and verified the resulting hash preserved `project=x-notifications`; the Topic Detail page rendered without page-level horizontal scroll, stuck loading/error text, or browser console/page errors.
 - Publication handoff API smoke created a frozen snapshot, approved it, created a `public_export_manifest` handoff, read it back from Publication Detail, and scanned the returned artifact for local path/private endpoint/token patterns. Browser/CDP checks verified desktop Publication Detail fills the full viewport width, the handoff artifact list renders, mobile has no page-level or card-level horizontal overflow, long hashes/config text wrap inside the card, and the status badge stays intact.
+- Rebrowser LaunchCapture endpoint smoke verified URL-only launches record a queued event when `REBROWSER_LAUNCH_URL` is not configured. A temporary local launch helper verified the configured path returns a normalized committed session, open URL, and two event ids without adding deployment values to Git. Browser/CDP checks verified the UI reports `Capture committed`, opens the returned session route, live desktop fills a 1920x1080 viewport, and live mobile has no page-level horizontal overflow. The active live env still requires a real helper URL before RUI-08 can be marked `Done`.
 
 ## Next Checkpoint
 
-Continue with `RUI-08`: finish Rebrowser LaunchCapture wiring so `REBROWSER_LAUNCH_URL` points to the real launch helper, UI launch requests record the returned session, and committed capture events link back to the requested project/source/route.
+Continue with `RUI-08`: configure `REBROWSER_LAUNCH_URL` in ignored deployment env to the real Rebrowser launch helper and verify one real capture session end to end. If no real helper is available in the current environment, keep RUI-08 blocked on live helper configuration and continue the repo consolidation work without reintroducing local model ownership.

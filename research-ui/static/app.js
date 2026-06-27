@@ -14,6 +14,13 @@ const state = {
   conflictResolution: 'leave_unresolved',
   conflictReasonCode: 'unresolved',
   conflictPreferredClaimId: '',
+  topicDetailId: '',
+  topicDetailTab: 'overview',
+  compareViewId: 'claims',
+  benchmarkId: 'benchmark',
+  draftId: 'working-draft',
+  publicationBundleId: '',
+  publicationDetailTab: 'overview',
   rows: [],
   facets: null,
   home: null,
@@ -72,6 +79,7 @@ const state = {
   publishingRows: [],
   publishingSelectedId: '',
   publishingPreviewTab: 'readiness',
+  captureLaunchStatus: '',
   sidebarCollapsed: localStorage.getItem('web-osint-sidebar-collapsed') === '1',
   taxonomyQueue: 'proposed_terms',
   taxonomyVocabulary: '',
@@ -210,6 +218,12 @@ const routeConfig = {
   reviews: { title: 'Reviews', endpoint: '/api/reviews' },
   publishing: { title: 'Publishing', endpoint: '/api/publishing' },
   taxonomy: { title: 'Taxonomy', endpoint: '/api/taxonomy' },
+  timeline: { title: 'Timeline', endpoint: '' },
+  compare: { title: 'Compare', endpoint: '' },
+  'topic-detail': { title: 'Topic Detail', endpoint: '' },
+  benchmark: { title: 'Benchmark Detail', endpoint: '' },
+  draft: { title: 'Draft Editor', endpoint: '' },
+  'publication-detail': { title: 'Publication Review', endpoint: '' },
   'entity-detail': { title: 'Entity Detail', endpoint: '' },
   'conflict-detail': { title: 'Conflict Resolution', endpoint: '' },
 };
@@ -315,6 +329,31 @@ function applyHashParams() {
     state.conflictResolution = params.get('resolution') || 'leave_unresolved';
     state.conflictReasonCode = params.get('reason') || 'unresolved';
   }
+  if (route === 'timeline') {
+    state.project = params.get('project') || state.project || '';
+    state.q = params.get('q') || state.q || '';
+  }
+  if (route === 'compare') {
+    state.project = params.get('project') || state.project || '';
+    state.compareViewId = params.get('view') || 'claims';
+  }
+  if (route === 'topic-detail') {
+    state.topicDetailId = params.get('id') || '';
+    state.topicDetailTab = params.get('tab') || 'overview';
+    state.project = params.get('project') || state.project || '';
+  }
+  if (route === 'benchmark') {
+    state.benchmarkId = params.get('id') || 'benchmark';
+    state.project = params.get('project') || state.project || '';
+  }
+  if (route === 'draft') {
+    state.draftId = params.get('id') || 'working-draft';
+    state.project = params.get('project') || state.project || '';
+  }
+  if (route === 'publication-detail') {
+    state.publicationBundleId = params.get('id') || '';
+    state.publicationDetailTab = params.get('tab') || 'overview';
+  }
 }
 
 function routeHash() {
@@ -415,6 +454,49 @@ function routeHash() {
     if (state.conflictReasonCode && state.conflictReasonCode !== 'unresolved') params.set('reason', state.conflictReasonCode);
     const query = params.toString();
     return `#conflict-detail${query ? '?' + query : ''}`;
+  }
+  if (state.route === 'timeline') {
+    const params = new URLSearchParams();
+    if (state.project) params.set('project', state.project);
+    if (state.q) params.set('q', state.q);
+    const query = params.toString();
+    return `#timeline${query ? '?' + query : ''}`;
+  }
+  if (state.route === 'compare') {
+    const params = new URLSearchParams();
+    if (state.project) params.set('project', state.project);
+    if (state.compareViewId && state.compareViewId !== 'claims') params.set('view', state.compareViewId);
+    const query = params.toString();
+    return `#compare${query ? '?' + query : ''}`;
+  }
+  if (state.route === 'topic-detail') {
+    const params = new URLSearchParams();
+    if (state.topicDetailId) params.set('id', state.topicDetailId);
+    if (state.project) params.set('project', state.project);
+    if (state.topicDetailTab && state.topicDetailTab !== 'overview') params.set('tab', state.topicDetailTab);
+    const query = params.toString();
+    return `#topic-detail${query ? '?' + query : ''}`;
+  }
+  if (state.route === 'benchmark') {
+    const params = new URLSearchParams();
+    if (state.benchmarkId && state.benchmarkId !== 'benchmark') params.set('id', state.benchmarkId);
+    if (state.project) params.set('project', state.project);
+    const query = params.toString();
+    return `#benchmark${query ? '?' + query : ''}`;
+  }
+  if (state.route === 'draft') {
+    const params = new URLSearchParams();
+    if (state.draftId && state.draftId !== 'working-draft') params.set('id', state.draftId);
+    if (state.project) params.set('project', state.project);
+    const query = params.toString();
+    return `#draft${query ? '?' + query : ''}`;
+  }
+  if (state.route === 'publication-detail') {
+    const params = new URLSearchParams();
+    if (state.publicationBundleId) params.set('id', state.publicationBundleId);
+    if (state.publicationDetailTab && state.publicationDetailTab !== 'overview') params.set('tab', state.publicationDetailTab);
+    const query = params.toString();
+    return `#publication-detail${query ? '?' + query : ''}`;
   }
   if (state.route !== 'library') return `#${state.route}`;
   const params = new URLSearchParams();
@@ -862,7 +944,7 @@ function sourceButton(row, extra = '') {
 }
 
 function bindObjectRows() {
-  document.querySelectorAll('.object-row[data-id]').forEach((button) => {
+  document.querySelectorAll('.object-row[data-id], .mini-source-row[data-id], .timeline-item [data-id], .ledger-table [data-id], .detail-card [data-id]').forEach((button) => {
     const id = button.dataset.id;
     if (!id) return;
     button.addEventListener('click', () => selectSource(id));
@@ -939,9 +1021,9 @@ function renderProjectLocalNav(row) {
       ${projectRouteButton(row, 'Evidence', 'evidence')}
       ${projectRouteButton(row, 'Claims', 'claims')}
       ${projectRouteButton(row, 'Entities', 'entities')}
-      <button type="button" class="text-button" disabled title="Not yet implemented">Timeline</button>
-      <button type="button" class="text-button" disabled title="Not yet implemented">Compare</button>
-      <button type="button" class="text-button" disabled title="Not yet implemented">Drafts</button>
+      ${projectRouteButton(row, 'Timeline', 'timeline')}
+      ${projectRouteButton(row, 'Compare', 'compare')}
+      ${projectRouteButton(row, 'Drafts', 'draft')}
       ${projectRouteButton(row, 'Publishing', 'publishing')}
       ${projectRouteButton(row, 'Inbox', 'inbox')}
     </nav>
@@ -3997,13 +4079,11 @@ function renderPublishingPreview(data) {
   `;
 }
 
-// Publishing is a preview surface: snapshot/approve/publish are disabled until
-// a snapshot store exists. Drive enabled/disabled from the backend's
-// permitted_actions / disabled_actions so the UI never offers a button that
-// only logs an event without doing the real work.
+// Drive enabled/disabled from the backend's persisted snapshot/release state so
+// the UI never offers publish before an approved frozen snapshot exists.
 function renderPublishingActions(row) {
   const permitted = row?.permitted_actions || ['open_package', 'run_checks', 'focus_blockers'];
-  const disabled = row?.disabled_actions || ['create_snapshot', 'request_review', 'create_handoff', 'publish_snapshot', 'supersede_release'];
+  const disabled = row?.disabled_actions || ['request_review', 'create_handoff', 'publish_snapshot', 'supersede_release'];
   const labelFor = (action) => ({
     open_package: 'Open package', run_checks: 'Run checks', focus_blockers: 'Resolve blockers',
     create_snapshot: 'Create snapshot', request_review: 'Request review',
@@ -4014,13 +4094,32 @@ function renderPublishingActions(row) {
   return `<div class="review-preview-actions publishing-actions">
     ${all.map((action) => {
       const isDisabled = disabled.includes(action) && !permitted.includes(action);
-      return `<button class="secondary" data-publishing-action="${escapeHtml(action)}" ${isDisabled ? 'disabled title="Not implemented yet — publication is a preview surface"' : ''}>${escapeHtml(labelFor(action))}</button>`;
+      return `<button class="secondary" data-publishing-action="${escapeHtml(action)}" ${isDisabled ? 'disabled title="Unavailable for the current snapshot state"' : ''}>${escapeHtml(labelFor(action))}</button>`;
     }).join('')}
   </div>`;
 }
 
 async function persistPublishingAction(row, action) {
   if (!row) return;
+  if (action === 'open_package') {
+    openPublicationDetail(row);
+    return;
+  }
+  const endpoint = {
+    create_snapshot: '/api/publishing/snapshot',
+    request_review: '/api/publishing/request-review',
+    publish_snapshot: '/api/publishing/publish',
+    supersede_release: '/api/publishing/supersede',
+  }[action];
+  if (endpoint) {
+    await postJson(endpoint, {
+      bundle_id: publishingBundleKey(row),
+      snapshot_id: row.latest_snapshot_id || '',
+      actor: REVIEW_UI_ACTOR,
+      expected_version: row.snapshot_updated_at || row.optimistic_version || '',
+    });
+    return;
+  }
   await postJson('/api/review/events', {
     event_type: `publishing.${action}.recorded`,
     source_evidence_id: '',
@@ -4080,7 +4179,7 @@ function bindPublishingKeyboard() {
       const row = (state.publishingRows || []).find((item) => publishingBundleKey(item) === state.publishingSelectedId);
       // Map key -> the existing publishing action vocabulary. Snapshot/publish
       // respect disabled_actions (no-op when the row marks them unavailable).
-      const actionMap = { o: 'open_source', c: 'run_checks', b: 'blockers', s: 'create_snapshot', r: 'request_review', e: 'export', p: 'publish_snapshot', h: 'history' };
+      const actionMap = { o: 'open_package', c: 'run_checks', b: 'focus_blockers', s: 'create_snapshot', r: 'request_review', e: 'create_handoff', p: 'publish_snapshot', h: 'history' };
       const action = actionMap[key];
       const disabled = new Set(row?.disabled_actions || ['create_snapshot', 'request_review', 'create_handoff', 'publish_snapshot', 'supersede_release']);
       if (['create_snapshot', 'publish_snapshot'].includes(action) && disabled.has(action)) {
@@ -4089,9 +4188,11 @@ function bindPublishingKeyboard() {
         return;
       }
       try {
-        if (action === 'open_source' || action === 'history' || action === 'blockers' || action === 'export') {
+        if (action === 'open_package') {
+          openPublicationDetail(row);
+        } else if (action === 'history' || action === 'focus_blockers' || action === 'create_handoff') {
           // Read-only / preview actions: switch preview tab where one exists.
-          if (action === 'blockers') state.publishingPreviewTab = 'checks';
+          if (action === 'focus_blockers') state.publishingPreviewTab = 'readiness';
           else if (action === 'history') state.publishingPreviewTab = 'audit';
           else state.publishingPreviewTab = 'readiness';
           replaceRouteHash();
@@ -4137,13 +4238,17 @@ function bindPublishingPage(data) {
     replaceRouteHash();
     loadRoutePage();
   });
-  document.querySelectorAll('.publish-row').forEach((rowEl) => {
-    rowEl.addEventListener('click', () => {
-      state.publishingSelectedId = rowEl.dataset.bundleId || '';
-      replaceRouteHash();
-      loadRoutePage();
-    });
-  });
+	  document.querySelectorAll('.publish-row').forEach((rowEl) => {
+	    rowEl.addEventListener('click', () => {
+	      state.publishingSelectedId = rowEl.dataset.bundleId || '';
+	      replaceRouteHash();
+	      loadRoutePage();
+	    });
+	    rowEl.addEventListener('dblclick', () => {
+	      const row = (data.bundles || []).find((item) => publishingBundleKey(item) === (rowEl.dataset.bundleId || ''));
+	      openPublicationDetail(row);
+	    });
+	  });
   document.querySelectorAll('[data-publishing-preview-tab]').forEach((button) => {
     button.addEventListener('click', () => {
       state.publishingPreviewTab = button.dataset.publishingPreviewTab || 'readiness';
@@ -4161,9 +4266,10 @@ function bindPublishingPage(data) {
       const status = $('publishingActionStatus');
       try {
         if (status) status.textContent = `${button.textContent.trim()}...`;
-        await persistPublishingAction(row, button.dataset.publishingAction || 'run_checks');
-        if (status) status.textContent = `${button.textContent.trim()} recorded.`;
-      } catch (error) {
+	        await persistPublishingAction(row, button.dataset.publishingAction || 'run_checks');
+	        if (status) status.textContent = `${button.textContent.trim()} recorded.`;
+	        if (state.route === 'publishing') await loadRoutePage();
+	      } catch (error) {
         if (status) status.textContent = error.message;
       }
     });
@@ -4183,17 +4289,17 @@ function renderPublishingPage(data) {
       <div>
         <span class="breadcrumb">Research UI / Publication preparation</span>
         <div class="title-action-group">
-          <span class="status-badge warn">preview — snapshot & publish not implemented</span>
+          <span class="status-badge info">snapshot-backed workflow</span>
           <span class="status-badge danger">${escapeHtml(summary.blocked || 0)} blocking checks</span>
         </div>
         <h1>Publishing</h1>
         <p>Assemble reviewed claims and exact source citations into frozen, reusable publication packages.</p>
-        <p class="muted">Readiness checks are derived from review-object counts. Snapshot creation, approval, and release are placeholders pending a snapshot store; those actions are disabled.</p>
+        <p class="muted">Snapshot creation freezes the current manifest. Publish remains gated on an approved snapshot.</p>
       </div>
       <div class="page-actions">
-        <button class="secondary" data-publishing-action="published_releases" disabled title="Not implemented yet">Published releases</button>
-        <button class="secondary" data-publishing-action="create_from_draft" disabled title="Not implemented yet">Create from draft</button>
-        <button data-publishing-action="new_package" disabled title="Not implemented yet">New package</button>
+        <button class="secondary" data-publishing-action="published_releases">Published releases</button>
+        <button class="secondary" data-publishing-action="create_from_draft">Create from draft</button>
+        <button data-publishing-action="new_package">New package</button>
       </div>
     </header>
     <section class="operation-search-card">
@@ -5022,7 +5128,371 @@ function renderConflictDetailPage(data) {
   if (btn) btn.addEventListener('click', () => persistConflictResolution({ optimistic_version: '', updated_at: '' }));
 }
 
+function routeProjectId() {
+  return state.project || state.home?.active_project?.project_id || '__active__';
+}
+
+function statusBadge(value) {
+  const text = String(value || 'unknown');
+  return `<span class="status-badge ${publishingStateClass(text)}">${escapeHtml(titleCase(text.replace(/_/g, ' ')))}</span>`;
+}
+
+function renderMiniSourceList(sources) {
+  const rows = sources || [];
+  if (!rows.length) return '<p class="muted">No sources in this view.</p>';
+  return `<div class="mini-source-list">${rows.slice(0, 40).map((row) => `
+    <button class="mini-source-row object-row" type="button" data-id="${escapeHtml(row.evidence_id || row.source_evidence_id || '')}">
+      <strong>${escapeHtml(row.title || row.canonical_url || row.evidence_id || row.source_evidence_id || 'Source')}</strong>
+      <span>${escapeHtml([row.source_label || row.source_kind, row.domain, fmtDate(row.last_ingested_at || row.updated_at)].filter(Boolean).join(' · '))}</span>
+    </button>
+  `).join('')}</div>`;
+}
+
+async function loadTimelinePage() {
+  const projectId = routeProjectId();
+  const params = new URLSearchParams({ limit: state.limit });
+  if (state.q) params.set('q', state.q);
+  $('routePage').innerHTML = pageHeader('Timeline', 'Loading chronological evidence and claim events...');
+  const token = makeFetchToken();
+  try {
+    const data = await fetchJson(`/api/project/${encodeURIComponent(projectId)}/timeline?${params.toString()}`);
+    if (!isCurrentFetchToken(token) || state.route !== 'timeline') return;
+    renderTimelinePage(data);
+  } catch (error) {
+    if (!isCurrentFetchToken(token) || state.route !== 'timeline') return;
+    $('routePage').innerHTML = pageHeader('Timeline', 'Could not load timeline.') + `<div class="empty-state panel"><h2>Timeline error</h2><p>${escapeHtml(error.message)}</p></div>`;
+  }
+}
+
+function renderTimelinePage(data) {
+  const items = data.items || data.results?.items || [];
+  const summary = data.summary || {};
+  $('routePage').innerHTML = `
+    ${pageHeader('Timeline', `${escapeHtml(data.scope?.project || 'Active project')} · ${escapeHtml(summary.items || 0)} event(s)`, `
+      <button class="secondary" type="button" data-route-target="compare" data-project="${escapeHtml(data.scope?.project || state.project || '')}">Compare</button>
+      <button type="button" data-route-target="draft" data-project="${escapeHtml(data.scope?.project || state.project || '')}">Draft</button>
+    `)}
+    ${metricCards([
+      { label: 'Events', value: summary.items || items.length },
+      { label: 'Captures', value: summary.captures || 0 },
+      { label: 'Claims', value: summary.claims || 0 },
+      { label: 'Conflicts', value: summary.conflicts || 0 },
+    ])}
+    <section class="timeline-shell panel">
+      <div class="timeline-lanes">
+        ${(data.lanes || []).map((lane) => `<span class="pill">${escapeHtml(lane.label)} ${escapeHtml(lane.count || 0)}</span>`).join('')}
+      </div>
+      <div class="timeline-list">
+        ${items.length ? items.map((item) => `
+          <article class="timeline-item ${escapeHtml(item.conflict_state || '')}">
+            <time>${escapeHtml(fmtDate(item.date) || 'undated')}</time>
+            <div>
+              <strong>${escapeHtml(item.summary || item.item_id || 'Timeline item')}</strong>
+              <p>${escapeHtml([titleCase(item.event_type || ''), item.date_precision, item.review_state, item.conflict_state].filter(Boolean).join(' · '))}</p>
+              <div class="tag-line">
+                ${(item.entities || []).slice(0, 4).map((value) => `<span class="pill">${escapeHtml(value)}</span>`).join('')}
+                ${(item.source_ids || []).slice(0, 2).map((value) => `<button class="text-button" type="button" data-id="${escapeHtml(value)}">${escapeHtml(value)}</button>`).join('')}
+              </div>
+            </div>
+          </article>
+        `).join('') : '<div class="empty-state"><h2>No timeline events</h2><p>No captures or claims match this project.</p></div>'}
+      </div>
+    </section>
+  `;
+  bindObjectRows();
+  document.querySelectorAll('[data-route-target]').forEach((button) => button.addEventListener('click', () => {
+    state.project = button.dataset.project || state.project;
+    setRoute(button.dataset.routeTarget || 'projects');
+  }));
+}
+
+async function loadComparePage() {
+  const projectId = routeProjectId();
+  $('routePage').innerHTML = pageHeader('Compare', 'Loading comparison matrix...');
+  const token = makeFetchToken();
+  try {
+    const data = await fetchJson(`/api/project/${encodeURIComponent(projectId)}/compare/${encodeURIComponent(state.compareViewId || 'claims')}?limit=${encodeURIComponent(state.limit)}`);
+    if (!isCurrentFetchToken(token) || state.route !== 'compare') return;
+    renderComparePage(data);
+  } catch (error) {
+    if (!isCurrentFetchToken(token) || state.route !== 'compare') return;
+    $('routePage').innerHTML = pageHeader('Compare', 'Could not load comparison matrix.') + `<div class="empty-state panel"><h2>Compare error</h2><p>${escapeHtml(error.message)}</p></div>`;
+  }
+}
+
+function renderComparePage(data) {
+  const columns = data.columns || [];
+  const rows = data.rows || [];
+  $('routePage').innerHTML = `
+    ${pageHeader('Compare', `${escapeHtml(columns.length)} entities · ${escapeHtml(rows.length)} properties`)}
+    <section class="compare-shell panel">
+      <div class="compare-legend">${(data.legend || []).map((item) => `<span class="pill">${escapeHtml(item)}</span>`).join('')}</div>
+      <div class="compare-table-wrap">
+        <table class="ledger-table compare-table">
+          <thead><tr><th>Property</th>${columns.map((col) => `<th>${escapeHtml(col.label || col.id)}</th>`).join('')}</tr></thead>
+          <tbody>
+            ${rows.length ? rows.map((row) => `
+              <tr>
+                <th>${escapeHtml(titleCase(row.property || 'property'))}</th>
+                ${(row.cells || []).map((cell) => `
+                  <td>
+                    ${statusBadge(cell.state)}
+                    <strong>${escapeHtml(cell.value || '')}</strong>
+                    ${cell.source_evidence_id ? `<button class="text-button" type="button" data-id="${escapeHtml(cell.source_evidence_id)}">Evidence</button>` : '<span class="muted">No evidence</span>'}
+                  </td>
+                `).join('')}
+              </tr>
+            `).join('') : '<tr><td colspan="99">No scoped claims available for comparison.</td></tr>'}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  `;
+  bindObjectRows();
+}
+
+async function loadTopicDetailPage() {
+  if (!state.topicDetailId) {
+    $('routePage').innerHTML = pageHeader('Topic Detail', 'No topic selected.') + '<div class="empty-state panel"><h2>Select a topic</h2><p>Open a taxonomy topic to inspect source coverage, claims, entities, and timeline events.</p></div>';
+    return;
+  }
+  const params = new URLSearchParams();
+  if (state.project) params.set('project', state.project);
+  $('routePage').innerHTML = pageHeader('Topic Detail', 'Loading topic...');
+  const token = makeFetchToken();
+  try {
+    const data = await fetchJson(`/api/topic/${encodeURIComponent(state.topicDetailId)}?${params.toString()}`);
+    if (!isCurrentFetchToken(token) || state.route !== 'topic-detail') return;
+    renderTopicDetailPage(data);
+  } catch (error) {
+    if (!isCurrentFetchToken(token) || state.route !== 'topic-detail') return;
+    $('routePage').innerHTML = pageHeader('Topic Detail', 'Could not load topic.') + `<div class="empty-state panel"><h2>Topic error</h2><p>${escapeHtml(error.message)}</p></div>`;
+  }
+}
+
+function renderTopicDetailPage(data) {
+  const h = data.header || {};
+  const tabs = data.tabs || ['overview'];
+  const active = tabs.includes(state.topicDetailTab) ? state.topicDetailTab : 'overview';
+  const tabButton = (id) => `<button class="secondary ${active === id ? 'active' : ''}" type="button" data-topic-tab="${escapeHtml(id)}">${escapeHtml(titleCase(id))}</button>`;
+  $('routePage').innerHTML = `
+    ${pageHeader(h.label || 'Topic Detail', `${escapeHtml(h.source_count || 0)} sources · ${escapeHtml(h.claim_count || 0)} claims · ${escapeHtml(h.entity_count || 0)} entities`)}
+    <section class="synthesis-detail-shell">
+      <article class="panel detail-card">
+        <h2>${escapeHtml(h.label || 'Topic')}</h2>
+        <p>${escapeHtml(h.definition || '')}</p>
+        <div class="tag-line">${statusBadge(h.review_state)}<span class="pill">${escapeHtml(h.topic_id || '')}</span></div>
+      </article>
+      <nav class="entity-detail-tabs">${tabs.map(tabButton).join('')}</nav>
+      <section class="panel detail-card" data-topic-section="overview">
+        <h3>Coverage</h3>
+        <div class="coverage-rule-list">
+          ${(data.coverage?.sources || []).map((item) => `<div class="coverage-rule"><strong>${escapeHtml(item.label)}</strong><em>${escapeHtml(item.count)}</em></div>`).join('')}
+        </div>
+      </section>
+      <section class="panel detail-card" data-topic-section="evidence"><h3>Evidence</h3>${renderMiniSourceList(data.sources || [])}</section>
+      <section class="panel detail-card" data-topic-section="claims"><h3>Claims</h3>${(data.claims || []).map((claim) => `<p><strong>${escapeHtml(claim.claim_text || '')}</strong><br>${statusBadge(claim.review_state)} ${statusBadge(claim.contradiction_state)}</p>`).join('') || '<p class="muted">No claims.</p>'}</section>
+      <section class="panel detail-card" data-topic-section="entities"><h3>Entities</h3><div class="tag-line">${(data.entities || []).map((entity) => `<span class="pill">${escapeHtml(entity)}</span>`).join('') || '<span class="muted">No entities.</span>'}</div></section>
+    </section>
+  `;
+  document.querySelectorAll('[data-topic-tab]').forEach((button) => button.addEventListener('click', () => {
+    state.topicDetailTab = button.dataset.topicTab || 'overview';
+    replaceRouteHash();
+  }));
+  bindObjectRows();
+}
+
+async function loadBenchmarkPage() {
+  const params = new URLSearchParams();
+  if (state.project) params.set('project', state.project);
+  $('routePage').innerHTML = pageHeader('Benchmark Detail', 'Loading benchmark...');
+  const token = makeFetchToken();
+  try {
+    const data = await fetchJson(`/api/benchmark/${encodeURIComponent(state.benchmarkId || 'benchmark')}?${params.toString()}`);
+    if (!isCurrentFetchToken(token) || state.route !== 'benchmark') return;
+    renderBenchmarkPage(data);
+  } catch (error) {
+    if (!isCurrentFetchToken(token) || state.route !== 'benchmark') return;
+    $('routePage').innerHTML = pageHeader('Benchmark Detail', 'Could not load benchmark.') + `<div class="empty-state panel"><h2>Benchmark error</h2><p>${escapeHtml(error.message)}</p></div>`;
+  }
+}
+
+function renderBenchmarkPage(data) {
+  const h = data.header || {};
+  const rows = data.results || [];
+  $('routePage').innerHTML = `
+    ${pageHeader(h.label || 'Benchmark Detail', `${escapeHtml(rows.length)} result(s) · ${escapeHtml(h.methodology_state || '')}`)}
+    <section class="benchmark-shell panel">
+      <div class="review-layer-stack">
+        ${(data.checks || []).map((check) => `<div><span>${escapeHtml(check.label)}</span><strong>${escapeHtml(check.state)}</strong></div>`).join('')}
+      </div>
+      <table class="ledger-table">
+        <thead><tr><th>Model</th><th>Metric</th><th>Value</th><th>Config</th><th>Ranking</th><th>Evidence</th></tr></thead>
+        <tbody>
+          ${rows.length ? rows.map((row) => `<tr><td>${escapeHtml(row.model || '')}</td><td>${escapeHtml(row.metric || '')}</td><td>${escapeHtml(row.value || '')}</td><td><code>${escapeHtml(row.config_key || '')}</code></td><td>${statusBadge(row.default_ranked ? 'ranked' : 'incomparable')}</td><td>${row.source_evidence_id ? `<button class="text-button" data-id="${escapeHtml(row.source_evidence_id)}">Open</button>` : '<span class="muted">None</span>'}</td></tr>`).join('') : '<tr><td colspan="6">No benchmark claims match this view.</td></tr>'}
+        </tbody>
+      </table>
+    </section>
+  `;
+  bindObjectRows();
+}
+
+async function loadDraftPage() {
+  const projectId = routeProjectId();
+  $('routePage').innerHTML = pageHeader('Draft Editor', 'Loading draft...');
+  const token = makeFetchToken();
+  try {
+    const data = await fetchJson(`/api/project/${encodeURIComponent(projectId)}/draft/${encodeURIComponent(state.draftId || 'working-draft')}`);
+    if (!isCurrentFetchToken(token) || state.route !== 'draft') return;
+    renderDraftPage(data);
+  } catch (error) {
+    if (!isCurrentFetchToken(token) || state.route !== 'draft') return;
+    $('routePage').innerHTML = pageHeader('Draft Editor', 'Could not load draft.') + `<div class="empty-state panel"><h2>Draft error</h2><p>${escapeHtml(error.message)}</p></div>`;
+  }
+}
+
+function renderDraftPage(data) {
+  const paragraphs = data.paragraphs || [];
+  $('routePage').innerHTML = `
+    ${pageHeader(data.header?.title || 'Draft Editor', `Revision ${escapeHtml(data.header?.revision || '')} · ${escapeHtml((data.references || []).length)} references`)}
+    <section class="draft-shell">
+      <aside class="panel draft-outline">${(data.outline || []).map((item) => `<button class="saved-item" type="button"><span>${escapeHtml(item.label)}</span><strong>${escapeHtml(item.status)}</strong></button>`).join('')}</aside>
+      <section class="panel draft-editor-pane">
+        ${paragraphs.map((paragraph) => `
+          <article class="draft-paragraph ${paragraph.support_state === 'unsupported' ? 'unsupported' : ''}">
+            <p>${escapeHtml(paragraph.text || '')}</p>
+            <div class="tag-line">${statusBadge(paragraph.support_state)} ${(paragraph.references || []).map((ref) => `<span class="pill">${escapeHtml(ref.object_type)}:${escapeHtml(ref.object_id)}</span>`).join('')}</div>
+          </article>
+        `).join('') || '<div class="empty-state"><h2>No draft paragraphs</h2><p>No claims are available for this draft.</p></div>'}
+      </section>
+      <aside class="panel draft-evidence-rail">${renderMiniSourceList(data.evidence_rail || [])}</aside>
+    </section>
+  `;
+  bindObjectRows();
+}
+
+function openPublicationDetail(row) {
+  if (!row) return;
+  state.publicationBundleId = publishingBundleKey(row);
+  state.publicationDetailTab = 'overview';
+  setRoute('publication-detail');
+}
+
+async function loadPublicationDetailPage() {
+  if (!state.publicationBundleId) {
+    $('routePage').innerHTML = pageHeader('Publication Review', 'No publication bundle selected.');
+    return;
+  }
+  $('routePage').innerHTML = pageHeader('Publication Review', 'Loading publication snapshot detail...');
+  const token = makeFetchToken();
+  try {
+    const data = await fetchJson(`/api/publishing/${encodeURIComponent(state.publicationBundleId)}`);
+    if (!isCurrentFetchToken(token) || state.route !== 'publication-detail') return;
+    renderPublicationDetailPage(data);
+  } catch (error) {
+    if (!isCurrentFetchToken(token) || state.route !== 'publication-detail') return;
+    $('routePage').innerHTML = pageHeader('Publication Review', 'Could not load publication detail.') + `<div class="empty-state panel"><h2>Publication error</h2><p>${escapeHtml(error.message)}</p></div>`;
+  }
+}
+
+async function persistPublicationDetailAction(action, data) {
+  const bundle = data.bundle || {};
+  const snapshot = data.snapshot || {};
+  const endpoint = {
+    create_snapshot: '/api/publishing/snapshot',
+    request_review: '/api/publishing/request-review',
+    approve_snapshot: '/api/publishing/approve',
+    request_changes: '/api/publishing/request-changes',
+    publish_snapshot: '/api/publishing/publish',
+    supersede_release: '/api/publishing/supersede',
+  }[action];
+  if (!endpoint) return;
+  const status = $('publicationDetailStatus');
+  try {
+    if (status) status.textContent = `${titleCase(action)}...`;
+    await postJson(endpoint, {
+      bundle_id: publishingBundleKey(bundle),
+      snapshot_id: snapshot.snapshot_id || '',
+      actor: REVIEW_UI_ACTOR,
+      expected_version: snapshot.updated_at || bundle.optimistic_version || '',
+    });
+    if (status) status.textContent = `${titleCase(action)} recorded.`;
+    await loadPublicationDetailPage();
+  } catch (error) {
+    if (status) status.textContent = error.message;
+  }
+}
+
+function renderPublicationDetailPage(data) {
+  const bundle = data.bundle || {};
+  const snapshot = data.snapshot || {};
+  const tabs = data.tabs || ['overview'];
+  const active = tabs.includes(state.publicationDetailTab) ? state.publicationDetailTab : 'overview';
+  const tabButton = (id) => `<button class="secondary ${active === id ? 'active' : ''}" type="button" data-publication-tab="${escapeHtml(id)}">${escapeHtml(titleCase(id))}</button>`;
+  $('routePage').innerHTML = `
+    ${pageHeader(bundle.title || 'Publication Review', `${escapeHtml(bundle.display_state || 'draft')} · ${escapeHtml(data.manifest_hash || bundle.manifest_hash || '')}`, `
+      <button class="secondary" type="button" data-route-target="publishing">Back to publishing</button>
+    `)}
+    <section class="publication-detail-shell">
+      <header class="panel publication-detail-head">
+        <div>
+          <h2>${escapeHtml(bundle.package_type_label || bundle.package_type || 'Package')}</h2>
+          <p>${escapeHtml(bundle.target || '')}</p>
+          <div class="tag-line">${statusBadge(bundle.display_state)}${statusBadge(snapshot.review_state || 'no_snapshot')}<span class="pill">${escapeHtml(snapshot.snapshot_id || 'No snapshot')}</span></div>
+        </div>
+        <div class="publication-detail-actions">
+          <button data-publication-action="create_snapshot">Create snapshot</button>
+          <button class="secondary" data-publication-action="request_review" ${snapshot.snapshot_id ? '' : 'disabled'}>Request review</button>
+          <button class="secondary" data-publication-action="approve_snapshot" ${snapshot.snapshot_id ? '' : 'disabled'}>Approve</button>
+          <button class="secondary" data-publication-action="request_changes" ${snapshot.snapshot_id ? '' : 'disabled'}>Request changes</button>
+          <button data-publication-action="publish_snapshot" ${snapshot.review_state === 'approved' ? '' : 'disabled'}>Publish</button>
+          <button class="secondary danger-button" data-publication-action="supersede_release" ${bundle.release_state === 'published' ? '' : 'disabled'}>Supersede</button>
+          <span id="publicationDetailStatus" class="muted"></span>
+        </div>
+      </header>
+      <nav class="entity-detail-tabs">${tabs.map(tabButton).join('')}</nav>
+      <section class="panel detail-card" data-publication-section="overview">
+        ${metricCards([
+          { label: 'Claims', value: data.manifest_summary?.claims || 0 },
+          { label: 'Evidence', value: data.manifest_summary?.evidence || 0 },
+          { label: 'Sources', value: data.manifest_summary?.sources || 0 },
+          { label: 'Taxonomy IDs', value: data.manifest_summary?.taxonomy_terms || 0 },
+        ])}
+      </section>
+      <section class="panel detail-card" data-publication-section="checks">
+        <h3>Checks</h3>
+        ${(data.checks || []).map((check) => `<p>${statusBadge(check.state)} <strong>${escapeHtml(check.label)}</strong><br>${escapeHtml(check.detail || '')}</p>`).join('')}
+      </section>
+      <section class="panel detail-card" data-publication-section="changed_content">
+        <h3>Changed content</h3>
+        ${(data.changed_content || []).map((row) => `<p><strong>${escapeHtml(row.label)}</strong><br><code>${escapeHtml(row.before || '')}</code><br><code>${escapeHtml(row.after || '')}</code></p>`).join('')}
+      </section>
+      <section class="panel detail-card" data-publication-section="claims"><h3>Claims</h3>${(data.claims || []).map((claim) => `<p><strong>${escapeHtml(claim.claim_text || '')}</strong><br>${statusBadge(claim.review_state)} ${claim.source_evidence_id ? `<button class="text-button" data-id="${escapeHtml(claim.source_evidence_id)}">Source</button>` : ''}</p>`).join('') || '<p class="muted">No claims.</p>'}</section>
+      <section class="panel detail-card" data-publication-section="evidence"><h3>Evidence</h3>${renderMiniSourceList(data.sources || [])}</section>
+      <section class="panel detail-card" data-publication-section="contradictions"><h3>Contradictions</h3>${(data.contradictions || []).map((claim) => `<p>${statusBadge(claim.contradiction_state)} ${escapeHtml(claim.claim_text || '')}</p>`).join('') || '<p class="muted">No unresolved contradictions in this manifest.</p>'}</section>
+      <section class="panel detail-card" data-publication-section="discussion"><h3>Discussion</h3>${(data.discussion || []).map((event) => `<p><strong>${escapeHtml(event.event_type)}</strong><br>${escapeHtml(fmtDate(event.created_at))} · ${escapeHtml(event.actor || '')}</p>`).join('') || '<p class="muted">No review discussion yet.</p>'}</section>
+      <section class="panel detail-card" data-publication-section="public_preview"><h3>Public preview</h3><p>${escapeHtml(data.public_preview?.title || bundle.title || '')}</p><p>${escapeHtml(data.public_preview?.claim_count || 0)} claims · ${escapeHtml(data.public_preview?.citation_count || 0)} citations</p></section>
+    </section>
+  `;
+  document.querySelectorAll('[data-publication-tab]').forEach((button) => button.addEventListener('click', () => {
+    state.publicationDetailTab = button.dataset.publicationTab || 'overview';
+    replaceRouteHash();
+    document.querySelectorAll('[data-publication-tab]').forEach((tab) => tab.classList.toggle('active', tab === button));
+    document.querySelectorAll('[data-publication-section]').forEach((section) => section.classList.toggle('hidden', section.dataset.publicationSection !== state.publicationDetailTab && state.publicationDetailTab !== 'overview'));
+  }));
+  document.querySelectorAll('[data-publication-section]').forEach((section) => section.classList.toggle('hidden', section.dataset.publicationSection !== active && active !== 'overview'));
+  document.querySelectorAll('[data-publication-action]').forEach((button) => button.addEventListener('click', () => persistPublicationDetailAction(button.dataset.publicationAction || '', data)));
+  document.querySelectorAll('[data-route-target]').forEach((button) => button.addEventListener('click', () => setRoute(button.dataset.routeTarget || 'publishing')));
+  bindObjectRows();
+}
+
 function renderRoutePage(route, data) {
+  if (route === 'timeline') return renderTimelinePage(data);
+  if (route === 'compare') return renderComparePage(data);
+  if (route === 'topic-detail') return renderTopicDetailPage(data);
+  if (route === 'benchmark') return renderBenchmarkPage(data);
+  if (route === 'draft') return renderDraftPage(data);
+  if (route === 'publication-detail') return renderPublicationDetailPage(data);
   if (route === 'entity-detail') return renderEntityDetailPage(data);
   if (route === 'conflict-detail') return renderConflictDetailPage(data);
   if (route === 'projects') return renderProjectsPage(data);
@@ -5126,6 +5596,30 @@ async function loadRoutePage() {
   }
   if (state.route === 'conflict-detail') {
     await loadConflictDetail();
+    return;
+  }
+  if (state.route === 'timeline') {
+    await loadTimelinePage();
+    return;
+  }
+  if (state.route === 'compare') {
+    await loadComparePage();
+    return;
+  }
+  if (state.route === 'topic-detail') {
+    await loadTopicDetailPage();
+    return;
+  }
+  if (state.route === 'benchmark') {
+    await loadBenchmarkPage();
+    return;
+  }
+  if (state.route === 'draft') {
+    await loadDraftPage();
+    return;
+  }
+  if (state.route === 'publication-detail') {
+    await loadPublicationDetailPage();
     return;
   }
   const config = routeConfig[state.route];
@@ -6453,6 +6947,26 @@ async function selectSource(id) {
   }
 }
 
+async function launchCaptureFlow(seed = '') {
+  const seedUrl = seed || window.prompt('Capture URL', '') || '';
+  if (!seedUrl.trim()) return;
+  state.captureLaunchStatus = 'Launching capture...';
+  try {
+    const result = await postJson('/api/rebrowser/launch-capture', {
+      project_id: state.project || state.home?.active_project?.project_id || '',
+      seed_url: seedUrl.trim(),
+      return_route: routeHash(),
+      actor: REVIEW_UI_ACTOR,
+    });
+    state.captureLaunchStatus = result.message || 'Capture launch recorded.';
+    window.alert(state.captureLaunchStatus);
+    await loadInbox();
+  } catch (error) {
+    state.captureLaunchStatus = error.message;
+    window.alert(error.message);
+  }
+}
+
 function wireEvents() {
   setSidebarCollapsed(state.sidebarCollapsed);
   $('sidebarToggle')?.addEventListener('click', () => {
@@ -6482,10 +6996,10 @@ function wireEvents() {
     setRoute('inbox');
   });
   $('captureSourceButton').addEventListener('click', () => {
-    setRoute('inbox');
+    launchCaptureFlow();
   });
   $('captureTopButton')?.addEventListener('click', () => {
-    setRoute('inbox');
+    launchCaptureFlow();
   });
   $('newNoteButton')?.addEventListener('click', () => {
     openInboxQueue('manual_docs');
@@ -6514,7 +7028,7 @@ function wireEvents() {
     if ($('inboxLocalSearch') && $('inboxLocalSearch').value !== state.q) $('inboxLocalSearch').value = state.q;
     clearTimeout(window.__inboxTimer);
     window.__inboxTimer = setTimeout(() => {
-      if (state.route === 'library' || state.route === 'evidence' || state.route === 'entities' || state.route === 'claims' || state.route === 'reviews' || state.route === 'publishing' || state.route === 'taxonomy') replaceRouteHash();
+      if (state.route === 'library' || state.route === 'evidence' || state.route === 'entities' || state.route === 'claims' || state.route === 'reviews' || state.route === 'publishing' || state.route === 'taxonomy' || state.route === 'timeline' || state.route === 'compare' || state.route === 'draft') replaceRouteHash();
       if (state.route === 'home') openLibraryView({ q: state.q, mode: 'hybrid', scope: 'corpus' });
       else if (state.route === 'inbox') loadInbox();
       else loadRoutePage();
@@ -6561,7 +7075,7 @@ function wireEvents() {
     state.previewTaskKey = '';
     if (state.route === 'inbox') loadInbox();
     if (state.route !== 'home' && state.route !== 'inbox') {
-      if (state.route === 'library' || state.route === 'evidence' || state.route === 'entities' || state.route === 'claims' || state.route === 'reviews' || state.route === 'publishing' || state.route === 'taxonomy') replaceRouteHash();
+      if (state.route === 'library' || state.route === 'evidence' || state.route === 'entities' || state.route === 'claims' || state.route === 'reviews' || state.route === 'publishing' || state.route === 'taxonomy' || state.route === 'timeline' || state.route === 'compare' || state.route === 'draft') replaceRouteHash();
       loadRoutePage();
     }
   });

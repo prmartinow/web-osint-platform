@@ -33,6 +33,9 @@
         <button class="nav-item" data-route="evidence"><span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M3 3v18h18"></path><path d="m7 14 4-4 3 3 5-7"></path></svg></span><span class="nav-label">Evidence</span></button>
         <button class="nav-item" data-route="entities"><span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="6" cy="12" r="3"></circle><circle cx="18" cy="6" r="3"></circle><circle cx="18" cy="18" r="3"></circle><path d="m8.6 10.6 6.8-3.2"></path><path d="m8.6 13.4 6.8 3.2"></path></svg></span><span class="nav-label">Entities</span></button>
         <button class="nav-item" data-route="claims"><span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M5 4h14v16H5z"></path><path d="M8 8h8"></path><path d="M8 12h8"></path><path d="M8 16h5"></path></svg></span><span class="nav-label">Claims</span></button>
+        <button class="nav-item" data-route="timeline"><span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M5 4v16"></path><path d="M5 8h12"></path><path d="M5 14h8"></path><circle cx="19" cy="8" r="2"></circle><circle cx="15" cy="14" r="2"></circle></svg></span><span class="nav-label">Timeline</span></button>
+        <button class="nav-item" data-route="compare"><span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M4 4h7v16H4z"></path><path d="M13 4h7v16h-7z"></path><path d="M7 8h1"></path><path d="M16 8h1"></path><path d="M7 13h1"></path><path d="M16 13h1"></path></svg></span><span class="nav-label">Compare</span></button>
+        <button class="nav-item" data-route="draft"><span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M5 4h10l4 4v12H5z"></path><path d="M15 4v5h5"></path><path d="M8 13h8"></path><path d="M8 17h6"></path></svg></span><span class="nav-label">Draft</span></button>
         <button class="nav-item" data-route="reviews"><span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5"></path><path d="M4 4h16v16H4z"></path></svg></span><span class="nav-label">Reviews</span></button>
         <button class="nav-item" data-route="publishing"><span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 3v12"></path><path d="m7 8 5-5 5 5"></path><path d="M5 15v4a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-4"></path></svg></span><span class="nav-label">Publishing</span></button>
         <button class="nav-item" data-route="taxonomy"><span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 3 3 8l9 5 9-5-9-5Z"></path><path d="m3 16 9 5 9-5"></path><path d="m3 12 9 5 9-5"></path></svg></span><span class="nav-label">Taxonomy</span></button>
@@ -43,8 +46,8 @@
         <span id="activeProjectMeta">Loading evidence signals</span>
         <div class="mini-meter"><span id="activeProjectMeter"></span></div>
       </section>
-      <button id="captureSourceButton" class="capture-button" title="Opens the inbox; automated Rebrowser capture is not wired from the UI yet">+ Triage inbox</button>
-      <p class="rail-note">Evidence workspace · internal · capture runs out-of-band</p>
+      <button id="captureSourceButton" class="capture-button" title="Launch Rebrowser capture">+ Capture source</button>
+      <p class="rail-note">Evidence workspace · internal · env-configured capture</p>
     </aside>
 
     <section class="research-home">
@@ -59,7 +62,7 @@
         </label>
         <div class="top-actions">
           <button id="newNoteButton" class="secondary top-action" type="button">New note</button>
-          <button id="captureTopButton" class="top-action primary-action" type="button" title="Opens the inbox; automated Rebrowser capture is not wired from the UI yet">Triage inbox</button>
+          <button id="captureTopButton" class="top-action primary-action" type="button" title="Launch Rebrowser capture">Capture</button>
           <button id="themeSwitch" class="theme-switch" role="switch" aria-checked="false" title="Toggle theme">
             <span class="sun"></span><span class="moon"></span><span class="knob"></span>
           </button>
@@ -75,6 +78,9 @@
         <button class="pnav-item" data-route="evidence">Evidence</button>
         <button class="pnav-item" data-route="entities">Entities</button>
         <button class="pnav-item" data-route="claims">Claims</button>
+        <button class="pnav-item" data-route="timeline">Timeline</button>
+        <button class="pnav-item" data-route="compare">Compare</button>
+        <button class="pnav-item" data-route="draft">Draft</button>
         <button class="pnav-item" data-route="reviews">Reviews</button>
         <button class="pnav-item" data-route="publishing">Publishing</button>
         <button class="pnav-item" data-route="taxonomy">Taxonomy</button>

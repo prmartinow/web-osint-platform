@@ -29,6 +29,7 @@ DERIVED_ROOT = Path(os.environ.get("DERIVED_ROOT", str(DATA_ROOT / "derived"))).
 REVIEW_ROOT = Path(os.environ.get("REVIEW_ROOT", str(DATA_ROOT / "review"))).resolve()
 PROJECT_BRIEF_ROOT = REVIEW_ROOT / "project_briefs"
 REVIEW_ACTOR = os.environ.get("REVIEW_ACTOR", "web-osint-user")
+REBROWSER_LAUNCH_URL = os.environ.get("REBROWSER_LAUNCH_URL", "").strip()
 
 MAX_LIMIT = 200
 MAX_JSON_BODY_BYTES = 1_000_000
@@ -630,6 +631,47 @@ def ensure_review_tables():
         ENGINE = ReplacingMergeTree(updated_at)
         PARTITION BY toYYYYMM(created_at)
         ORDER BY (source_evidence_id, claim_id)
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS publication_snapshots
+        (
+            snapshot_id String,
+            bundle_id String,
+            project String,
+            package_type LowCardinality(String),
+            snapshot_state LowCardinality(String),
+            review_state LowCardinality(String),
+            release_state LowCardinality(String),
+            manifest_hash String,
+            manifest_json String,
+            checks_json String,
+            actor String,
+            note String,
+            created_at DateTime64(3, 'UTC'),
+            updated_at DateTime64(3, 'UTC')
+        )
+        ENGINE = ReplacingMergeTree(updated_at)
+        PARTITION BY toYYYYMM(created_at)
+        ORDER BY (bundle_id, snapshot_id)
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS publication_releases
+        (
+            release_id String,
+            snapshot_id String,
+            bundle_id String,
+            project String,
+            release_state LowCardinality(String),
+            manifest_hash String,
+            supersedes_release_id String,
+            actor String,
+            note String,
+            created_at DateTime64(3, 'UTC'),
+            updated_at DateTime64(3, 'UTC')
+        )
+        ENGINE = ReplacingMergeTree(updated_at)
+        PARTITION BY toYYYYMM(created_at)
+        ORDER BY (bundle_id, release_id)
         """,
     ]
     for query in ddl:
@@ -3772,8 +3814,8 @@ def publishing_checks_for_project(row, counts, coverage):
         {
             "id": "snapshot",
             "label": "Frozen publication snapshot exists",
-            "state": "not_started",
-            "detail": "Snapshot/approval storage is not implemented yet; publication is a preview.",
+            "state": "needs_work",
+            "detail": "Create and approve a frozen snapshot before publication.",
         },
     ]
 
@@ -3910,6 +3952,160 @@ def publishing_preview(row):
     }
 
 
+def parse_json_list(value):
+    if not value:
+        return []
+    try:
+        parsed = json.loads(value)
+    except Exception:
+        return []
+    return parsed if isinstance(parsed, list) else []
+
+
+def parse_json_dict(value):
+    if not value:
+        return {}
+    try:
+        parsed = json.loads(value)
+    except Exception:
+        return {}
+    return parsed if isinstance(parsed, dict) else {}
+
+
+def decorate_publication_snapshot(row):
+    row = dict(row or {})
+    row["manifest"] = parse_json_dict(row.get("manifest_json", ""))
+    row["checks"] = parse_json_list(row.get("checks_json", ""))
+    return row
+
+
+def latest_publication_snapshots(bundle_ids):
+    bundle_ids = [bundle_id for bundle_id in dict.fromkeys(bundle_ids or []) if bundle_id]
+    if not bundle_ids:
+        return {}
+    quoted = ", ".join(sql_string(bundle_id) for bundle_id in bundle_ids)
+    rows = ch_data(
+        f"""
+        SELECT snapshot_id, bundle_id, project, package_type, snapshot_state,
+          review_state, release_state, manifest_hash, manifest_json, checks_json,
+          actor, note, created_at, updated_at
+        FROM publication_snapshots FINAL
+        WHERE bundle_id IN ({quoted})
+        ORDER BY updated_at DESC
+        """,
+        fallback=[],
+    )
+    latest = {}
+    for row in rows:
+        bundle_id = row.get("bundle_id") or ""
+        if bundle_id and bundle_id not in latest:
+            latest[bundle_id] = decorate_publication_snapshot(row)
+    return latest
+
+
+def latest_publication_releases(bundle_ids):
+    bundle_ids = [bundle_id for bundle_id in dict.fromkeys(bundle_ids or []) if bundle_id]
+    if not bundle_ids:
+        return {}
+    quoted = ", ".join(sql_string(bundle_id) for bundle_id in bundle_ids)
+    rows = ch_data(
+        f"""
+        SELECT release_id, snapshot_id, bundle_id, project, release_state,
+          manifest_hash, supersedes_release_id, actor, note, created_at, updated_at
+        FROM publication_releases FINAL
+        WHERE bundle_id IN ({quoted})
+        ORDER BY updated_at DESC
+        """,
+        fallback=[],
+    )
+    latest = {}
+    for row in rows:
+        bundle_id = row.get("bundle_id") or ""
+        if bundle_id and bundle_id not in latest:
+            latest[bundle_id] = row
+    return latest
+
+
+def snapshot_check(snapshot):
+    if not snapshot:
+        return {
+            "id": "snapshot",
+            "label": "Frozen publication snapshot exists",
+            "state": "needs_work",
+            "detail": "No frozen snapshot exists yet; create one before review or release.",
+        }
+    review_state = snapshot.get("review_state") or "draft"
+    release_state = snapshot.get("release_state") or "unpublished"
+    state = "pass" if review_state == "approved" or release_state == "published" else "needs_work"
+    return {
+        "id": "snapshot",
+        "label": "Frozen publication snapshot exists",
+        "state": state,
+        "detail": f"{snapshot.get('snapshot_id')} is {review_state}; manifest {snapshot.get('manifest_hash') or 'unhashed'}.",
+    }
+
+
+def apply_publication_persistence(row, snapshot=None, release=None):
+    row = dict(row)
+    original_blocked_checks = sum(1 for check in row.get("checks") or [] if check.get("state") == "blocked")
+    base_blockers = max(0, int(row.get("blocker_count") or 0) - original_blocked_checks)
+    checks = []
+    for check in row.get("checks") or []:
+        checks.append(snapshot_check(snapshot) if check.get("id") == "snapshot" else check)
+    if not any(check.get("id") == "snapshot" for check in checks):
+        checks.append(snapshot_check(snapshot))
+    checks_passed = sum(1 for check in checks if check.get("state") == "pass")
+    checks_total = len(checks)
+    row["checks"] = checks
+    row["checks_passed"] = checks_passed
+    row["checks_total"] = checks_total
+    row["readiness_percent"] = percent(checks_passed, checks_total)
+    row["implementation_state"] = "active"
+    row["permitted_actions"] = ["open_package", "run_checks", "focus_blockers", "create_snapshot"]
+    row["disabled_actions"] = []
+    if snapshot:
+        row["latest_snapshot_id"] = snapshot.get("snapshot_id") or ""
+        row["snapshot_state"] = snapshot.get("snapshot_state") or "frozen"
+        row["review_state"] = snapshot.get("review_state") or "draft"
+        row["release_state"] = (release or {}).get("release_state") or snapshot.get("release_state") or "unpublished"
+        row["manifest_hash"] = snapshot.get("manifest_hash") or row.get("manifest_hash") or ""
+        row["snapshot_created_at"] = snapshot.get("created_at") or ""
+        row["snapshot_updated_at"] = snapshot.get("updated_at") or ""
+        row["permitted_actions"].extend(["request_review", "create_handoff"])
+        if row["review_state"] == "approved":
+            row["permitted_actions"].append("publish_snapshot")
+        else:
+            row["disabled_actions"].append("publish_snapshot")
+        if row["release_state"] == "published":
+            row["display_state"] = "published"
+            row["permitted_actions"].append("supersede_release")
+        else:
+            row["disabled_actions"].append("supersede_release")
+            if row["review_state"] == "approved":
+                row["display_state"] = "ready_to_publish"
+            elif row["review_state"] in ("snapshot_in_review", "ready_for_review"):
+                row["display_state"] = "awaiting_review"
+            elif row["review_state"] == "changes_requested":
+                row["display_state"] = "changes_requested"
+            else:
+                row["display_state"] = "snapshot_created"
+        row["history"] = (row.get("history") or []) + [{
+            "event_type": "publication.snapshot.loaded",
+            "actor": snapshot.get("actor") or "research-ui",
+            "created_at": snapshot.get("updated_at") or snapshot.get("created_at") or now_iso(),
+            "detail": f"{snapshot.get('snapshot_id')} / {snapshot.get('review_state') or 'draft'}",
+        }]
+    else:
+        row["latest_snapshot_id"] = ""
+        row["snapshot_state"] = "none"
+        row["review_state"] = "draft"
+        row["release_state"] = "unpublished"
+        row["disabled_actions"] = ["request_review", "create_handoff", "publish_snapshot", "supersede_release"]
+    row["blocker_count"] = base_blockers + sum(1 for check in checks if check.get("state") == "blocked")
+    row["optimistic_version"] = compact_text(first_nonempty(row.get("snapshot_updated_at"), row.get("updated_at"), row.get("manifest_hash")), 120)
+    return row
+
+
 def publishing_read_model(params):
     limit = sql_int(params.get("limit", ["120"])[0], 120)
     q = (params.get("q", [""])[0] or "").strip()
@@ -3939,6 +4135,9 @@ def publishing_read_model(params):
             rows.append(make_publication_bundle_row(row, counts, coverage, "comparison_table"))
         if int(row.get("proposed_evidence") or 0):
             rows.append(make_publication_bundle_row(row, counts, coverage, "export_bundle"))
+    snapshots = latest_publication_snapshots([row.get("bundle_id") for row in rows])
+    releases = latest_publication_releases([row.get("bundle_id") for row in rows])
+    rows = [apply_publication_persistence(row, snapshots.get(row.get("bundle_id")), releases.get(row.get("bundle_id"))) for row in rows]
     if q:
         lowered = q.lower()
         rows = [row for row in rows if lowered in " ".join(str(row.get(key) or "") for key in ("title", "project", "package_type_label", "target", "display_state")).lower()]
@@ -3974,6 +4173,773 @@ def publishing_read_model(params):
         "generated_at": now_iso(),
         "stale": False,
         "version": "publishing-page.v2",
+    }
+
+
+def resolve_project_id(project=""):
+    project = compact_text(project, 300)
+    if project and project != "__active__":
+        return project
+    rows = project_rows({}).get("rows", [])
+    return (rows[0].get("project_id") if rows else "") or ""
+
+
+def evidence_project_where(project, table="evidence_events"):
+    if not project:
+        return "1 = 1"
+    return f"{table}.source_project = {sql_string(project)}"
+
+
+def review_project_where(project, column="source_evidence_id"):
+    if not project:
+        return "1 = 1"
+    return f"{column} IN (SELECT evidence_id FROM evidence_events WHERE source_project = {sql_string(project)})"
+
+
+def source_rows_for_project(project, limit=120, q=""):
+    clauses = [evidence_project_where(project)]
+    if q:
+        like = sql_string(q)
+        clauses.append(
+            "("
+            f"positionCaseInsensitive(title, {like}) > 0 OR "
+            f"positionCaseInsensitive(text, {like}) > 0 OR "
+            f"positionCaseInsensitive(canonical_url, {like}) > 0 OR "
+            f"positionCaseInsensitive(domain, {like}) > 0 OR "
+            f"positionCaseInsensitive(arrayStringConcat(topics, ' '), {like}) > 0"
+            ")"
+        )
+    return [decorate_source_row(row) for row in latest_source_rows(" AND ".join(clauses), limit)]
+
+
+def scoped_claim_rows(project="", limit=200, q=""):
+    clauses = [review_project_where(project)]
+    if q:
+        like = sql_string(q)
+        clauses.append(
+            "("
+            f"positionCaseInsensitive(claim_text, {like}) > 0 OR "
+            f"positionCaseInsensitive(claim_type, {like}) > 0 OR "
+            f"positionCaseInsensitive(note, {like}) > 0"
+            ")"
+        )
+    rows = ch_data(
+        f"""
+        SELECT claim_id, source_evidence_id, evidence_selection_id, claim_text,
+          claim_type, evidence_relation, qualifier_json, source_anchor_json,
+          status, note, actor, created_at, updated_at
+        FROM claim_records FINAL
+        WHERE {" AND ".join(clauses)}
+        ORDER BY updated_at DESC
+        LIMIT {limit}
+        """,
+        fallback=[],
+    )
+    source_map = hydrate_source_rows([row.get("source_evidence_id") for row in rows])
+    proposition_counts = {}
+    for row in rows:
+        source = source_for_ledger_row(source_map, row.get("source_evidence_id") or "")
+        parts = claim_subject_value({**row, **source})
+        if not parts.get("subject_scoped"):
+            continue
+        key = claim_proposition_key(parts)
+        proposition_counts.setdefault(key, set()).add(str(parts.get("value") or "").lower())
+    decorated = []
+    for row in rows:
+        source = source_for_ledger_row(source_map, row.get("source_evidence_id") or "")
+        parts = claim_subject_value({**row, **source})
+        cluster_size = len(proposition_counts.get(claim_proposition_key(parts), [])) if parts.get("subject_scoped") else 1
+        decorated.append({
+            **row,
+            **source,
+            **parts,
+            "qualifier": parse_raw_json(row.get("qualifier_json", "")),
+            "review_state": row.get("status") or "draft",
+            "contradiction_state": claim_contradiction_state(row, cluster_size),
+            "source": source,
+        })
+    return decorated
+
+
+def date_precision(value):
+    if not value:
+        return "unknown"
+    text = str(value)
+    if "T" in text:
+        return "datetime"
+    if len(text) >= 10:
+        return "day"
+    if len(text) >= 7:
+        return "month"
+    if len(text) >= 4:
+        return "year"
+    return "unknown"
+
+
+def timeline_item_from_source(row):
+    date_value = first_nonempty(row.get("last_captured_at"), row.get("first_captured_at"), row.get("last_ingested_at"))
+    return {
+        "item_id": f"capture:{row.get('evidence_id')}",
+        "lane": "captures",
+        "event_type": "source_capture",
+        "summary": row.get("title") or row.get("canonical_url") or row.get("evidence_id"),
+        "date": date_value,
+        "date_range": {"start": row.get("first_captured_at") or date_value, "end": row.get("last_captured_at") or date_value},
+        "date_precision": date_precision(date_value),
+        "source_date": row.get("first_captured_at") or "",
+        "capture_date": row.get("last_captured_at") or row.get("last_ingested_at") or "",
+        "entities": row.get("entities") or [],
+        "topics": row.get("topics") or [],
+        "evidence_count": 1,
+        "source_ids": [row.get("evidence_id")],
+        "review_state": "captured",
+        "conflict_state": "none",
+        "source": source_for_ledger_row({row.get("evidence_id"): row}, row.get("evidence_id")),
+    }
+
+
+def timeline_item_from_claim(row):
+    date_value = first_nonempty(row.get("updated_at"), row.get("created_at"), row.get("captured_at"))
+    return {
+        "item_id": f"claim:{row.get('claim_id')}",
+        "lane": "claims",
+        "event_type": row.get("claim_type") or "claim",
+        "summary": row.get("claim_text") or row.get("value") or row.get("claim_id"),
+        "date": date_value,
+        "date_range": {"start": date_value, "end": date_value},
+        "date_precision": date_precision(date_value),
+        "source_date": row.get("captured_at") or "",
+        "capture_date": row.get("updated_at") or "",
+        "entities": [row.get("subject")] if row.get("subject_scoped") else [],
+        "topics": [row.get("claim_type")] if row.get("claim_type") else [],
+        "evidence_count": 1 if row.get("source_evidence_id") else 0,
+        "source_ids": [row.get("source_evidence_id")] if row.get("source_evidence_id") else [],
+        "review_state": row.get("review_state") or "draft",
+        "conflict_state": row.get("contradiction_state") or "under_review",
+        "source": row.get("source") or {},
+    }
+
+
+def project_timeline(params):
+    project = resolve_project_id(params.get("project_id", params.get("project", [""]))[0] if isinstance(params.get("project_id", params.get("project", [""])), list) else "")
+    q = (params.get("q", [""])[0] or "").strip()
+    limit = sql_int(params.get("limit", ["120"])[0], 120)
+    sources = source_rows_for_project(project, max(limit, 120), q)
+    claims = scoped_claim_rows(project, max(limit, 120), q)
+    items = [timeline_item_from_source(row) for row in sources] + [timeline_item_from_claim(row) for row in claims]
+    if q:
+        lowered = q.lower()
+        items = [item for item in items if lowered in " ".join(str(item.get(key) or "") for key in ("summary", "event_type", "review_state", "conflict_state")).lower()]
+    items.sort(key=lambda item: (item.get("date") or "9999", item.get("item_id") or ""))
+    visible = items[:limit]
+    return read_envelope({
+        "scope": {"project": project or "all", "surface": "timeline"},
+        "query": {"q": q, "limit": limit},
+        "summary": {
+            "items": len(items),
+            "captures": sum(1 for item in items if item.get("lane") == "captures"),
+            "claims": sum(1 for item in items if item.get("lane") == "claims"),
+            "conflicts": sum(1 for item in items if item.get("conflict_state") in ("conflict", "disputed")),
+        },
+        "lanes": [
+            {"id": "captures", "label": "Captures", "count": sum(1 for item in items if item.get("lane") == "captures")},
+            {"id": "claims", "label": "Claims", "count": sum(1 for item in items if item.get("lane") == "claims")},
+            {"id": "reviews", "label": "Reviews", "count": sum(1 for item in items if item.get("review_state") not in ("captured", "accepted", "published"))},
+        ],
+        "saved_views": [
+            {"id": "recent_captures", "label": "Recent captures", "filters": {"lane": "captures"}},
+            {"id": "date_conflicts", "label": "Date and claim conflicts", "filters": {"conflict_state": "conflict"}},
+            {"id": "accepted_claims", "label": "Accepted claim chronology", "filters": {"review_state": "accepted"}},
+        ],
+        "results": cursor_page(visible, len(items), limit),
+        "items": visible,
+    }, "project-timeline.v1", now_iso(), False, ["navigate", "review", "open_source"])
+
+
+def topic_detail(params):
+    topic_id = ((params.get("topic_id", [""])[0] or "") or (params.get("id", [""])[0] or "")).strip()
+    project = resolve_project_id((params.get("project", [""])[0] or "").strip())
+    taxonomy = taxonomy_read_model({"queue": ["all"], "vocabulary": ["topics"], "limit": ["200"]})
+    topics = taxonomy.get("rows") or []
+    topic = next((row for row in topics if row.get("stable_id") == topic_id or row.get("record_id") == topic_id or row.get("term") == topic_id), None)
+    term = (topic or {}).get("term") or topic_id or "topic"
+    like = sql_string(term)
+    clauses = [
+        evidence_project_where(project),
+        "("
+        f"positionCaseInsensitive(arrayStringConcat(topics, ' '), {like}) > 0 OR "
+        f"positionCaseInsensitive(title, {like}) > 0 OR "
+        f"positionCaseInsensitive(text, {like}) > 0"
+        ")",
+    ]
+    sources = [decorate_source_row(row) for row in latest_source_rows(" AND ".join(clauses), 120)]
+    source_ids = [row.get("evidence_id") for row in sources]
+    source_id_sql = ", ".join(sql_string(source_id) for source_id in source_ids if source_id) or "''"
+    claims = scoped_claim_rows(project, 120, term)
+    if source_ids:
+        claims = [row for row in claims if row.get("source_evidence_id") in source_ids or term.lower() in str(row.get("claim_text") or "").lower()]
+    entities = sorted({entity for row in sources for entity in (row.get("entities") or []) if entity})[:50]
+    selections = ch_data(
+        f"""
+        SELECT selection_id, source_evidence_id, selection_kind, quote, status, updated_at
+        FROM evidence_selections FINAL
+        WHERE source_evidence_id IN ({source_id_sql})
+        ORDER BY updated_at DESC
+        LIMIT 120
+        """,
+        fallback=[],
+    ) if source_ids else []
+    timeline_items = [timeline_item_from_source(row) for row in sources] + [timeline_item_from_claim(row) for row in claims]
+    timeline_items.sort(key=lambda item: item.get("date") or "9999")
+    header = {
+        "topic_id": topic_id or (topic or {}).get("stable_id") or taxonomy_term_id("topics", term),
+        "label": term,
+        "definition": (topic or {}).get("definition") or "Topic derived from captured source labels and reviewed claims.",
+        "project": project,
+        "review_state": (topic or {}).get("review_state") or "observed",
+        "source_count": len(sources),
+        "claim_count": len(claims),
+        "entity_count": len(entities),
+        "evidence_count": len(selections),
+    }
+    return read_envelope({
+        "header": header,
+        "tabs": ["overview", "evidence", "claims", "entities", "timeline", "notes"],
+        "coverage": {
+            "sources": evidence_facet_counts(sources, "source_kind"),
+            "projects": evidence_facet_counts(sources, "source_project"),
+            "review_states": evidence_facet_counts(claims, "review_state"),
+        },
+        "sources": sources[:60],
+        "evidence": selections,
+        "claims": claims[:80],
+        "entities": entities,
+        "timeline": timeline_items[:80],
+        "notes": (topic or {}).get("policy") or {},
+    }, "topic-detail.v1", now_iso(), False, ["navigate", "review", "open_source"])
+
+
+def compare_cell_state(claim, peer_values):
+    if not claim:
+        return "Missing"
+    relation = str(claim.get("evidence_relation") or "").lower()
+    status = str(claim.get("review_state") or claim.get("status") or "").lower()
+    if relation in ("refutes", "contradicts") or status == "disputed" or len(peer_values) > 1:
+        return "Disputed"
+    if status in ("accepted", "published"):
+        return "Independently-measured"
+    if claim.get("source_kind") in ("x_post", "x_account", "web_page"):
+        return "Vendor-reported"
+    if status in ("rejected", "superseded"):
+        return "NA"
+    return "Vendor-reported"
+
+
+def compare_view(params):
+    project = resolve_project_id((params.get("project_id", params.get("project", [""]))[0] or "").strip())
+    view_id = (params.get("view_id", [""])[0] or "claims").strip()
+    claims = [row for row in scoped_claim_rows(project, 240) if row.get("subject_scoped")]
+    subjects = []
+    for row in claims:
+        subject = row.get("subject") or ""
+        if subject and subject not in subjects:
+            subjects.append(subject)
+    subjects = subjects[:10]
+    properties = []
+    for row in claims:
+        prop = row.get("property") or row.get("claim_type") or "general"
+        if prop not in properties:
+            properties.append(prop)
+    rows = []
+    for prop in properties[:40]:
+        cells = []
+        for subject in subjects:
+            matches = [row for row in claims if row.get("subject") == subject and (row.get("property") or row.get("claim_type") or "general") == prop]
+            values = {str(row.get("value") or row.get("claim_text") or "").lower() for row in matches}
+            selected = matches[0] if matches else None
+            cells.append({
+                "entity": subject,
+                "state": compare_cell_state(selected, values),
+                "value": selected.get("value") if selected else "",
+                "claim_id": selected.get("claim_id") if selected else "",
+                "source_evidence_id": selected.get("source_evidence_id") if selected else "",
+                "evidence": [source_for_ledger_row({selected.get("source_evidence_id"): selected}, selected.get("source_evidence_id"))] if selected else [],
+                "qualifier": selected.get("qualifier") if selected else {},
+            })
+        rows.append({"property": prop, "cells": cells})
+    return read_envelope({
+        "scope": {"project": project or "all", "view_id": view_id, "surface": "compare"},
+        "columns": [{"id": subject, "label": subject} for subject in subjects],
+        "rows": rows,
+        "legend": ["Missing", "NA", "Vendor-reported", "Independently-measured", "Reproduced", "Disputed", "Stale", "Incomparable"],
+        "summary": {
+            "entities": len(subjects),
+            "properties": len(rows),
+            "cells": sum(len(row.get("cells") or []) for row in rows),
+            "disputed": sum(1 for row in rows for cell in row.get("cells") or [] if cell.get("state") == "Disputed"),
+        },
+    }, "compare-view.v1", now_iso(), False, ["navigate", "open_source", "review"])
+
+
+def benchmark_detail(params):
+    benchmark_id = ((params.get("benchmark_id", [""])[0] or "") or (params.get("id", [""])[0] or "") or "benchmark").strip()
+    project = resolve_project_id((params.get("project", [""])[0] or "").strip())
+    claims = [
+        row for row in scoped_claim_rows(project, 240, benchmark_id if benchmark_id != "benchmark" else "benchmark")
+        if "benchmark" in str(row.get("claim_type") or row.get("claim_text") or "").lower()
+    ]
+    results = []
+    for row in claims:
+        qualifier = row.get("qualifier") or {}
+        config_key = json_text(qualifier)
+        incompatible = bool(qualifier.get("incompatible") or qualifier.get("different_setup"))
+        results.append({
+            "result_id": row.get("claim_id"),
+            "model": row.get("subject") if row.get("subject_scoped") else row.get("title") or row.get("source_evidence_id"),
+            "metric": row.get("property") or row.get("claim_type") or "benchmark_result",
+            "value": row.get("value") or row.get("claim_text"),
+            "config": qualifier,
+            "config_key": hashlib.sha1(config_key.encode("utf-8")).hexdigest()[:12],
+            "compatible": not incompatible,
+            "default_ranked": not incompatible,
+            "review_state": row.get("review_state"),
+            "source_evidence_id": row.get("source_evidence_id"),
+        })
+    methodology_missing = not any(row.get("source_evidence_id") for row in claims)
+    return read_envelope({
+        "header": {
+            "benchmark_id": benchmark_id,
+            "label": title_case_label(benchmark_id),
+            "project": project,
+            "methodology_state": "missing" if methodology_missing else "source_linked",
+            "publication_blocked": methodology_missing,
+        },
+        "methodology": {
+            "dataset": "",
+            "prompting": "",
+            "harness": "",
+            "scoring": "",
+            "hardware": "",
+            "notes": "Methodology fields must be filled from source-linked evidence before leaderboard publication.",
+        },
+        "results": results,
+        "excluded_from_default_ranking": [row for row in results if not row.get("default_ranked")],
+        "checks": [
+            {"id": "methodology", "state": "blocked" if methodology_missing else "pass", "label": "Methodology source exists"},
+            {"id": "compatible_configs", "state": "pass", "label": "Incompatible configs excluded from default ranking"},
+            {"id": "source_links", "state": "pass" if results else "needs_work", "label": "Every result exposes source evidence"},
+        ],
+    }, "benchmark-detail.v1", now_iso(), False, ["navigate", "review", "open_source"])
+
+
+def draft_editor(params):
+    project = resolve_project_id((params.get("project_id", params.get("project", [""]))[0] or "").strip())
+    draft_id = (params.get("draft_id", [""])[0] or "working-draft").strip()
+    brief = read_project_brief(project, project)
+    claims = [row for row in scoped_claim_rows(project, 160) if row.get("review_state") in ("accepted", "published", "under_review", "draft", "proposed")]
+    sources = hydrate_source_rows([row.get("source_evidence_id") for row in claims])
+    outline = [
+        {"id": "summary", "label": "Summary", "status": "draft"},
+        {"id": "evidence", "label": "Evidence base", "status": "draft"},
+        {"id": "open_questions", "label": "Open questions", "status": "draft"},
+        {"id": "limitations", "label": "Limitations", "status": "draft"},
+    ]
+    paragraphs = []
+    if brief.get("research_question"):
+        paragraphs.append({
+            "paragraph_id": "draft-paragraph/question",
+            "section_id": "summary",
+            "text": brief.get("research_question"),
+            "references": [],
+            "support_state": "context",
+        })
+    for claim in claims[:20]:
+        source = source_for_ledger_row(sources, claim.get("source_evidence_id") or "")
+        paragraphs.append({
+            "paragraph_id": f"draft-paragraph/{claim.get('claim_id')}",
+            "section_id": "evidence",
+            "text": claim.get("claim_text") or claim.get("value") or "",
+            "references": [{
+                "object_type": "claim_stub",
+                "object_id": claim.get("claim_id"),
+                "object_version": claim.get("updated_at") or "",
+                "source_evidence_id": claim.get("source_evidence_id") or "",
+                "source_title": source.get("title") or "",
+            }],
+            "support_state": "supported" if claim.get("source_evidence_id") else "unsupported",
+        })
+    for question in brief.get("open_questions") or []:
+        paragraphs.append({
+            "paragraph_id": f"draft-paragraph/{question.get('id')}",
+            "section_id": "open_questions",
+            "text": question.get("text") or "",
+            "references": [],
+            "support_state": "open_question",
+        })
+    unsupported = [row for row in paragraphs if not row.get("references") and row.get("support_state") not in ("context", "open_question")]
+    return read_envelope({
+        "header": {"draft_id": draft_id, "project": project, "title": f"{brief.get('project_name') or project} draft", "revision": brief.get("version") or "1"},
+        "layout": {"outline_px": 260, "evidence_rail_px": 380},
+        "outline": outline,
+        "paragraphs": paragraphs,
+        "references": [ref for paragraph in paragraphs for ref in paragraph.get("references") or []],
+        "evidence_rail": list(sources.values())[:80],
+        "proposed_diffs": [],
+        "checks": [
+            {"id": "object_linked_refs", "state": "pass" if any(p.get("references") for p in paragraphs) else "needs_work", "label": "Citations are object references"},
+            {"id": "unsupported_paragraphs", "state": "pass" if not unsupported else "blocked", "label": "Unsupported paragraphs are visible", "count": len(unsupported)},
+            {"id": "source_version_stale", "state": "needs_work", "label": "Citation staleness check uses source capture versions"},
+        ],
+        "unsupported_paragraphs": unsupported,
+    }, "draft-editor.v1", now_iso(), False, ["navigate", "edit_draft", "insert_citation", "review"])
+
+
+def frozen_publication_manifest(bundle):
+    project = bundle.get("project") or ""
+    sources = source_rows_for_project(project, 200)
+    source_ids = [row.get("evidence_id") for row in sources if row.get("evidence_id")]
+    project_clause = review_project_where(project)
+    claims = scoped_claim_rows(project, 200)
+    selections = ch_data(
+        f"""
+        SELECT selection_id, source_evidence_id, document_id, block_id, selection_kind,
+          quote, source_anchor_json, status, actor, created_at, updated_at
+        FROM evidence_selections FINAL
+        WHERE {project_clause}
+        ORDER BY updated_at DESC
+        LIMIT 200
+        """,
+        fallback=[],
+    )
+    entities = ch_data(
+        f"""
+        SELECT entity_link_id, source_evidence_id, mention_text, entity_type,
+          canonical_entity_id, canonical_name, status, actor, created_at, updated_at
+        FROM entity_links FINAL
+        WHERE {project_clause}
+        ORDER BY updated_at DESC
+        LIMIT 200
+        """,
+        fallback=[],
+    )
+    taxonomy_terms = taxonomy_read_model({"queue": ["all"], "limit": ["200"]}).get("rows", [])
+    brief = read_project_brief(project, project)
+    manifest = {
+        "bundle": {key: bundle.get(key) for key in ("bundle_id", "package_type", "project", "title", "target", "draft_revision", "manifest_version")},
+        "draft": {"project_brief_id": brief.get("id"), "revision": brief.get("version"), "updated_at": brief.get("updated_at")},
+        "claim_ids": [row.get("claim_id") for row in claims if row.get("claim_id")],
+        "evidence_selection_ids": [row.get("selection_id") for row in selections if row.get("selection_id")],
+        "source_capture_ids": source_ids,
+        "entity_link_ids": [row.get("entity_link_id") for row in entities if row.get("entity_link_id")],
+        "taxonomy_term_ids": [row.get("stable_id") for row in taxonomy_terms if row.get("usage_total") or row.get("review_state") == "accepted"],
+        "public_config": {"target": bundle.get("target") or "", "package_type": bundle.get("package_type") or "", "visibility": "internal_until_release"},
+        "claims": claims,
+        "evidence": selections,
+        "sources": sources,
+        "entities": entities,
+        "checks": bundle.get("checks") or [],
+        "generated_at": now_iso(),
+    }
+    manifest_hash = hashlib.sha256(json_text(manifest).encode("utf-8")).hexdigest()
+    manifest["manifest_hash"] = manifest_hash
+    return manifest, manifest_hash
+
+
+def publication_bundle_by_id(bundle_id):
+    model = publishing_read_model({"limit": ["200"]})
+    for row in model.get("bundles") or []:
+        if row.get("bundle_id") == bundle_id:
+            return row
+    raise ResearchUiError(404, f"Publication bundle not found: {bundle_id}")
+
+
+def publication_detail_checks(bundle, snapshot, manifest):
+    sources = manifest.get("sources") or []
+    claims = manifest.get("claims") or []
+    evidence = manifest.get("evidence") or []
+    disputed = [row for row in claims if row.get("contradiction_state") in ("conflict", "disputed") or row.get("review_state") == "disputed"]
+    checks = [
+        {"id": "source_anchors", "label": "Exact source anchors resolve", "state": "pass" if evidence or sources else "blocked", "detail": f"{len(evidence)} evidence selections; {len(sources)} source captures."},
+        {"id": "claim_review", "label": "Claims reviewed or explicitly marked draft", "state": "pass" if claims else "needs_work", "detail": f"{len(claims)} claim object(s) included."},
+        {"id": "contradictions", "label": "Unresolved contradictions are excluded or visible", "state": "blocked" if disputed else "pass", "detail": f"{len(disputed)} disputed claim(s)."},
+        {"id": "source_diversity", "label": "Source diversity is visible", "state": "pass" if len({row.get('source_kind') for row in sources if row.get('source_kind')}) >= 2 else "needs_work", "detail": "Diversity is computed from pinned source captures."},
+        {"id": "media_ocr", "label": "Media/OCR coverage checked", "state": "pass" if not any(row.get("has_media") and not row.get("has_ocr") for row in sources) else "needs_work", "detail": "Media sources without OCR stay visible as blockers."},
+        {"id": "citation_refs", "label": "Citations are object references", "state": "pass", "detail": "Snapshot pins claim, evidence, source, entity, and taxonomy IDs."},
+        {"id": "taxonomy", "label": "Taxonomy IDs are frozen", "state": "pass" if manifest.get("taxonomy_term_ids") else "needs_work", "detail": f"{len(manifest.get('taxonomy_term_ids') or [])} taxonomy IDs."},
+        {"id": "private_data", "label": "Private config is excluded", "state": "pass", "detail": "Manifest stores IDs and public config, not environment secrets."},
+        {"id": "public_config", "label": "Public target config exists", "state": "pass" if manifest.get("public_config") else "blocked", "detail": bundle.get("target") or "No target."},
+        {"id": "snapshot", "label": "Frozen snapshot exists", "state": "pass" if snapshot else "needs_work", "detail": (snapshot or {}).get("snapshot_id") or "No snapshot yet."},
+        {"id": "approval", "label": "Approved snapshot gates publish", "state": "pass" if snapshot and snapshot.get("review_state") == "approved" else "needs_work", "detail": (snapshot or {}).get("review_state") or "Not reviewed."},
+    ]
+    return checks
+
+
+def publication_detail(params):
+    bundle_id = (params.get("bundle_id", [""])[0] or "").strip()
+    if not bundle_id:
+        raise ResearchUiError(400, "bundle_id is required")
+    bundle = publication_bundle_by_id(bundle_id)
+    snapshot = latest_publication_snapshots([bundle_id]).get(bundle_id)
+    release = latest_publication_releases([bundle_id]).get(bundle_id)
+    if snapshot and snapshot.get("manifest"):
+        manifest = snapshot.get("manifest") or {}
+        manifest_hash = snapshot.get("manifest_hash") or manifest.get("manifest_hash") or ""
+    else:
+        manifest, manifest_hash = frozen_publication_manifest(bundle)
+    checks = publication_detail_checks(bundle, snapshot, manifest)
+    changed_content = [
+        {"label": "Draft revision", "before": bundle.get("draft_revision") or "", "after": manifest.get("draft", {}).get("revision") or "", "state": "tracked"},
+        {"label": "Manifest hash", "before": bundle.get("manifest_hash") or "", "after": manifest_hash, "state": "tracked"},
+    ]
+    return read_envelope({
+        "bundle": bundle,
+        "snapshot": snapshot or {},
+        "release": release or {},
+        "manifest_hash": manifest_hash,
+        "manifest_summary": {
+            "claims": len(manifest.get("claims") or []),
+            "evidence": len(manifest.get("evidence") or []),
+            "sources": len(manifest.get("sources") or []),
+            "entities": len(manifest.get("entities") or []),
+            "taxonomy_terms": len(manifest.get("taxonomy_term_ids") or []),
+        },
+        "tabs": ["overview", "changed_content", "claims", "evidence", "contradictions", "checks", "discussion", "public_preview"],
+        "checks": checks,
+        "changed_content": changed_content,
+        "claims": (manifest.get("claims") or [])[:120],
+        "evidence": (manifest.get("evidence") or [])[:120],
+        "sources": (manifest.get("sources") or [])[:120],
+        "entities": (manifest.get("entities") or [])[:120],
+        "contradictions": [row for row in manifest.get("claims") or [] if row.get("contradiction_state") in ("conflict", "disputed") or row.get("review_state") == "disputed"],
+        "discussion": ch_data(
+            f"""
+            SELECT event_id, event_type, actor, created_at, payload_json
+            FROM research_review_events
+            WHERE subject_type IN ('publication_bundle', 'publication_snapshot')
+              AND (subject_id = {sql_string(bundle_id)} OR JSONExtractString(payload_json, 'bundle_id') = {sql_string(bundle_id)})
+            ORDER BY created_at DESC
+            LIMIT 80
+            """,
+            fallback=[],
+        ),
+        "public_preview": {
+            "title": bundle.get("title"),
+            "target": bundle.get("target"),
+            "claim_count": len(manifest.get("claims") or []),
+            "citation_count": len(manifest.get("source_capture_ids") or []),
+        },
+        "actions": apply_publication_persistence(bundle, snapshot, release).get("permitted_actions") or [],
+    }, "publication-detail.v1", now_iso(), False, ["navigate", "create_snapshot", "review", "publish"])
+
+
+def insert_publication_snapshot_row(row):
+    ch_insert_json_each_row("publication_snapshots", [{
+        "snapshot_id": row["snapshot_id"],
+        "bundle_id": row["bundle_id"],
+        "project": row.get("project") or "",
+        "package_type": row.get("package_type") or "",
+        "snapshot_state": row.get("snapshot_state") or "frozen",
+        "review_state": row.get("review_state") or "draft",
+        "release_state": row.get("release_state") or "unpublished",
+        "manifest_hash": row.get("manifest_hash") or "",
+        "manifest_json": json_text(row.get("manifest") or {}),
+        "checks_json": json_text(row.get("checks") or []),
+        "actor": row.get("actor") or REVIEW_ACTOR,
+        "note": row.get("note") or "",
+        "created_at": row.get("created_at") or now_iso(),
+        "updated_at": row.get("updated_at") or now_iso(),
+    }])
+
+
+def create_publication_snapshot(payload):
+    bundle_id = compact_text(payload.get("bundle_id"), 120)
+    if not bundle_id:
+        raise ResearchUiError(400, "bundle_id is required")
+    bundle = publication_bundle_by_id(bundle_id)
+    manifest, manifest_hash = frozen_publication_manifest(bundle)
+    now = now_iso()
+    snapshot = {
+        "snapshot_id": compact_text(payload.get("snapshot_id"), 200) or make_id("publication_snapshot"),
+        "bundle_id": bundle_id,
+        "project": bundle.get("project") or "",
+        "package_type": bundle.get("package_type") or "",
+        "snapshot_state": "frozen",
+        "review_state": "draft",
+        "release_state": "unpublished",
+        "manifest_hash": manifest_hash,
+        "manifest": manifest,
+        "checks": publication_detail_checks(bundle, None, manifest),
+        "actor": compact_text(payload.get("actor") or REVIEW_ACTOR, 200),
+        "note": compact_text(payload.get("note"), 20000),
+        "created_at": now,
+        "updated_at": now,
+    }
+    insert_publication_snapshot_row(snapshot)
+    event = persist_review_event(build_review_event("publication.snapshot.created", {
+        **payload,
+        "project": snapshot["project"],
+        "subject_type": "publication_snapshot",
+        "subject_id": snapshot["snapshot_id"],
+        "bundle_id": bundle_id,
+        "snapshot_id": snapshot["snapshot_id"],
+        "manifest_hash": manifest_hash,
+        "source_anchor": {"kind": "publication_snapshot", "bundle_id": bundle_id, "snapshot_id": snapshot["snapshot_id"], "manifest_hash": manifest_hash},
+    }))
+    return {"snapshot": snapshot, "event": event, "detail": publication_detail({"bundle_id": [bundle_id]})}
+
+
+def latest_snapshot_for_update(payload):
+    bundle_id = compact_text(payload.get("bundle_id"), 120)
+    if not bundle_id:
+        raise ResearchUiError(400, "bundle_id is required")
+    snapshot = latest_publication_snapshots([bundle_id]).get(bundle_id)
+    if not snapshot:
+        raise ResearchUiError(409, "Create a snapshot before requesting review, approving, or publishing")
+    snapshot_id = compact_text(payload.get("snapshot_id"), 200)
+    if snapshot_id and snapshot.get("snapshot_id") != snapshot_id:
+        raise ResearchUiError(409, "A newer snapshot exists for this bundle")
+    expected = compact_text(payload.get("expected_version"), 120)
+    if expected and expected != (snapshot.get("updated_at") or ""):
+        raise ResearchUiError(409, "Publication snapshot changed since it was loaded")
+    return bundle_id, snapshot
+
+
+def update_publication_snapshot(payload, *, snapshot_state, review_state, release_state=None, event_type):
+    bundle_id, snapshot = latest_snapshot_for_update(payload)
+    now = now_iso()
+    updated = {
+        **snapshot,
+        "snapshot_state": snapshot_state,
+        "review_state": review_state,
+        "release_state": release_state or snapshot.get("release_state") or "unpublished",
+        "actor": compact_text(payload.get("actor") or REVIEW_ACTOR, 200),
+        "note": compact_text(payload.get("note"), 20000),
+        "updated_at": now,
+    }
+    insert_publication_snapshot_row(updated)
+    event = persist_review_event(build_review_event(event_type, {
+        **payload,
+        "project": updated.get("project") or "",
+        "subject_type": "publication_snapshot",
+        "subject_id": updated.get("snapshot_id") or "",
+        "bundle_id": bundle_id,
+        "snapshot_id": updated.get("snapshot_id") or "",
+        "manifest_hash": updated.get("manifest_hash") or "",
+        "source_anchor": {"kind": "publication_snapshot", "bundle_id": bundle_id, "snapshot_id": updated.get("snapshot_id"), "manifest_hash": updated.get("manifest_hash")},
+    }))
+    return {"snapshot": updated, "event": event, "detail": publication_detail({"bundle_id": [bundle_id]})}
+
+
+def request_publication_review(payload):
+    return update_publication_snapshot(payload, snapshot_state="in_review", review_state="snapshot_in_review", event_type="publication.snapshot.review_requested")
+
+
+def approve_publication_snapshot(payload):
+    return update_publication_snapshot(payload, snapshot_state="approved", review_state="approved", event_type="publication.snapshot.approved")
+
+
+def request_publication_changes(payload):
+    return update_publication_snapshot(payload, snapshot_state="changes_requested", review_state="changes_requested", event_type="publication.snapshot.changes_requested")
+
+
+def publish_publication_snapshot(payload):
+    bundle_id, snapshot = latest_snapshot_for_update(payload)
+    if snapshot.get("review_state") != "approved":
+        raise ResearchUiError(409, "Snapshot must be approved before publishing")
+    result = update_publication_snapshot(payload, snapshot_state="published", review_state="approved", release_state="published", event_type="publication.snapshot.published")
+    now = now_iso()
+    release = {
+        "release_id": compact_text(payload.get("release_id"), 200) or make_id("publication_release"),
+        "snapshot_id": snapshot.get("snapshot_id") or "",
+        "bundle_id": bundle_id,
+        "project": snapshot.get("project") or "",
+        "release_state": "published",
+        "manifest_hash": snapshot.get("manifest_hash") or "",
+        "supersedes_release_id": "",
+        "actor": compact_text(payload.get("actor") or REVIEW_ACTOR, 200),
+        "note": compact_text(payload.get("note"), 20000),
+        "created_at": now,
+        "updated_at": now,
+    }
+    ch_insert_json_each_row("publication_releases", [release])
+    result["release"] = release
+    return result
+
+
+def supersede_publication_release(payload):
+    bundle_id, snapshot = latest_snapshot_for_update(payload)
+    latest_release = latest_publication_releases([bundle_id]).get(bundle_id)
+    result = update_publication_snapshot(payload, snapshot_state="superseded", review_state=snapshot.get("review_state") or "approved", release_state="superseded", event_type="publication.release.superseded")
+    now = now_iso()
+    release = {
+        "release_id": compact_text(payload.get("release_id"), 200) or (latest_release or {}).get("release_id") or make_id("publication_release"),
+        "snapshot_id": snapshot.get("snapshot_id") or "",
+        "bundle_id": bundle_id,
+        "project": snapshot.get("project") or "",
+        "release_state": "superseded",
+        "manifest_hash": snapshot.get("manifest_hash") or "",
+        "supersedes_release_id": (latest_release or {}).get("release_id") or "",
+        "actor": compact_text(payload.get("actor") or REVIEW_ACTOR, 200),
+        "note": compact_text(payload.get("note"), 20000),
+        "created_at": (latest_release or {}).get("created_at") or now,
+        "updated_at": now,
+    }
+    ch_insert_json_each_row("publication_releases", [release])
+    result["release"] = release
+    return result
+
+
+def launch_rebrowser_capture(payload):
+    project = compact_text(payload.get("project_id") or payload.get("project") or "", 300)
+    seed_url = compact_text(payload.get("seed_url") or payload.get("url") or "", 2000)
+    source_id = compact_text(payload.get("source_id") or payload.get("source_evidence_id") or "", 1000)
+    if not seed_url and not source_id:
+        raise ResearchUiError(400, "seed_url or source_id is required")
+    launch_payload = {
+        "project_id": project,
+        "seed_url": seed_url,
+        "source_id": source_id,
+        "return_route": compact_text(payload.get("return_route") or "#inbox", 500),
+        "requested_at": now_iso(),
+        "actor": compact_text(payload.get("actor") or REVIEW_ACTOR, 200),
+    }
+    event = persist_review_event(build_review_event("rebrowser.capture.launch_requested", {
+        **payload,
+        "project": project,
+        "source_evidence_id": source_id,
+        "subject_type": "rebrowser_capture_intent",
+        "subject_id": source_id or seed_url,
+        "source_anchor": {"kind": "rebrowser_launch", "source_id": source_id, "seed_url": seed_url},
+    }))
+    response_body = {}
+    status = "queued"
+    configured = bool(REBROWSER_LAUNCH_URL)
+    if configured:
+        request = urllib.request.Request(
+            REBROWSER_LAUNCH_URL,
+            data=json_bytes(launch_payload),
+            method="POST",
+            headers={"Content-Type": "application/json"},
+        )
+        try:
+            with urllib.request.urlopen(request, timeout=10) as response:
+                text = response.read().decode("utf-8", errors="replace")
+                try:
+                    response_body = json.loads(text) if text else {}
+                except Exception:
+                    response_body = {"body": text[:2000]}
+                status = "launched"
+        except urllib.error.HTTPError as exc:
+            detail = exc.read().decode("utf-8", errors="replace")[:1000]
+            raise ResearchUiError(502, f"Rebrowser launch failed ({exc.code}): {detail}")
+        except Exception as exc:
+            raise ResearchUiError(502, f"Rebrowser launch failed: {exc}")
+    return {
+        "configured": configured,
+        "status": status,
+        "launch": response_body,
+        "event_id": event.get("event_id"),
+        "message": "Capture launch recorded" if not configured else "Capture launch submitted",
     }
 
 
@@ -5405,6 +6371,23 @@ class ResearchUiHandler(BaseHTTPRequestHandler):
                 return self.send_json(inbox(params))
             if parsed.path == "/api/projects":
                 return self.send_json(project_rows(params))
+            if parsed.path.startswith("/api/project/") and parsed.path.endswith("/timeline"):
+                tail = parsed.path[len("/api/project/"):-len("/timeline")]
+                params["project_id"] = [urllib.parse.unquote(tail)]
+                return self.send_json(project_timeline(params))
+            if parsed.path.startswith("/api/project/") and "/compare" in parsed.path:
+                tail = parsed.path[len("/api/project/"):]
+                parts = tail.split("/")
+                params["project_id"] = [urllib.parse.unquote(parts[0])]
+                if len(parts) > 2:
+                    params["view_id"] = [urllib.parse.unquote(parts[2])]
+                return self.send_json(compare_view(params))
+            if parsed.path.startswith("/api/project/") and "/draft/" in parsed.path:
+                tail = parsed.path[len("/api/project/"):]
+                project_id, draft_id = tail.split("/draft/", 1)
+                params["project_id"] = [urllib.parse.unquote(project_id)]
+                params["draft_id"] = [urllib.parse.unquote(draft_id)]
+                return self.send_json(draft_editor(params))
             if parsed.path == "/api/library":
                 return self.send_json(library_search(params))
             if parsed.path == "/api/evidence":
@@ -5428,6 +6411,15 @@ class ResearchUiHandler(BaseHTTPRequestHandler):
                 return self.send_json(reviews_read_model(params))
             if parsed.path == "/api/publishing":
                 return self.send_json(publishing_read_model(params))
+            if parsed.path.startswith("/api/publishing/"):
+                params["bundle_id"] = [urllib.parse.unquote(parsed.path[len("/api/publishing/"):])]
+                return self.send_json(publication_detail(params))
+            if parsed.path.startswith("/api/topic/"):
+                params["topic_id"] = [urllib.parse.unquote(parsed.path[len("/api/topic/"):])]
+                return self.send_json(topic_detail(params))
+            if parsed.path.startswith("/api/benchmark/"):
+                params["benchmark_id"] = [urllib.parse.unquote(parsed.path[len("/api/benchmark/"):])]
+                return self.send_json(benchmark_detail(params))
             if parsed.path == "/api/taxonomy":
                 return self.send_json(taxonomy_read_model(params))
             if parsed.path == "/api/source":
@@ -5460,6 +6452,20 @@ class ResearchUiHandler(BaseHTTPRequestHandler):
             payload = self.read_json_body()
             if parsed.path == "/api/review/events":
                 return self.send_json(create_generic_review_event(payload), status=201)
+            if parsed.path == "/api/rebrowser/launch-capture":
+                return self.send_json(launch_rebrowser_capture(payload), status=201)
+            if parsed.path == "/api/publishing/snapshot":
+                return self.send_json(create_publication_snapshot(payload), status=201)
+            if parsed.path == "/api/publishing/request-review":
+                return self.send_json(request_publication_review(payload), status=201)
+            if parsed.path == "/api/publishing/approve":
+                return self.send_json(approve_publication_snapshot(payload), status=201)
+            if parsed.path == "/api/publishing/request-changes":
+                return self.send_json(request_publication_changes(payload), status=201)
+            if parsed.path == "/api/publishing/publish":
+                return self.send_json(publish_publication_snapshot(payload), status=201)
+            if parsed.path == "/api/publishing/supersede":
+                return self.send_json(supersede_publication_release(payload), status=201)
             if parsed.path == "/api/conflicts/resolve":
                 return self.send_json(resolve_conflict(payload), status=201)
             if parsed.path == "/api/project-brief":

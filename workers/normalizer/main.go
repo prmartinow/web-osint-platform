@@ -51,19 +51,20 @@ const (
 var statusURLPattern = regexp.MustCompile(`(?i)(?:x|twitter)\.com/([^/?#]+)/status/([0-9]+)`)
 
 type config struct {
-	Brokers       []string
-	GroupID       string
-	PebbleDir     string
-	TypesenseURL  string
-	TypesenseKey  string
-	QdrantURL     string
-	QdrantColl    string
-	ClickURL      string
-	ClickDB       string
-	ClickUser     string
-	ClickPassword string
-	HTTPAddr      string
-	EmitObserved  bool
+	Brokers                 []string
+	GroupID                 string
+	PebbleDir               string
+	TypesenseURL            string
+	TypesenseKey            string
+	QdrantURL               string
+	QdrantColl              string
+	ClickURL                string
+	ClickDB                 string
+	ClickUser               string
+	ClickPassword           string
+	HTTPAddr                string
+	EmitObserved            bool
+	EnableMaintenanceDelete bool
 }
 
 type app struct {
@@ -197,7 +198,7 @@ func main() {
 }
 
 func loadConfig() config {
-	return config{
+	cfg := config{
 		Brokers:       splitCSV(envFirst("REDPANDA_BROKERS", "KAFKA_BROKERS", "127.0.0.1:19092")),
 		GroupID:       envFirst("REDPANDA_GROUP_ID", "KAFKA_GROUP_ID", "web-osint-normalizer-v1"),
 		PebbleDir:     env("PEBBLE_DIR", "/data/pebble"),
@@ -212,6 +213,8 @@ func loadConfig() config {
 		HTTPAddr:      env("HTTP_ADDR", ":8090"),
 		EmitObserved:  envBool("WEB_OSINT_EMIT_OBSERVED_TOPICS", true),
 	}
+	cfg.EnableMaintenanceDelete = envBool("WEB_OSINT_ENABLE_MAINTENANCE_DELETE", false)
+	return cfg
 }
 
 func openPebble(dir string) (*pebble.DB, error) {
@@ -1191,9 +1194,88 @@ func (a *app) serveHTTP() {
 		_, _ = w.Write(value)
 		_, _ = w.Write([]byte("\n"))
 	})
+	mux.HandleFunc("/maintenance/pebble/delete", func(w http.ResponseWriter, r *http.Request) {
+		if !a.cfg.EnableMaintenanceDelete {
+			http.Error(w, "maintenance delete disabled", http.StatusForbidden)
+			return
+		}
+		if r.Method != http.MethodPost {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		var request struct {
+			Keys     []string `json:"keys"`
+			Prefixes []string `json:"prefixes"`
+		}
+		if err := json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&request); err != nil {
+			http.Error(w, "invalid json: "+err.Error(), http.StatusBadRequest)
+			return
+		}
+		result, err := a.deletePebbleKeys(request.Keys, request.Prefixes)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		writeJSON(w, result)
+	})
 	if err := http.ListenAndServe(a.cfg.HTTPAddr, mux); err != nil {
 		log.Fatalf("http: %v", err)
 	}
+}
+
+func (a *app) deletePebbleKeys(keys []string, prefixes []string) (map[string]any, error) {
+	seen := map[string]struct{}{}
+	for _, key := range keys {
+		key = strings.TrimSpace(key)
+		if key == "" {
+			continue
+		}
+		seen[key] = struct{}{}
+	}
+	for _, prefix := range prefixes {
+		prefix = strings.TrimSpace(prefix)
+		if prefix == "" {
+			continue
+		}
+		iter, err := a.db.NewIter(&pebble.IterOptions{})
+		if err != nil {
+			return nil, err
+		}
+		for ok := iter.SeekGE([]byte(prefix)); ok; ok = iter.Next() {
+			key := string(iter.Key())
+			if !strings.HasPrefix(key, prefix) {
+				break
+			}
+			seen[key] = struct{}{}
+		}
+		if err := iter.Error(); err != nil {
+			_ = iter.Close()
+			return nil, err
+		}
+		if err := iter.Close(); err != nil {
+			return nil, err
+		}
+	}
+
+	deleted := []string{}
+	missing := []string{}
+	for key := range seen {
+		err := a.db.Delete([]byte(key), pebble.Sync)
+		if errors.Is(err, pebble.ErrNotFound) {
+			missing = append(missing, key)
+			continue
+		}
+		if err != nil {
+			return nil, err
+		}
+		deleted = append(deleted, key)
+	}
+	return map[string]any{
+		"deleted":       deleted,
+		"deleted_count": len(deleted),
+		"missing":       missing,
+		"missing_count": len(missing),
+	}, nil
 }
 
 func (a *app) pebbleInfo(limit int) (map[string]any, error) {

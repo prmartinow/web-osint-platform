@@ -4294,6 +4294,9 @@ def timeline_item_from_source(row):
         "source_ids": [row.get("evidence_id")],
         "review_state": "captured",
         "conflict_state": "none",
+        "confidence_state": "source_linked",
+        "source_kind": row.get("source_kind") or "",
+        "source_label": row.get("source_label") or source_kind_label(row.get("source_kind")),
         "source": source_for_ledger_row({row.get("evidence_id"): row}, row.get("evidence_id")),
     }
 
@@ -4316,40 +4319,135 @@ def timeline_item_from_claim(row):
         "source_ids": [row.get("source_evidence_id")] if row.get("source_evidence_id") else [],
         "review_state": row.get("review_state") or "draft",
         "conflict_state": row.get("contradiction_state") or "under_review",
+        "confidence_state": "disputed" if row.get("contradiction_state") in ("conflict", "disputed") else ("source_linked" if row.get("source_evidence_id") else "needs_evidence"),
+        "source_kind": row.get("source_kind") or "",
+        "source_label": row.get("source_label") or source_kind_label(row.get("source_kind")),
         "source": row.get("source") or {},
     }
+
+
+def timeline_param(params, name, default=""):
+    value = params.get(name, [default])
+    if isinstance(value, list):
+        return (value[0] if value else default) or default
+    return value or default
+
+
+def timeline_selected_date(item, date_type):
+    if date_type == "source":
+        return item.get("source_date") or ""
+    if date_type == "capture":
+        return item.get("capture_date") or ""
+    return item.get("date") or ""
+
+
+def timeline_date_matches(item, date_type, date_from, date_to):
+    if not date_from and not date_to:
+        return True
+    date_value = timeline_selected_date(item, date_type)
+    if not date_value:
+        return False
+    date_key = str(date_value)[:10]
+    if date_from and date_key < date_from:
+        return False
+    if date_to and date_key > date_to:
+        return False
+    return True
+
+
+def timeline_facet(items, key, *, label_fn=None):
+    counts = {}
+    for item in items:
+        value = item.get(key) or ""
+        if not value:
+            continue
+        counts[value] = counts.get(value, 0) + 1
+    return [
+        {"id": value, "label": label_fn(value) if label_fn else title_case_label(value), "count": count}
+        for value, count in sorted(counts.items(), key=lambda pair: (-pair[1], pair[0]))
+    ]
+
+
+def apply_timeline_saved_view(saved_view, filters):
+    saved_views = {
+        "recent_captures": {"lane": "captures", "date_type": "capture"},
+        "date_conflicts": {"confidence": "disputed"},
+        "accepted_claims": {"lane": "claims", "review_state": "accepted", "date_type": "event"},
+        "needs_evidence": {"confidence": "needs_evidence"},
+    }
+    for key, value in saved_views.get(saved_view, {}).items():
+        filters[key] = value
 
 
 def project_timeline(params):
     project = resolve_project_id(params.get("project_id", params.get("project", [""]))[0] if isinstance(params.get("project_id", params.get("project", [""])), list) else "")
     q = (params.get("q", [""])[0] or "").strip()
     limit = sql_int(params.get("limit", ["120"])[0], 120)
+    filters = {
+        "lane": timeline_param(params, "lane").strip(),
+        "date_type": timeline_param(params, "date_type", "event").strip() or "event",
+        "date_from": timeline_param(params, "date_from").strip(),
+        "date_to": timeline_param(params, "date_to").strip(),
+        "confidence": timeline_param(params, "confidence").strip(),
+        "review_state": timeline_param(params, "review_state").strip(),
+        "source_kind": timeline_param(params, "source_kind").strip(),
+        "saved_view": timeline_param(params, "saved_view").strip(),
+    }
+    apply_timeline_saved_view(filters["saved_view"], filters)
+    if filters["date_type"] not in ("event", "source", "capture"):
+        filters["date_type"] = "event"
     sources = source_rows_for_project(project, max(limit, 120), q)
     claims = scoped_claim_rows(project, max(limit, 120), q)
-    items = [timeline_item_from_source(row) for row in sources] + [timeline_item_from_claim(row) for row in claims]
+    all_items = [timeline_item_from_source(row) for row in sources] + [timeline_item_from_claim(row) for row in claims]
+    items = list(all_items)
     if q:
         lowered = q.lower()
         items = [item for item in items if lowered in " ".join(str(item.get(key) or "") for key in ("summary", "event_type", "review_state", "conflict_state")).lower()]
-    items.sort(key=lambda item: (item.get("date") or "9999", item.get("item_id") or ""))
+    if filters["lane"]:
+        items = [item for item in items if item.get("lane") == filters["lane"]]
+    if filters["confidence"]:
+        items = [item for item in items if item.get("confidence_state") == filters["confidence"]]
+    if filters["review_state"]:
+        items = [item for item in items if item.get("review_state") == filters["review_state"]]
+    if filters["source_kind"]:
+        items = [item for item in items if item.get("source_kind") == filters["source_kind"]]
+    items = [item for item in items if timeline_date_matches(item, filters["date_type"], filters["date_from"], filters["date_to"])]
+    for item in items:
+        item["selected_date"] = timeline_selected_date(item, filters["date_type"])
+        item["selected_date_type"] = filters["date_type"]
+    items.sort(key=lambda item: (item.get("selected_date") or item.get("date") or "9999", item.get("item_id") or ""))
     visible = items[:limit]
     return read_envelope({
         "scope": {"project": project or "all", "surface": "timeline"},
-        "query": {"q": q, "limit": limit},
+        "query": {"q": q, "limit": limit, **filters},
         "summary": {
             "items": len(items),
             "captures": sum(1 for item in items if item.get("lane") == "captures"),
             "claims": sum(1 for item in items if item.get("lane") == "claims"),
             "conflicts": sum(1 for item in items if item.get("conflict_state") in ("conflict", "disputed")),
+            "all_items": len(all_items),
         },
         "lanes": [
             {"id": "captures", "label": "Captures", "count": sum(1 for item in items if item.get("lane") == "captures")},
             {"id": "claims", "label": "Claims", "count": sum(1 for item in items if item.get("lane") == "claims")},
             {"id": "reviews", "label": "Reviews", "count": sum(1 for item in items if item.get("review_state") not in ("captured", "accepted", "published"))},
         ],
+        "date_types": [
+            {"id": "event", "label": "Event date", "description": "Best available event date from captured or reviewed object timestamps."},
+            {"id": "source", "label": "Source date", "description": "Original source/capture timestamp when present."},
+            {"id": "capture", "label": "Capture/update date", "description": "Collection or review-update timestamp when present."},
+        ],
+        "facets": {
+            "lanes": timeline_facet(all_items, "lane"),
+            "confidence": timeline_facet(all_items, "confidence_state"),
+            "review_states": timeline_facet(all_items, "review_state"),
+            "source_kinds": timeline_facet(all_items, "source_kind", label_fn=source_kind_label),
+        },
         "saved_views": [
-            {"id": "recent_captures", "label": "Recent captures", "filters": {"lane": "captures"}},
-            {"id": "date_conflicts", "label": "Date and claim conflicts", "filters": {"conflict_state": "conflict"}},
-            {"id": "accepted_claims", "label": "Accepted claim chronology", "filters": {"review_state": "accepted"}},
+            {"id": "recent_captures", "label": "Recent captures", "filters": {"lane": "captures", "date_type": "capture"}},
+            {"id": "date_conflicts", "label": "Date and claim conflicts", "filters": {"confidence": "disputed"}},
+            {"id": "accepted_claims", "label": "Accepted claim chronology", "filters": {"lane": "claims", "review_state": "accepted", "date_type": "event"}},
+            {"id": "needs_evidence", "label": "Needs evidence", "filters": {"confidence": "needs_evidence"}},
         ],
         "results": cursor_page(visible, len(items), limit),
         "items": visible,

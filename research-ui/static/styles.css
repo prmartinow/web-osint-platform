@@ -4655,6 +4655,39 @@ pre {
   flex-wrap: wrap;
   gap: 6px;
 }
+.timeline-controls {
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+}
+.timeline-saved-views {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.timeline-filter-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(150px, 1fr)) auto;
+  gap: 10px;
+  align-items: end;
+}
+.timeline-filter-grid label {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+}
+.timeline-filter-grid label span {
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+.timeline-filter-grid input,
+.timeline-filter-grid select {
+  width: 100%;
+  min-width: 0;
+}
 .timeline-list {
   display: flex;
   flex-direction: column;
@@ -4770,6 +4803,9 @@ pre {
   }
 }
 @media (max-width: 720px) {
+  .timeline-filter-grid {
+    grid-template-columns: 1fr;
+  }
   .timeline-item {
     grid-template-columns: 1fr;
   }

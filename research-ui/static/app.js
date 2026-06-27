@@ -14,6 +14,14 @@ const state = {
   conflictResolution: 'leave_unresolved',
   conflictReasonCode: 'unresolved',
   conflictPreferredClaimId: '',
+  timelineLane: '',
+  timelineDateType: 'event',
+  timelineDateFrom: '',
+  timelineDateTo: '',
+  timelineConfidence: '',
+  timelineReviewState: '',
+  timelineSourceKind: '',
+  timelineSavedView: '',
   topicDetailId: '',
   topicDetailTab: 'overview',
   compareViewId: 'claims',
@@ -332,6 +340,14 @@ function applyHashParams() {
   if (route === 'timeline') {
     state.project = params.get('project') || state.project || '';
     state.q = params.get('q') || state.q || '';
+    state.timelineLane = params.get('lane') || '';
+    state.timelineDateType = params.get('date_type') || 'event';
+    state.timelineDateFrom = params.get('date_from') || '';
+    state.timelineDateTo = params.get('date_to') || '';
+    state.timelineConfidence = params.get('confidence') || '';
+    state.timelineReviewState = params.get('review_state') || '';
+    state.timelineSourceKind = params.get('source_kind') || '';
+    state.timelineSavedView = params.get('saved_view') || '';
   }
   if (route === 'compare') {
     state.project = params.get('project') || state.project || '';
@@ -459,6 +475,14 @@ function routeHash() {
     const params = new URLSearchParams();
     if (state.project) params.set('project', state.project);
     if (state.q) params.set('q', state.q);
+    if (state.timelineLane) params.set('lane', state.timelineLane);
+    if (state.timelineDateType && state.timelineDateType !== 'event') params.set('date_type', state.timelineDateType);
+    if (state.timelineDateFrom) params.set('date_from', state.timelineDateFrom);
+    if (state.timelineDateTo) params.set('date_to', state.timelineDateTo);
+    if (state.timelineConfidence) params.set('confidence', state.timelineConfidence);
+    if (state.timelineReviewState) params.set('review_state', state.timelineReviewState);
+    if (state.timelineSourceKind) params.set('source_kind', state.timelineSourceKind);
+    if (state.timelineSavedView) params.set('saved_view', state.timelineSavedView);
     const query = params.toString();
     return `#timeline${query ? '?' + query : ''}`;
   }
@@ -5148,10 +5172,59 @@ function renderMiniSourceList(sources) {
   `).join('')}</div>`;
 }
 
+function optionList(items, active, allLabel) {
+  const rows = items || [];
+  return `<option value="">${escapeHtml(allLabel)}</option>${rows.map((item) => {
+    const id = item.id ?? item.value ?? '';
+    const label = item.label || titleCase(String(id).replace(/_/g, ' '));
+    const count = item.count !== undefined ? ` (${item.count})` : '';
+    return `<option value="${escapeHtml(id)}" ${String(active || '') === String(id) ? 'selected' : ''}>${escapeHtml(label)}${escapeHtml(count)}</option>`;
+  }).join('')}`;
+}
+
+function timelineDateTypeOptions(data) {
+  const rows = data.date_types || [
+    { id: 'event', label: 'Event date' },
+    { id: 'source', label: 'Source date' },
+    { id: 'capture', label: 'Capture/update date' },
+  ];
+  return rows.map((item) => `<option value="${escapeHtml(item.id)}" ${state.timelineDateType === item.id ? 'selected' : ''}>${escapeHtml(item.label)}</option>`).join('');
+}
+
+function setTimelineFilterStateFromQuery(query) {
+  state.timelineLane = query.lane || '';
+  state.timelineDateType = query.date_type || 'event';
+  state.timelineDateFrom = query.date_from || '';
+  state.timelineDateTo = query.date_to || '';
+  state.timelineConfidence = query.confidence || '';
+  state.timelineReviewState = query.review_state || '';
+  state.timelineSourceKind = query.source_kind || '';
+  state.timelineSavedView = query.saved_view || '';
+}
+
+function clearTimelineFilterState() {
+  state.timelineLane = '';
+  state.timelineDateType = 'event';
+  state.timelineDateFrom = '';
+  state.timelineDateTo = '';
+  state.timelineConfidence = '';
+  state.timelineReviewState = '';
+  state.timelineSourceKind = '';
+  state.timelineSavedView = '';
+}
+
 async function loadTimelinePage() {
   const projectId = routeProjectId();
   const params = new URLSearchParams({ limit: state.limit });
   if (state.q) params.set('q', state.q);
+  if (state.timelineLane) params.set('lane', state.timelineLane);
+  if (state.timelineDateType && state.timelineDateType !== 'event') params.set('date_type', state.timelineDateType);
+  if (state.timelineDateFrom) params.set('date_from', state.timelineDateFrom);
+  if (state.timelineDateTo) params.set('date_to', state.timelineDateTo);
+  if (state.timelineConfidence) params.set('confidence', state.timelineConfidence);
+  if (state.timelineReviewState) params.set('review_state', state.timelineReviewState);
+  if (state.timelineSourceKind) params.set('source_kind', state.timelineSourceKind);
+  if (state.timelineSavedView) params.set('saved_view', state.timelineSavedView);
   $('routePage').innerHTML = pageHeader('Timeline', 'Loading chronological evidence and claim events...');
   const token = makeFetchToken();
   try {
@@ -5167,6 +5240,9 @@ async function loadTimelinePage() {
 function renderTimelinePage(data) {
   const items = data.items || data.results?.items || [];
   const summary = data.summary || {};
+  const query = data.query || {};
+  setTimelineFilterStateFromQuery(query);
+  const facets = data.facets || {};
   $('routePage').innerHTML = `
     ${pageHeader('Timeline', `${escapeHtml(data.scope?.project || 'Active project')} · ${escapeHtml(summary.items || 0)} event(s)`, `
       <button class="secondary" type="button" data-route-target="compare" data-project="${escapeHtml(data.scope?.project || state.project || '')}">Compare</button>
@@ -5178,6 +5254,22 @@ function renderTimelinePage(data) {
       { label: 'Claims', value: summary.claims || 0 },
       { label: 'Conflicts', value: summary.conflicts || 0 },
     ])}
+    <section class="timeline-controls panel">
+      <div class="timeline-saved-views">
+        ${(data.saved_views || []).map((view) => `<button class="secondary ${state.timelineSavedView === view.id ? 'active' : ''}" type="button" data-timeline-saved-view="${escapeHtml(view.id)}">${escapeHtml(view.label || view.id)}</button>`).join('')}
+      </div>
+      <div class="timeline-filter-grid">
+        <label><span>Date type</span><select data-timeline-filter="date_type">${timelineDateTypeOptions(data)}</select></label>
+        <label><span>From</span><input data-timeline-filter="date_from" type="date" value="${escapeHtml(state.timelineDateFrom)}"></label>
+        <label><span>To</span><input data-timeline-filter="date_to" type="date" value="${escapeHtml(state.timelineDateTo)}"></label>
+        <label><span>Lane</span><select data-timeline-filter="lane">${optionList(facets.lanes || data.lanes, state.timelineLane, 'All lanes')}</select></label>
+        <label><span>Confidence</span><select data-timeline-filter="confidence">${optionList(facets.confidence, state.timelineConfidence, 'All confidence states')}</select></label>
+        <label><span>Review state</span><select data-timeline-filter="review_state">${optionList(facets.review_states, state.timelineReviewState, 'All review states')}</select></label>
+        <label><span>Source kind</span><select data-timeline-filter="source_kind">${optionList(facets.source_kinds, state.timelineSourceKind, 'All source kinds')}</select></label>
+        <button class="secondary" type="button" id="timelineClearFilters">Clear</button>
+      </div>
+      <p class="muted">Date filters use the selected existing date field and leave unknown dates out only when a range is active.</p>
+    </section>
     <section class="timeline-shell panel">
       <div class="timeline-lanes">
         ${(data.lanes || []).map((lane) => `<span class="pill">${escapeHtml(lane.label)} ${escapeHtml(lane.count || 0)}</span>`).join('')}
@@ -5185,10 +5277,10 @@ function renderTimelinePage(data) {
       <div class="timeline-list">
         ${items.length ? items.map((item) => `
           <article class="timeline-item ${escapeHtml(item.conflict_state || '')}">
-            <time>${escapeHtml(fmtDate(item.date) || 'undated')}</time>
+            <time>${escapeHtml(fmtDate(item.selected_date || item.date) || 'undated')}</time>
             <div>
               <strong>${escapeHtml(item.summary || item.item_id || 'Timeline item')}</strong>
-              <p>${escapeHtml([titleCase(item.event_type || ''), item.date_precision, item.review_state, item.conflict_state].filter(Boolean).join(' · '))}</p>
+              <p>${escapeHtml([titleCase(item.event_type || ''), item.selected_date_type ? `${titleCase(item.selected_date_type)} date` : '', item.date_precision, item.review_state, item.conflict_state, item.confidence_state, item.source_label].filter(Boolean).join(' · '))}</p>
               <div class="tag-line">
                 ${(item.entities || []).slice(0, 4).map((value) => `<span class="pill">${escapeHtml(value)}</span>`).join('')}
                 ${(item.source_ids || []).slice(0, 2).map((value) => `<button class="text-button" type="button" data-id="${escapeHtml(value)}">${escapeHtml(value)}</button>`).join('')}
@@ -5204,6 +5296,37 @@ function renderTimelinePage(data) {
     state.project = button.dataset.project || state.project;
     setRoute(button.dataset.routeTarget || 'projects');
   }));
+  document.querySelectorAll('[data-timeline-filter]').forEach((control) => control.addEventListener('change', () => {
+    const key = control.dataset.timelineFilter;
+    if (key === 'lane') state.timelineLane = control.value;
+    if (key === 'date_type') state.timelineDateType = control.value || 'event';
+    if (key === 'date_from') state.timelineDateFrom = control.value;
+    if (key === 'date_to') state.timelineDateTo = control.value;
+    if (key === 'confidence') state.timelineConfidence = control.value;
+    if (key === 'review_state') state.timelineReviewState = control.value;
+    if (key === 'source_kind') state.timelineSourceKind = control.value;
+    state.timelineSavedView = '';
+    replaceRouteHash();
+    loadTimelinePage();
+  }));
+  document.querySelectorAll('[data-timeline-saved-view]').forEach((button) => button.addEventListener('click', () => {
+    const view = (data.saved_views || []).find((item) => item.id === button.dataset.timelineSavedView);
+    clearTimelineFilterState();
+    state.timelineSavedView = view?.id || '';
+    const filters = view?.filters || {};
+    state.timelineLane = filters.lane || '';
+    state.timelineDateType = filters.date_type || 'event';
+    state.timelineConfidence = filters.confidence || '';
+    state.timelineReviewState = filters.review_state || '';
+    state.timelineSourceKind = filters.source_kind || '';
+    replaceRouteHash();
+    loadTimelinePage();
+  }));
+  $('timelineClearFilters')?.addEventListener('click', () => {
+    clearTimelineFilterState();
+    replaceRouteHash();
+    loadTimelinePage();
+  });
 }
 
 async function loadComparePage() {

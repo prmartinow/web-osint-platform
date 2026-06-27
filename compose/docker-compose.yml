@@ -37,7 +37,7 @@ services:
       - "127.0.0.1:18082:18082"
       - "127.0.0.1:19644:9644"
     volumes:
-      - ${WEB_OSINT_DATA_ROOT:-/mnt/data/web-osint-platform}/redpanda:/var/lib/redpanda/data
+      - ${WEB_OSINT_DATA_ROOT:?set WEB_OSINT_DATA_ROOT}/redpanda:/var/lib/redpanda/data
     healthcheck:
       test: ["CMD-SHELL", "rpk cluster health | grep -q 'Healthy: *true'"]
       interval: 20s
@@ -62,7 +62,7 @@ services:
     ports:
       - "127.0.0.1:18108:8108"
     volumes:
-      - ${WEB_OSINT_DATA_ROOT:-/mnt/data/web-osint-platform}/typesense:/data
+      - ${WEB_OSINT_DATA_ROOT:?set WEB_OSINT_DATA_ROOT}/typesense:/data
     restart: unless-stopped
 
   qdrant:
@@ -72,7 +72,7 @@ services:
       - "127.0.0.1:16333:6333"
       - "127.0.0.1:16334:6334"
     volumes:
-      - ${WEB_OSINT_DATA_ROOT:-/mnt/data/web-osint-platform}/qdrant:/qdrant/storage
+      - ${WEB_OSINT_DATA_ROOT:?set WEB_OSINT_DATA_ROOT}/qdrant:/qdrant/storage
     restart: unless-stopped
 
   clickhouse:
@@ -93,8 +93,8 @@ services:
         soft: 262144
         hard: 262144
     volumes:
-      - ${WEB_OSINT_DATA_ROOT:-/mnt/data/web-osint-platform}/clickhouse/data:/var/lib/clickhouse
-      - ${WEB_OSINT_DATA_ROOT:-/mnt/data/web-osint-platform}/clickhouse/logs:/var/log/clickhouse-server
+      - ${WEB_OSINT_DATA_ROOT:?set WEB_OSINT_DATA_ROOT}/clickhouse/data:/var/lib/clickhouse
+      - ${WEB_OSINT_DATA_ROOT:?set WEB_OSINT_DATA_ROOT}/clickhouse/logs:/var/log/clickhouse-server
     restart: unless-stopped
 
   normalizer:
@@ -121,7 +121,7 @@ services:
     ports:
       - "127.0.0.1:18090:8090"
     volumes:
-      - ${WEB_OSINT_DATA_ROOT:-/mnt/data/web-osint-platform}/state/pebble:/data/pebble
+      - ${WEB_OSINT_DATA_ROOT:?set WEB_OSINT_DATA_ROOT}/state/pebble:/data/pebble
     depends_on:
       - redpanda
       - typesense
@@ -173,13 +173,13 @@ services:
       RESEARCH_PLANNER_URL: http://127.0.0.1:18091
       REDPANDA_PROXY_URL: http://127.0.0.1:18082
       REDPANDA_ADMIN_URL: http://127.0.0.1:19644
-      MEDIA_ROOT: ${WEB_OSINT_DATA_ROOT:-/mnt/data/web-osint-platform}/media
-      OCR_ROOT: ${WEB_OSINT_DATA_ROOT:-/mnt/data/web-osint-platform}/ocr
+      MEDIA_ROOT: ${WEB_OSINT_DATA_ROOT:?set WEB_OSINT_DATA_ROOT}/media
+      OCR_ROOT: ${WEB_OSINT_DATA_ROOT:?set WEB_OSINT_DATA_ROOT}/ocr
       DASHBOARD_HOST: ${WEB_OSINT_DASHBOARD_BIND:-127.0.0.1}
       DASHBOARD_PORT: "18191"
     network_mode: host
     volumes:
-      - ${WEB_OSINT_DATA_ROOT:-/mnt/data/web-osint-platform}:${WEB_OSINT_DATA_ROOT:-/mnt/data/web-osint-platform}:ro
+      - ${WEB_OSINT_DATA_ROOT:?set WEB_OSINT_DATA_ROOT}:${WEB_OSINT_DATA_ROOT:?set WEB_OSINT_DATA_ROOT}:ro
     depends_on:
       - redpanda
       - typesense
@@ -199,18 +199,18 @@ services:
       CLICKHOUSE_URL: http://127.0.0.1:18123
       CLICKHOUSE_DATABASE: ${CLICKHOUSE_DATABASE:-web_osint}
       CLICKHOUSE_USER: ${CLICKHOUSE_USER:-web_osint}
-      WEB_OSINT_DATA_ROOT: ${WEB_OSINT_DATA_ROOT:-/mnt/data/web-osint-platform}
-      MEDIA_ROOT: ${WEB_OSINT_DATA_ROOT:-/mnt/data/web-osint-platform}/media
-      OCR_ROOT: ${WEB_OSINT_DATA_ROOT:-/mnt/data/web-osint-platform}/ocr
-      WEB_ROOT: ${WEB_OSINT_DATA_ROOT:-/mnt/data/web-osint-platform}/web
-      DERIVED_ROOT: ${WEB_OSINT_DATA_ROOT:-/mnt/data/web-osint-platform}/derived
-      REVIEW_ROOT: ${WEB_OSINT_DATA_ROOT:-/mnt/data/web-osint-platform}/review
+      WEB_OSINT_DATA_ROOT: ${WEB_OSINT_DATA_ROOT:?set WEB_OSINT_DATA_ROOT}
+      MEDIA_ROOT: ${WEB_OSINT_DATA_ROOT:?set WEB_OSINT_DATA_ROOT}/media
+      OCR_ROOT: ${WEB_OSINT_DATA_ROOT:?set WEB_OSINT_DATA_ROOT}/ocr
+      WEB_ROOT: ${WEB_OSINT_DATA_ROOT:?set WEB_OSINT_DATA_ROOT}/web
+      DERIVED_ROOT: ${WEB_OSINT_DATA_ROOT:?set WEB_OSINT_DATA_ROOT}/derived
+      REVIEW_ROOT: ${WEB_OSINT_DATA_ROOT:?set WEB_OSINT_DATA_ROOT}/review
       RESEARCH_UI_HOST: ${WEB_OSINT_RESEARCH_UI_BIND:-127.0.0.1}
       RESEARCH_UI_PORT: "18192"
     network_mode: host
     volumes:
-      - ${WEB_OSINT_DATA_ROOT:-/mnt/data/web-osint-platform}:${WEB_OSINT_DATA_ROOT:-/mnt/data/web-osint-platform}:ro
-      - ${WEB_OSINT_DATA_ROOT:-/mnt/data/web-osint-platform}/review:${WEB_OSINT_DATA_ROOT:-/mnt/data/web-osint-platform}/review:rw
+      - ${WEB_OSINT_DATA_ROOT:?set WEB_OSINT_DATA_ROOT}:${WEB_OSINT_DATA_ROOT:?set WEB_OSINT_DATA_ROOT}:ro
+      - ${WEB_OSINT_DATA_ROOT:?set WEB_OSINT_DATA_ROOT}/review:${WEB_OSINT_DATA_ROOT:?set WEB_OSINT_DATA_ROOT}/review:rw
     depends_on:
       - clickhouse
     restart: unless-stopped

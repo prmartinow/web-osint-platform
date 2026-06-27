@@ -2,7 +2,12 @@
 set -euo pipefail
 
 CODE_ROOT="${CODE_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
-DATA_ROOT="${WEB_OSINT_DATA_ROOT:-${DATA_ROOT:-/mnt/data/web-osint-platform}}"
+DATA_ROOT="${WEB_OSINT_DATA_ROOT:-${DATA_ROOT:-}}"
+
+if [[ -z "$DATA_ROOT" ]]; then
+  echo "Set WEB_OSINT_DATA_ROOT or DATA_ROOT before running init_dirs.sh" >&2
+  exit 2
+fi
 
 mkdir -p \
   "$CODE_ROOT"/{compose,scripts,schemas,typesense,qdrant,sql,docs,connect,workers} \

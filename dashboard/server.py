@@ -16,8 +16,9 @@ from pathlib import Path
 
 APP_DIR = Path(__file__).resolve().parent
 STATIC_DIR = APP_DIR / "static"
-MEDIA_ROOT = Path(os.environ.get("MEDIA_ROOT", "/mnt/data/web-osint-platform/media")).resolve()
-OCR_ROOT = Path(os.environ.get("OCR_ROOT", "/mnt/data/web-osint-platform/ocr")).resolve()
+DATA_ROOT = Path(os.environ.get("WEB_OSINT_DATA_ROOT", str(APP_DIR / "data"))).resolve()
+MEDIA_ROOT = Path(os.environ.get("MEDIA_ROOT", str(DATA_ROOT / "media"))).resolve()
+OCR_ROOT = Path(os.environ.get("OCR_ROOT", str(DATA_ROOT / "ocr"))).resolve()
 WEB_ROOT = Path(os.environ.get("WEB_ROOT", str(MEDIA_ROOT.parent / "web"))).resolve()
 
 CLICKHOUSE_URL = os.environ.get("CLICKHOUSE_URL", "http://web-osint-clickhouse:8123").rstrip("/")
@@ -708,7 +709,7 @@ def artifact_paths_from_raw(raw):
     paths = []
 
     def add(value):
-        if isinstance(value, str) and value.startswith("/mnt/data/") and value not in paths:
+        if isinstance(value, str) and inspector_path_url(value) and value not in paths:
             paths.append(value)
 
     def walk(value, depth=0):

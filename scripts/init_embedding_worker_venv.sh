@@ -1,7 +1,11 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-DATA_ROOT="${WEB_OSINT_DATA_ROOT:-/mnt/data/web-osint-platform}"
+DATA_ROOT="${WEB_OSINT_DATA_ROOT:-${DATA_ROOT:-}}"
+if [[ -z "$DATA_ROOT" ]]; then
+  echo "Set WEB_OSINT_DATA_ROOT or DATA_ROOT before running init_embedding_worker_venv.sh" >&2
+  exit 2
+fi
 VENV="${WEB_OSINT_EMBEDDING_WORKER_VENV:-$DATA_ROOT/.venv-embedding-worker}"
 
 export PIP_DISABLE_PIP_VERSION_CHECK=1

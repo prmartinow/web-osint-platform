@@ -142,8 +142,8 @@ def require_data_root(path: Path, allow_non_data_root: bool) -> None:
     resolved = path.resolve()
     if allow_non_data_root:
         return
-    if not str(resolved).startswith("/mnt/data/"):
-        raise CanaryConfigError(f"data root must be under /mnt/data, got {resolved}")
+    if str(resolved) in {"", "/", "/home", "/tmp"}:
+        raise CanaryConfigError(f"unsafe durable data root: {resolved}")
 
 
 def deployment_defaults(data_root: Path) -> dict[str, str]:
@@ -507,7 +507,7 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run a Web OSINT end-to-end ingestion/search canary.")
     parser.add_argument("--env-file", type=Path, default=Path(".env"), help="Optional repo .env file.")
     parser.add_argument("--data-root", help="Durable data root. Defaults to OSINT_DATA_ROOT, WEB_OSINT_DATA_ROOT, or WEB_OSINT_CANARY_DATA_ROOTS.")
-    parser.add_argument("--allow-non-data-root", action="store_true", help="Allow data roots outside /mnt/data for tests.")
+    parser.add_argument("--allow-non-data-root", action="store_true", help="Allow unsafe or temporary data roots for tests.")
     parser.add_argument("--run-id", help="Explicit run id.")
     parser.add_argument("--timeout-seconds", type=int, default=420)
     parser.add_argument("--pandaproxy-url", help="Pandaproxy URL.")

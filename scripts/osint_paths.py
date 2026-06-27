@@ -26,8 +26,6 @@ def require_mnt_data_root(path: str | Path, *, allow_non_data_root: bool | None 
         return resolved
     if str(resolved) in {"", "/", "/home", "/tmp"}:
         raise StorageRootError(f"unsafe durable data root: {resolved}")
-    if not str(resolved).startswith("/mnt/data/"):
-        raise StorageRootError(f"durable data root must be under /mnt/data, got {resolved}")
     return resolved
 
 
@@ -51,5 +49,8 @@ def ensure_dir(path: str | Path, *, mode: int = 0o755) -> Path:
     return resolved
 
 
-def evidence_data_root(default: str = "/mnt/data/web-osint-platform") -> Path:
-    return require_mnt_data_root(env("OSINT_DATA_ROOT", env("WEB_OSINT_DATA_ROOT", default)))
+def evidence_data_root(default: str = "") -> Path:
+    raw = env("OSINT_DATA_ROOT", env("WEB_OSINT_DATA_ROOT", default))
+    if not raw:
+        raise StorageRootError("OSINT_DATA_ROOT or WEB_OSINT_DATA_ROOT is required")
+    return require_mnt_data_root(raw)

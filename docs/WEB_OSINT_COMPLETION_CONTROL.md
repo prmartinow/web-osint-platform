@@ -126,6 +126,7 @@ Migration steps:
 - 2026-06-27: Converted the normalizer worker away from baked loopback broker/search/vector/ClickHouse defaults. The normalizer now fails during config load when required broker and service endpoint env is absent, before opening Pebble or Kafka resources.
 - 2026-06-27: Converted the producer outbox and flush path away from repo-local state and baked Pandaproxy defaults. Producer spooling now requires `WEB_OSINT_OUTBOX_ROOT`, `WEB_OSINT_DATA_ROOT`, or `--outbox-root`; flushing requires env/CLI Pandaproxy config, and README examples use the documented env names.
 - 2026-06-27: Converted the RPC tunnel helper away from baked remote loopback targets and local user examples. Tunnel target host/ports now come from ignored config env, and real `config/*.env` files are ignored while checked-in examples remain allowed.
+- 2026-06-27: Parameterized Compose host binds, host-side ports, and Redpanda external advertise hosts. The checked-in Compose file no longer fixes loopback host:port bindings; `.env.example` carries the public variable names and valid example values.
 
 ## Verification Record
 
@@ -161,6 +162,7 @@ Latest verified state:
 - Normalizer endpoint cleanup checks: `gofmt -w main.go`, `go test ./...`, and `go build -o /tmp/web-osint-normalizer-config-check .` under `workers/normalizer` passed; an empty-env binary startup probe exited with `configuration: missing REDPANDA_BROKERS or KAFKA_BROKERS`; targeted scan found no normalizer hardcoded loopback endpoints or local deployment paths.
 - Producer outbox cleanup checks: `python3 -m py_compile producer/web_osint_producer.py` passed; missing Pandaproxy and missing outbox config probes failed before network writes; explicit temp-outbox spool smoke wrote only under `/tmp` and the temp artifact was removed; additions-only sanitizer found no new local paths, local endpoints, secrets, or model-owner variables.
 - RPC tunnel cleanup checks: `bash -n scripts/open_rpc_tunnel.sh` passed; a temp-config missing `REMOTE_TUNNEL_HOST` failed before SSH execution; targeted scan found no hardcoded local endpoints, local deployment paths, or local SSH user examples in the tunnel script/config diff.
+- Compose bind cleanup checks: `docker compose --env-file .env.example -f compose/docker-compose.yml config` passed; targeted scan found no tracked compose loopback host:port bindings, hardcoded Redpanda external loopback advertise endpoints, local deployment paths, or model-owner variables.
 
 ## Next Checkpoint
 

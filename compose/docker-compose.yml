@@ -20,11 +20,11 @@ services:
       - --kafka-addr
       - internal://0.0.0.0:9092,external://0.0.0.0:19092
       - --advertise-kafka-addr
-      - internal://web-osint-redpanda:9092,external://127.0.0.1:19092
+      - internal://web-osint-redpanda:9092,external://${REDPANDA_EXTERNAL_ADVERTISE_HOST:?set REDPANDA_EXTERNAL_ADVERTISE_HOST}:${WEB_OSINT_REDPANDA_BROKER_PORT:?set WEB_OSINT_REDPANDA_BROKER_PORT}
       - --pandaproxy-addr
       - internal://0.0.0.0:8082,external://0.0.0.0:18082
       - --advertise-pandaproxy-addr
-      - internal://web-osint-redpanda:8082,external://127.0.0.1:18082
+      - internal://web-osint-redpanda:8082,external://${REDPANDA_EXTERNAL_ADVERTISE_HOST:?set REDPANDA_EXTERNAL_ADVERTISE_HOST}:${WEB_OSINT_PANDAPROXY_PORT:?set WEB_OSINT_PANDAPROXY_PORT}
       - --schema-registry-addr
       - internal://0.0.0.0:8081,external://0.0.0.0:18081
       - --rpc-addr
@@ -32,10 +32,10 @@ services:
       - --advertise-rpc-addr
       - web-osint-redpanda:33145
     ports:
-      - "127.0.0.1:19092:19092"
-      - "127.0.0.1:18081:18081"
-      - "127.0.0.1:18082:18082"
-      - "127.0.0.1:19644:9644"
+      - "${WEB_OSINT_HOST_BIND:?set WEB_OSINT_HOST_BIND}:${WEB_OSINT_REDPANDA_BROKER_PORT:?set WEB_OSINT_REDPANDA_BROKER_PORT}:19092"
+      - "${WEB_OSINT_HOST_BIND:?set WEB_OSINT_HOST_BIND}:${WEB_OSINT_SCHEMA_REGISTRY_PORT:?set WEB_OSINT_SCHEMA_REGISTRY_PORT}:18081"
+      - "${WEB_OSINT_HOST_BIND:?set WEB_OSINT_HOST_BIND}:${WEB_OSINT_PANDAPROXY_PORT:?set WEB_OSINT_PANDAPROXY_PORT}:18082"
+      - "${WEB_OSINT_HOST_BIND:?set WEB_OSINT_HOST_BIND}:${WEB_OSINT_REDPANDA_ADMIN_PORT:?set WEB_OSINT_REDPANDA_ADMIN_PORT}:9644"
     volumes:
       - ${WEB_OSINT_DATA_ROOT:?set WEB_OSINT_DATA_ROOT}/redpanda:/var/lib/redpanda/data
     healthcheck:
@@ -60,7 +60,7 @@ services:
       - "8108"
       - --enable-cors
     ports:
-      - "127.0.0.1:18108:8108"
+      - "${WEB_OSINT_HOST_BIND:?set WEB_OSINT_HOST_BIND}:${WEB_OSINT_TYPESENSE_PORT:?set WEB_OSINT_TYPESENSE_PORT}:8108"
     volumes:
       - ${WEB_OSINT_DATA_ROOT:?set WEB_OSINT_DATA_ROOT}/typesense:/data
     restart: unless-stopped
@@ -69,8 +69,8 @@ services:
     image: qdrant/qdrant:latest
     container_name: ${WEB_OSINT_CONTAINER_PREFIX:-web-osint}-qdrant
     ports:
-      - "127.0.0.1:16333:6333"
-      - "127.0.0.1:16334:6334"
+      - "${WEB_OSINT_HOST_BIND:?set WEB_OSINT_HOST_BIND}:${WEB_OSINT_QDRANT_HTTP_PORT:?set WEB_OSINT_QDRANT_HTTP_PORT}:6333"
+      - "${WEB_OSINT_HOST_BIND:?set WEB_OSINT_HOST_BIND}:${WEB_OSINT_QDRANT_GRPC_PORT:?set WEB_OSINT_QDRANT_GRPC_PORT}:6334"
     volumes:
       - ${WEB_OSINT_DATA_ROOT:?set WEB_OSINT_DATA_ROOT}/qdrant:/qdrant/storage
     restart: unless-stopped
@@ -86,8 +86,8 @@ services:
       CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD}
       CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: "1"
     ports:
-      - "127.0.0.1:18123:8123"
-      - "127.0.0.1:19000:9000"
+      - "${WEB_OSINT_HOST_BIND:?set WEB_OSINT_HOST_BIND}:${WEB_OSINT_CLICKHOUSE_HTTP_PORT:?set WEB_OSINT_CLICKHOUSE_HTTP_PORT}:8123"
+      - "${WEB_OSINT_HOST_BIND:?set WEB_OSINT_HOST_BIND}:${WEB_OSINT_CLICKHOUSE_NATIVE_PORT:?set WEB_OSINT_CLICKHOUSE_NATIVE_PORT}:9000"
     ulimits:
       nofile:
         soft: 262144
@@ -119,7 +119,7 @@ services:
       WEB_OSINT_EMIT_OBSERVED_TOPICS: ${WEB_OSINT_EMIT_OBSERVED_TOPICS:-true}
       WEB_OSINT_ENABLE_MAINTENANCE_DELETE: ${WEB_OSINT_ENABLE_MAINTENANCE_DELETE:-false}
     ports:
-      - "127.0.0.1:18090:8090"
+      - "${WEB_OSINT_HOST_BIND:?set WEB_OSINT_HOST_BIND}:${WEB_OSINT_NORMALIZER_PORT:?set WEB_OSINT_NORMALIZER_PORT}:8090"
     volumes:
       - ${WEB_OSINT_DATA_ROOT:?set WEB_OSINT_DATA_ROOT}/state/pebble:/data/pebble
     depends_on:
@@ -145,7 +145,7 @@ services:
       RESEARCH_PLANNER_LOOKBACK_HOURS: "24"
       RESEARCH_PLANNER_CANDIDATE_LIMIT: "250"
     ports:
-      - "127.0.0.1:18091:8092"
+      - "${WEB_OSINT_HOST_BIND:?set WEB_OSINT_HOST_BIND}:${WEB_OSINT_RESEARCH_PLANNER_PORT:?set WEB_OSINT_RESEARCH_PLANNER_PORT}:8092"
     depends_on:
       - redpanda
       - clickhouse
@@ -225,7 +225,7 @@ services:
       REDPANDA_BROKERS: web-osint-redpanda:9092
       REDPANDA_CONNECT_SHADOW_GROUP: web-osint-connect-shadow-v1
     ports:
-      - "127.0.0.1:14195:4195"
+      - "${WEB_OSINT_HOST_BIND:?set WEB_OSINT_HOST_BIND}:${WEB_OSINT_CONNECT_SHADOW_PORT:?set WEB_OSINT_CONNECT_SHADOW_PORT}:4195"
     depends_on:
       - redpanda
     restart: unless-stopped
@@ -241,7 +241,7 @@ services:
       REDPANDA_BROKERS: web-osint-redpanda:9092
       REDPANDA_CONNECT_PRODUCTION_GROUP: web-osint-connect-production-v1
     ports:
-      - "127.0.0.1:14194:4195"
+      - "${WEB_OSINT_HOST_BIND:?set WEB_OSINT_HOST_BIND}:${WEB_OSINT_CONNECT_SHADOW_P1P2_PORT:?set WEB_OSINT_CONNECT_SHADOW_P1P2_PORT}:4195"
     depends_on:
       - redpanda
     restart: unless-stopped

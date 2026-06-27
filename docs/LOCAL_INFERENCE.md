@@ -4,17 +4,16 @@ Web OSINT is a client of the shared local model API. It does not own model
 weights, model downloads, inference runtime dependencies, model service units,
 or Hugging Face cache setup.
 
-Model serving lives in:
+Model serving lives outside this repo in the local-inference project:
 
 ```text
-/home/ops/dev/prmartinow/local-inference
 https://github.com/prmartinow/local-inference
 ```
 
 The Web OSINT interface is the HTTP API URL:
 
 ```text
-LOCAL_INFERENCE_URL=http://127.0.0.1:18200
+LOCAL_INFERENCE_URL=<local-inference-http-base-url>
 ```
 
 Do not add `QWEN_INFERENCE_URL` compatibility paths back into Web OSINT. Older
@@ -57,13 +56,13 @@ guardrails, slow-model no-timeout semantics, and candidate model manifests.
 
 ## Web OSINT Client Services
 
-| Service | Port | Role |
-| --- | ---: | --- |
-| `web-osint-embedding-worker.service` | `127.0.0.1:18201` | Consumes observed evidence, calls `POST /embed`, and upserts named vectors into Qdrant |
-| `web-osint-media-ocr-worker.service` | `127.0.0.1:18212` | Consumes OCR requests, calls `POST /media/ocr`, and writes OCR artifacts/projections |
-| `web-osint-media-vl-worker.service` | `127.0.0.1:18213` | Calls `POST /embed model=vl` for media artifacts |
+| Service | URL variable | Role |
+| --- | --- | --- |
+| `web-osint-embedding-worker.service` | `EMBEDDING_WORKER_URL` | Consumes observed evidence, calls `POST /embed`, and upserts named vectors into Qdrant |
+| `web-osint-media-ocr-worker.service` | `MEDIA_OCR_WORKER_URL` | Consumes OCR requests, calls `POST /media/ocr`, and writes OCR artifacts/projections |
+| `web-osint-media-vl-worker.service` | `MEDIA_VL_WORKER_URL` | Calls `POST /embed model=vl` for media artifacts |
 | `web-osint-qdrant-embedding-backfill.service` | n/a | One-shot ClickHouse-to-Qdrant backfill through `POST /embed` |
-| Dashboard search coordinator | dashboard process | Calls `POST /embed` and optional `POST /rerank` for interactive search |
+| Dashboard search coordinator | dashboard env | Calls `POST /embed` and optional `POST /rerank` for interactive search |
 
 The embedding and media workers use Web OSINT client venvs, not the
 local-inference service venv. These venvs contain pipeline dependencies such as
@@ -96,8 +95,8 @@ Check the model API from the local-inference side:
 
 ```bash
 systemctl --user status local-inference.service --no-pager
-curl -fsS "${LOCAL_INFERENCE_URL:-http://127.0.0.1:18200}/healthz"
-curl -fsS "${LOCAL_INFERENCE_URL:-http://127.0.0.1:18200}/metrics"
+curl -fsS "${LOCAL_INFERENCE_URL:?set LOCAL_INFERENCE_URL}/healthz"
+curl -fsS "${LOCAL_INFERENCE_URL:?set LOCAL_INFERENCE_URL}/metrics"
 ```
 
 Check Web OSINT client workers:
@@ -106,9 +105,9 @@ Check Web OSINT client workers:
 systemctl --user status web-osint-embedding-worker.service --no-pager
 systemctl --user status web-osint-media-ocr-worker.service --no-pager
 systemctl --user status web-osint-media-vl-worker.service --no-pager
-curl -fsS http://127.0.0.1:18201/stats
-curl -fsS http://127.0.0.1:18212/stats
-curl -fsS http://127.0.0.1:18213/stats
+curl -fsS "${EMBEDDING_WORKER_URL:?set EMBEDDING_WORKER_URL}/stats"
+curl -fsS "${MEDIA_OCR_WORKER_URL:?set MEDIA_OCR_WORKER_URL}/stats"
+curl -fsS "${MEDIA_VL_WORKER_URL:?set MEDIA_VL_WORKER_URL}/stats"
 ```
 
 Existing ClickHouse evidence can be backfilled into Qdrant after

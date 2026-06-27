@@ -5,15 +5,18 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-WorkingDirectory=/home/ops/dev/x-research
-Environment=OSINT_DATA_ROOT=/mnt/data/x-research
-Environment=WEB_OSINT_MODEL_ROOT=/mnt/data/web-osint-platform
-Environment=KAFKA_BROKERS=127.0.0.1:19092
-Environment=PANDAPROXY_URL=http://127.0.0.1:18082
-Environment=WEBPAGE_EXTRACTION_HTTP_ADDR=127.0.0.1:18221
+EnvironmentFile=-%h/.config/web-osint-platform/web-osint.env
+Environment=WEB_OSINT_REPO_ROOT=/opt/web-osint-platform
+Environment=WEB_OSINT_DATA_ROOT=/srv/web-osint-platform/data
+Environment=WEB_OSINT_WEBPAGE_EXTRACTION_VENV=/srv/web-osint-platform/.venv-webpage-extraction
+Environment=OSINT_DATA_ROOT=/srv/web-osint-platform/data
+Environment=KAFKA_BROKERS=kafka.example.invalid:9092
+Environment=PANDAPROXY_URL=https://pandaproxy.example.invalid
+Environment=WEBPAGE_EXTRACTION_HTTP_ADDR=replace-with-bind-host:18221
 Environment=WEBPAGE_EXTRACTION_REQUEST_TIMEOUT=45
 Environment=WEBPAGE_EXTRACTION_MAX_HTML_BYTES=8388608
-ExecStart=/mnt/data/web-osint-platform/.venv-webpage-extraction/bin/python /home/ops/dev/x-research/workers/webpage-extraction/webpage_extraction_worker.py run
+ExecStartPre=/usr/bin/env bash -lc 'cd "${WEB_OSINT_REPO_ROOT:?set WEB_OSINT_REPO_ROOT}" && scripts/init_webpage_extraction_venv.sh'
+ExecStart=/usr/bin/env bash -lc 'cd "${WEB_OSINT_REPO_ROOT:?set WEB_OSINT_REPO_ROOT}" && exec "${WEB_OSINT_WEBPAGE_EXTRACTION_PYTHON:-${WEB_OSINT_WEBPAGE_EXTRACTION_VENV:?set WEB_OSINT_WEBPAGE_EXTRACTION_VENV}/bin/python}" workers/webpage-extraction/webpage_extraction_worker.py run'
 Restart=always
 RestartSec=5
 

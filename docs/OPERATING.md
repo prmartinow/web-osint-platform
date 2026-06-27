@@ -292,16 +292,17 @@ The dashboard includes a `Meaning` tab backed by `/api/stage/meaning`. It is rea
 
 ## Local Inference Interface
 
-Model serving and model downloads live in the separate `local-inference` repo.
-Web OSINT only calls the API through `LOCAL_INFERENCE_URL`, defaulting to
-`http://127.0.0.1:18200`.
+Model serving, model downloads, model caches, and model-serving runtime
+dependencies live in the separate `local-inference` repo. Web OSINT is a client
+only and calls the API through `LOCAL_INFERENCE_URL`; real endpoint values
+belong in ignored deployment env files.
 
 Check model service state from the local-inference side:
 
 ```bash
 systemctl --user status local-inference.service --no-pager
-curl -fsS "${LOCAL_INFERENCE_URL:-http://127.0.0.1:18200}/healthz" | python3 -m json.tool
-curl -fsS "${LOCAL_INFERENCE_URL:-http://127.0.0.1:18200}/metrics"
+curl -fsS "${LOCAL_INFERENCE_URL:?set LOCAL_INFERENCE_URL}/healthz" | python3 -m json.tool
+curl -fsS "${LOCAL_INFERENCE_URL:?set LOCAL_INFERENCE_URL}/metrics"
 ```
 
 Web OSINT owns only the client workers that call the API:
@@ -310,9 +311,9 @@ Web OSINT owns only the client workers that call the API:
 systemctl --user status web-osint-embedding-worker.service --no-pager
 systemctl --user status web-osint-media-ocr-worker.service --no-pager
 systemctl --user status web-osint-media-vl-worker.service --no-pager
-curl -fsS http://127.0.0.1:18201/stats
-curl -fsS http://127.0.0.1:18212/stats
-curl -fsS http://127.0.0.1:18213/stats
+curl -fsS "${EMBEDDING_WORKER_URL:?set EMBEDDING_WORKER_URL}/stats"
+curl -fsS "${MEDIA_OCR_WORKER_URL:?set MEDIA_OCR_WORKER_URL}/stats"
+curl -fsS "${MEDIA_VL_WORKER_URL:?set MEDIA_VL_WORKER_URL}/stats"
 ```
 
 PaddleOCR is served by local-inference through `POST /media/ocr`; the Web

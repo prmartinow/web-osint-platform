@@ -53,7 +53,3 @@ def ensure_dir(path: str | Path, *, mode: int = 0o755) -> Path:
 
 def evidence_data_root(default: str = "/mnt/data/web-osint-platform") -> Path:
     return require_mnt_data_root(env("OSINT_DATA_ROOT", env("WEB_OSINT_DATA_ROOT", default)))
-
-
-def model_data_root(default: str = "/mnt/data/web-osint-platform") -> Path:
-    return require_mnt_data_root(env("WEB_OSINT_MODEL_ROOT", env("WEB_OSINT_DATA_ROOT", default)))

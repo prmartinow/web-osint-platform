@@ -162,9 +162,15 @@ def main() -> None:
     clickhouse_database = args.clickhouse_database or env_value("CLICKHOUSE_DATABASE", defaults["clickhouse_database"], env_file)
     clickhouse_user = args.clickhouse_user or env_value("CLICKHOUSE_USER", defaults["clickhouse_user"], env_file)
     clickhouse_password = args.clickhouse_password or env_value("CLICKHOUSE_PASSWORD", "", env_file)
+    webpage_venv = env_value("WEB_OSINT_WEBPAGE_EXTRACTION_VENV", "", env_file)
+    default_venv_python = (
+        str(Path(webpage_venv) / "bin/python")
+        if webpage_venv
+        else str(data_root / ".venv-webpage-extraction/bin/python")
+    )
     venv_python = args.venv_python or env_value(
         "WEB_OSINT_WEBPAGE_EXTRACTION_PYTHON",
-        str(Path(env_value("WEB_OSINT_MODEL_ROOT", "/mnt/data/web-osint-platform", env_file)) / ".venv-webpage-extraction/bin/python"),
+        default_venv_python,
         env_file,
     )
     urls = args.url or DEFAULT_URLS

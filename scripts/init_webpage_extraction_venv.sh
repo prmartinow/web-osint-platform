@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-MODEL_ROOT="${WEB_OSINT_MODEL_ROOT:-${WEB_OSINT_DATA_ROOT:-/mnt/data/web-osint-platform}}"
-VENV="${WEB_OSINT_WEBPAGE_EXTRACTION_VENV:-$MODEL_ROOT/.venv-webpage-extraction}"
+DATA_ROOT="${WEB_OSINT_DATA_ROOT:?set WEB_OSINT_DATA_ROOT}"
+VENV="${WEB_OSINT_WEBPAGE_EXTRACTION_VENV:-$DATA_ROOT/.venv-webpage-extraction}"
 
 ts() {
   date -u '+%Y-%m-%dT%H:%M:%SZ'
 }
 
-mkdir -p "$MODEL_ROOT"
+mkdir -p "$(dirname "$VENV")"
 
 if [[ ! -x "$VENV/bin/python" ]]; then
   echo "[$(ts)] creating webpage extraction venv: $VENV"

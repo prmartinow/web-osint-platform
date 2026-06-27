@@ -114,6 +114,7 @@ Migration steps:
 - 2026-06-27: Removed the remaining stale model-root env usage from Web OSINT scripts/templates, moved webpage extraction venv selection to `WEB_OSINT_WEBPAGE_EXTRACTION_VENV` plus `WEB_OSINT_DATA_ROOT`, and changed local-inference docs plus `.env.example` to use env placeholders rather than tracked local endpoints.
 - 2026-06-27: Made the dashboard tolerate a disabled legacy media router when Redpanda Connect owns OCR/VL request routing, and added longer Kafka max-poll intervals plus provenance fields for embedding/media enrichment workers.
 - 2026-06-27: Added an opt-in normalizer Pebble maintenance delete endpoint for cleanup work, guarded by `WEB_OSINT_ENABLE_MAINTENANCE_DELETE=false` by default and wired through compose as an env variable.
+- 2026-06-27: Converted embedding, media OCR, media VL, media router, Qdrant backfill, and webpage extraction user-service templates away from legacy live-tree paths and local endpoints; templates now resolve repo roots, venv roots, data roots, brokers, ClickHouse, Qdrant, local-inference, and bind addresses from an ignored env file.
 
 ## Verification Record
 
@@ -137,7 +138,8 @@ Latest verified state:
 - Local-inference/model-root cleanup checks: `bash -n scripts/init_webpage_extraction_venv.sh`, `python3 -m py_compile scripts/run_webpage_extraction_canary.py scripts/osint_paths.py`, and `systemd-analyze verify --user systemd/user/web-osint-webpage-extraction-worker.service` passed. A repository search found no remaining stale model-root env/helper references.
 - Worker/dashboard cleanup checks: `python3 -m py_compile dashboard/server.py workers/embedding-worker/embedding_worker.py workers/media-enrichment/media_enrichment_worker.py` passed.
 - Normalizer maintenance-delete checks: `gofmt -w workers/normalizer/main.go` and `go test ./...` under `workers/normalizer` passed; additions-only sanitizer found no new local paths, local endpoints, secrets, or model-owner variables.
+- Service-template cleanup checks: `systemd-analyze verify --user systemd/user/*.service` passed, and additions-only sanitizer found no new local paths, local endpoints, secrets, or model-owner variables in the template/env-example diff.
 
 ## Next Checkpoint
 
-Continue with repo consolidation while RUI-08 waits on the real launch helper URL: compare the remaining legacy live tree differences for dashboard and service templates; migrate source-code deltas only; move local deployment values to env; keep model ownership outside Web OSINT.
+Continue with repo consolidation while RUI-08 waits on the real launch helper URL: compare remaining legacy live-tree docs/scripts differences, migrate source-code deltas only, move local deployment values to env, and choose the live-tree retirement shape.

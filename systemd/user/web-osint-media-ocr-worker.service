@@ -1,26 +1,28 @@
 [Unit]
 Description=Web OSINT media OCR client worker
-Documentation=file:/home/ops/dev/x-research/docs/OPERATING.md
+Documentation=https://github.com/prmartinow/web-osint-platform/blob/main/docs/OPERATING.md
 After=network-online.target local-inference.service web-osint-media-router.service
 Wants=network-online.target local-inference.service
 
 [Service]
 Type=simple
-WorkingDirectory=/home/ops/dev/x-research
-EnvironmentFile=-/home/ops/dev/x-research/.env
-Environment=OSINT_DATA_ROOT=/mnt/data/x-research
+EnvironmentFile=-%h/.config/web-osint-platform/web-osint.env
+Environment=WEB_OSINT_REPO_ROOT=/opt/web-osint-platform
+Environment=WEB_OSINT_DATA_ROOT=/srv/web-osint-platform/data
+Environment=WEB_OSINT_MEDIA_ENRICHMENT_VENV=/srv/web-osint-platform/.venv-media-enrichment
+Environment=OSINT_DATA_ROOT=/srv/web-osint-platform/data
 Environment=WEB_OSINT_CPU_RESERVED_THREADS=2
-Environment=REDPANDA_BROKERS=127.0.0.1:19092
-Environment=KAFKA_BROKERS=127.0.0.1:19092
-Environment=CLICKHOUSE_URL=http://127.0.0.1:18123
+Environment=REDPANDA_BROKERS=kafka.example.invalid:9092
+Environment=KAFKA_BROKERS=kafka.example.invalid:9092
+Environment=CLICKHOUSE_URL=https://clickhouse.example.invalid
 Environment=CLICKHOUSE_DATABASE=web_osint
 Environment=CLICKHOUSE_USER=web_osint
-Environment=LOCAL_INFERENCE_URL=http://127.0.0.1:18200
+Environment=LOCAL_INFERENCE_URL=https://local-inference.example.invalid
 Environment=MEDIA_WORKER_ROLE=ocr
-Environment=MEDIA_OCR_HTTP_ADDR=127.0.0.1:18212
+Environment=MEDIA_OCR_HTTP_ADDR=replace-with-bind-host:18212
 Environment=TOKENIZERS_PARALLELISM=false
-ExecStartPre=/home/ops/dev/x-research/scripts/init_media_enrichment_venv.sh
-ExecStart=/home/ops/dev/x-research/scripts/run_with_cpu_thread_guard.sh /mnt/data/web-osint-platform/.venv-media-enrichment/bin/python /home/ops/dev/x-research/workers/media-enrichment/media_enrichment_worker.py ocr
+ExecStartPre=/usr/bin/env bash -lc 'cd "${WEB_OSINT_REPO_ROOT:?set WEB_OSINT_REPO_ROOT}" && scripts/init_media_enrichment_venv.sh'
+ExecStart=/usr/bin/env bash -lc 'cd "${WEB_OSINT_REPO_ROOT:?set WEB_OSINT_REPO_ROOT}" && exec scripts/run_with_cpu_thread_guard.sh "$WEB_OSINT_MEDIA_ENRICHMENT_VENV/bin/python" workers/media-enrichment/media_enrichment_worker.py ocr'
 Restart=on-failure
 RestartSec=20
 

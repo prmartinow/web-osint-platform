@@ -4,36 +4,49 @@ set -euo pipefail
 CODE_ROOT="${CODE_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
 source "$CODE_ROOT/.env"
 
+CLICKHOUSE_USER="${CLICKHOUSE_USER:-web_osint}"
+
+: "${PANDAPROXY_URL:?set PANDAPROXY_URL}"
+: "${QDRANT_URL:?set QDRANT_URL}"
+: "${TYPESENSE_URL:?set TYPESENSE_URL}"
+: "${TYPESENSE_API_KEY:?set TYPESENSE_API_KEY}"
+: "${CLICKHOUSE_URL:?set CLICKHOUSE_URL}"
+: "${CLICKHOUSE_PASSWORD:?set CLICKHOUSE_PASSWORD}"
+: "${NORMALIZER_URL:?set NORMALIZER_URL}"
+: "${RESEARCH_PLANNER_URL:?set RESEARCH_PLANNER_URL}"
+: "${LOCAL_INFERENCE_URL:?set LOCAL_INFERENCE_URL}"
+: "${EMBEDDING_WORKER_URL:?set EMBEDDING_WORKER_URL}"
+
 echo "Redpanda Pandaproxy:"
-curl -fsS http://127.0.0.1:18082/brokers
+curl -fsS "${PANDAPROXY_URL%/}/brokers"
 echo
 
 echo "Qdrant:"
-curl -fsS http://127.0.0.1:16333/healthz
+curl -fsS "${QDRANT_URL%/}/healthz"
 echo
 
 echo "Typesense:"
-curl -fsS -H "X-TYPESENSE-API-KEY: ${TYPESENSE_API_KEY}" http://127.0.0.1:18108/health
+curl -fsS -H "X-TYPESENSE-API-KEY: ${TYPESENSE_API_KEY}" "${TYPESENSE_URL%/}/health"
 echo
 
 echo "ClickHouse:"
-curl -fsS -u "web_osint:${CLICKHOUSE_PASSWORD}" "http://127.0.0.1:18123/ping"
+curl -fsS -u "${CLICKHOUSE_USER}:${CLICKHOUSE_PASSWORD}" "${CLICKHOUSE_URL%/}/ping"
 echo
 
 echo "Normalizer:"
-curl -fsS http://127.0.0.1:18090/healthz
+curl -fsS "${NORMALIZER_URL%/}/healthz"
 echo
 
 echo "Research planner:"
-curl -fsS http://127.0.0.1:18091/healthz
+curl -fsS "${RESEARCH_PLANNER_URL%/}/healthz"
 echo
 
-echo "Qwen inference:"
-curl -fsS http://127.0.0.1:18200/healthz
+echo "Local inference:"
+curl -fsS "${LOCAL_INFERENCE_URL%/}/healthz"
 echo
 
 echo "Embedding worker:"
-curl -fsS http://127.0.0.1:18201/healthz
+curl -fsS "${EMBEDDING_WORKER_URL%/}/healthz"
 echo
 
 echo "Containers:"

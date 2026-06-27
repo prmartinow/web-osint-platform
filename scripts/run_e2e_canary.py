@@ -24,11 +24,19 @@ sys.path.insert(0, str(SCRIPT_DIR))
 from produce_research_documents import build_event, now_iso, post_event, slug, stable_hash  # noqa: E402
 
 
-DEFAULT_DATA_ROOT_CANDIDATES = ("/mnt/data/x-research", "/mnt/data/web-osint-platform")
-DEFAULT_PANDAPROXY_URL = "http://127.0.0.1:18082"
-DEFAULT_CLICKHOUSE_URL = "http://127.0.0.1:18123"
-DEFAULT_QDRANT_URL = "http://127.0.0.1:16333"
-DEFAULT_DASHBOARD_URLS = ("http://127.0.0.1:18191", "http://192.168.1.16:18191")
+DEFAULT_DATA_ROOT_CANDIDATES = tuple(
+    item.strip()
+    for item in os.environ.get("WEB_OSINT_CANARY_DATA_ROOTS", "").split(os.pathsep)
+    if item.strip()
+)
+DEFAULT_PANDAPROXY_URL = os.environ.get("PANDAPROXY_URL") or os.environ.get("REDPANDA_PROXY_URL", "")
+DEFAULT_CLICKHOUSE_URL = os.environ.get("CLICKHOUSE_URL", "")
+DEFAULT_QDRANT_URL = os.environ.get("QDRANT_URL", "")
+DEFAULT_DASHBOARD_URLS = tuple(
+    item.strip()
+    for item in os.environ.get("WEB_OSINT_DASHBOARD_URLS", "").split(os.pathsep)
+    if item.strip()
+)
 CAPTURE_TOPIC = "evidence.capture.events.v1"
 AUDIT_TOPIC = "osint.semantic.embedded.v1"
 SHADOW_VALIDATED_TOPIC = "evidence.capture.shadow.validated.v1"
@@ -113,13 +121,21 @@ def env_value(name: str, default: str, env_file: dict[str, str]) -> str:
 
 def choose_data_root(raw: str | None) -> Path:
     candidates = [raw] if raw else list(DEFAULT_DATA_ROOT_CANDIDATES)
+    if not candidates:
+        raise CanaryConfigError("--data-root, OSINT_DATA_ROOT, WEB_OSINT_DATA_ROOT, or WEB_OSINT_CANARY_DATA_ROOTS is required")
     for candidate in candidates:
         if not candidate:
             continue
         path = Path(candidate).expanduser()
         if path.exists():
             return path.resolve()
-    return Path(candidates[0] or DEFAULT_DATA_ROOT_CANDIDATES[0]).expanduser().resolve()
+    return Path(candidates[0]).expanduser().resolve()
+
+
+def require_config_value(name: str, value: str) -> str:
+    if not value:
+        raise CanaryConfigError(f"{name} is required in CLI args, environment, or --env-file")
+    return value
 
 
 def require_data_root(path: Path, allow_non_data_root: bool) -> None:
@@ -490,7 +506,7 @@ def poll_until(deadline: float, fn: Callable[[], Any], *, interval: float = 1.5)
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run a Web OSINT end-to-end ingestion/search canary.")
     parser.add_argument("--env-file", type=Path, default=Path(".env"), help="Optional repo .env file.")
-    parser.add_argument("--data-root", help="Durable data root. Defaults to existing /mnt/data/x-research.")
+    parser.add_argument("--data-root", help="Durable data root. Defaults to OSINT_DATA_ROOT, WEB_OSINT_DATA_ROOT, or WEB_OSINT_CANARY_DATA_ROOTS.")
     parser.add_argument("--allow-non-data-root", action="store_true", help="Allow data roots outside /mnt/data for tests.")
     parser.add_argument("--run-id", help="Explicit run id.")
     parser.add_argument("--timeout-seconds", type=int, default=420)
@@ -515,26 +531,43 @@ def parse_args() -> argparse.Namespace:
 def main() -> int:
     args = parse_args()
     env_file = load_env(args.env_file)
-    data_root = choose_data_root(args.data_root or env_value("OSINT_DATA_ROOT", "", env_file))
     try:
+        data_root = choose_data_root(
+            args.data_root
+            or env_value("OSINT_DATA_ROOT", "", env_file)
+            or env_value("WEB_OSINT_DATA_ROOT", "", env_file)
+        )
         require_data_root(data_root, args.allow_non_data_root)
+        pandaproxy_url = require_config_value(
+            "PANDAPROXY_URL",
+            args.pandaproxy_url
+            or env_value("PANDAPROXY_URL", "", env_file)
+            or env_value("REDPANDA_PROXY_URL", DEFAULT_PANDAPROXY_URL, env_file),
+        )
+        clickhouse_url = require_config_value(
+            "CLICKHOUSE_URL",
+            args.clickhouse_url or env_value("CLICKHOUSE_URL", DEFAULT_CLICKHOUSE_URL, env_file),
+        )
+        qdrant_url = require_config_value(
+            "QDRANT_URL",
+            args.qdrant_url or env_value("QDRANT_URL", DEFAULT_QDRANT_URL, env_file),
+        )
+        dashboard_urls = args.dashboard_url or [url for url in DEFAULT_DASHBOARD_URLS]
+        if not args.skip_dashboard and not dashboard_urls:
+            raise CanaryConfigError("WEB_OSINT_DASHBOARD_URLS or --dashboard-url is required unless --skip-dashboard is set")
     except CanaryConfigError as exc:
         print(json.dumps({"ok": False, "exit_code": 2, "error": str(exc)}, sort_keys=True), file=sys.stderr)
         return 2
 
-    pandaproxy_url = args.pandaproxy_url or env_value("REDPANDA_PROXY_URL", DEFAULT_PANDAPROXY_URL, env_file)
-    clickhouse_url = args.clickhouse_url or env_value("CLICKHOUSE_URL", DEFAULT_CLICKHOUSE_URL, env_file)
     defaults = deployment_defaults(data_root)
     clickhouse_db = args.clickhouse_database or env_value(
         "CLICKHOUSE_DATABASE", defaults["clickhouse_database"], env_file
     )
     clickhouse_user = args.clickhouse_user or env_value("CLICKHOUSE_USER", defaults["clickhouse_user"], env_file)
     clickhouse_password = env_value("CLICKHOUSE_PASSWORD", "", env_file)
-    qdrant_url = args.qdrant_url or env_value("QDRANT_URL", DEFAULT_QDRANT_URL, env_file)
     qdrant_collection = args.qdrant_collection or env_value(
         "QDRANT_COLLECTION", defaults["qdrant_collection"], env_file
     )
-    dashboard_urls = args.dashboard_url or [url for url in DEFAULT_DASHBOARD_URLS]
 
     run_id = args.run_id or f"e2e_canary_{time.strftime('%Y%m%dT%H%M%SZ', time.gmtime())}_{secrets.token_hex(3)}"
     source_project = "canary"

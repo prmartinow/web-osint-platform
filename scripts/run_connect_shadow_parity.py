@@ -24,9 +24,13 @@ sys.path.insert(0, str(SCRIPT_DIR))
 from produce_research_documents import post_event  # noqa: E402
 
 
-DEFAULT_DATA_ROOT_CANDIDATES = ("/mnt/data/x-research", "/mnt/data/web-osint-platform")
-DEFAULT_PANDAPROXY_URL = "http://127.0.0.1:18082"
-DEFAULT_CLICKHOUSE_URL = "http://127.0.0.1:18123"
+DEFAULT_DATA_ROOT_CANDIDATES = tuple(
+    item.strip()
+    for item in os.environ.get("WEB_OSINT_CANARY_DATA_ROOTS", "").split(os.pathsep)
+    if item.strip()
+)
+DEFAULT_PANDAPROXY_URL = os.environ.get("PANDAPROXY_URL") or os.environ.get("REDPANDA_PROXY_URL", "")
+DEFAULT_CLICKHOUSE_URL = os.environ.get("CLICKHOUSE_URL", "")
 CAPTURE_TOPIC = "evidence.capture.events.v1"
 SHADOW_OBSERVED_TOPIC = "evidence.capture.shadow.observed.v1"
 SHADOW_MEDIA_REQUEST_TOPIC = "osint.media.enrichment.shadow.requested.v1"
@@ -106,13 +110,21 @@ def env_value(name: str, default: str, env_file: dict[str, str]) -> str:
 
 def choose_data_root(raw: str | None) -> Path:
     candidates = [raw] if raw else list(DEFAULT_DATA_ROOT_CANDIDATES)
+    if not candidates:
+        raise ParityError("--data-root, OSINT_DATA_ROOT, WEB_OSINT_DATA_ROOT, or WEB_OSINT_CANARY_DATA_ROOTS is required")
     for candidate in candidates:
         if not candidate:
             continue
         path = Path(candidate).expanduser()
         if path.exists():
             return path.resolve()
-    return Path(candidates[0] or DEFAULT_DATA_ROOT_CANDIDATES[0]).expanduser().resolve()
+    return Path(candidates[0]).expanduser().resolve()
+
+
+def require_config_value(name: str, value: str) -> str:
+    if not value:
+        raise ParityError(f"{name} is required in CLI args, environment, or --env-file")
+    return value
 
 
 def deployment_defaults(data_root: Path) -> dict[str, str]:
@@ -365,10 +377,26 @@ def parse_args() -> argparse.Namespace:
 def main() -> int:
     args = parse_args()
     env_file = load_env(args.env_file)
-    data_root = choose_data_root(args.data_root or env_value("OSINT_DATA_ROOT", "", env_file))
+    try:
+        data_root = choose_data_root(
+            args.data_root
+            or env_value("OSINT_DATA_ROOT", "", env_file)
+            or env_value("WEB_OSINT_DATA_ROOT", "", env_file)
+        )
+        pandaproxy_url = require_config_value(
+            "PANDAPROXY_URL",
+            args.pandaproxy_url
+            or env_value("PANDAPROXY_URL", "", env_file)
+            or env_value("REDPANDA_PROXY_URL", DEFAULT_PANDAPROXY_URL, env_file),
+        )
+        clickhouse_url = require_config_value(
+            "CLICKHOUSE_URL",
+            args.clickhouse_url or env_value("CLICKHOUSE_URL", DEFAULT_CLICKHOUSE_URL, env_file),
+        )
+    except ParityError as exc:
+        print(json.dumps({"status": "config_error", "exit_code": 2, "errors": [str(exc)]}, ensure_ascii=False), file=sys.stderr)
+        return 2
     defaults = deployment_defaults(data_root)
-    pandaproxy_url = args.pandaproxy_url or env_value("REDPANDA_PROXY_URL", DEFAULT_PANDAPROXY_URL, env_file)
-    clickhouse_url = args.clickhouse_url or env_value("CLICKHOUSE_URL", DEFAULT_CLICKHOUSE_URL, env_file)
     clickhouse_db = args.clickhouse_database or env_value("CLICKHOUSE_DATABASE", defaults["clickhouse_database"], env_file)
     clickhouse_user = args.clickhouse_user or env_value("CLICKHOUSE_USER", defaults["clickhouse_user"], env_file)
     clickhouse_password = env_value("CLICKHOUSE_PASSWORD", "", env_file)

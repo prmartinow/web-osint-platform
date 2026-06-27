@@ -69,8 +69,8 @@ docker compose --env-file .env -f compose/docker-compose.yml --profile shadow up
 Check lag and output:
 
 ```bash
-docker exec web-osint-redpanda rpk topic consume evidence.capture.shadow.validated.v1 --brokers 127.0.0.1:9092 -n 1
-docker exec web-osint-redpanda rpk topic consume evidence.capture.shadow.errors.v1 --brokers 127.0.0.1:9092 -n 1
+docker exec web-osint-redpanda rpk topic consume evidence.capture.shadow.validated.v1 --brokers "${REDPANDA_BROKERS:?set REDPANDA_BROKERS}" -n 1
+docker exec web-osint-redpanda rpk topic consume evidence.capture.shadow.errors.v1 --brokers "${REDPANDA_BROKERS:?set REDPANDA_BROKERS}" -n 1
 ```
 
 Run the existing E2E canary with shadow verification once the shadow service is
@@ -85,8 +85,8 @@ Run the P1/P2 shadow projection parity canary:
 ```bash
 python3 scripts/run_connect_shadow_parity.py \
   --env-file .env \
-  --pandaproxy-url http://127.0.0.1:18082 \
-  --clickhouse-url http://127.0.0.1:18123
+  --pandaproxy-url "${PANDAPROXY_URL:?set PANDAPROXY_URL}" \
+  --clickhouse-url "${CLICKHOUSE_URL:?set CLICKHOUSE_URL}"
 ```
 
 This publishes a synthetic capture containing `user_input`, `web_document`,

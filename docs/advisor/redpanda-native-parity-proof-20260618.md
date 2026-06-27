@@ -33,7 +33,7 @@ Container:
 ```text
 x-research-connect-shadow
 image: web-osint-connect-shadow:69aa8d3
-port: 127.0.0.1:14195 -> 4195
+port: ${REDPANDA_CONNECT_SHADOW_URL} -> 4195
 restart policy: unless-stopped
 network: x-research_default
 ```
@@ -65,13 +65,13 @@ evidence.capture.shadow.errors.v1    high-watermark: 0
 Command:
 
 ```bash
-cd /home/ops/dev/x-research
+cd "${WEB_OSINT_REPO_ROOT:?set WEB_OSINT_REPO_ROOT}"
 python3 scripts/run_e2e_canary.py \
   --env-file .env \
-  --pandaproxy-url http://127.0.0.1:18082 \
-  --clickhouse-url http://127.0.0.1:18123 \
-  --qdrant-url http://127.0.0.1:16333 \
-  --dashboard-url http://192.168.1.16:18191 \
+  --pandaproxy-url "${PANDAPROXY_URL:?set PANDAPROXY_URL}" \
+  --clickhouse-url "${CLICKHOUSE_URL:?set CLICKHOUSE_URL}" \
+  --qdrant-url "${QDRANT_URL:?set QDRANT_URL}" \
+  --dashboard-url "${DASHBOARD_URL:?set DASHBOARD_URL}" \
   --expect-shadow \
   --timeout-seconds 900
 ```
@@ -79,7 +79,7 @@ python3 scripts/run_e2e_canary.py \
 Result artifact:
 
 ```text
-/mnt/data/x-research/canaries/runs/e2e_canary_20260618T025352Z_1a6fb8.json
+${WEB_OSINT_DATA_ROOT}/canaries/runs/e2e_canary_20260618T025352Z_1a6fb8.json
 ```
 
 Summary:
@@ -120,7 +120,7 @@ Embedding and retrieval:
 embedding_model: Qwen3-Embedding-8B
 embedding_dimension: 4096
 vector_names: text_dense
-qdrant_collection: x_research_evidence_v1
+qdrant_collection: ${QDRANT_COLLECTION}
 dashboard hydration: ok
 ```
 

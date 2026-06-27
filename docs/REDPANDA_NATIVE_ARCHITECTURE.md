@@ -198,12 +198,12 @@ component names and config fields can be checked against code before changing
 pipelines:
 
 ```text
-/mnt/data/web-osint-platform/reference-src/
+${WEB_OSINT_REFERENCE_SRC_ROOT}/
   redpanda-connect/          current upstream main
   redpanda-connect-v4.46.0/  exact Connect tag used by connect/go.mod
   redpanda/                  current upstream dev
   redpanda-v26.1.10/         exact live broker version observed 2026-06-18
 ```
 
-There is a convenience symlink at `/home/ops/dev/reference-src` on the RPC
+There is a convenience symlink at `${WEB_OSINT_REFERENCE_SRC_ROOT}` on the RPC
 node. Do not vendor these checkouts into the sanitized repo.

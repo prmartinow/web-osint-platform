@@ -53,8 +53,8 @@ The remaining work is production depth, visual QA, and Web OSINT repo consolidat
 | RUI-07 | Publication handoff/export | Done | Approved snapshot can create explicit handoff/export artifacts with manifest hash, frozen object IDs, public config, and no private runtime values. | Keep handoff export in the publishing regression loop while wiring Rebrowser LaunchCapture. |
 | RUI-08 | Rebrowser LaunchCapture final wiring | Partial | `REBROWSER_LAUNCH_URL` points to the real launch helper; UI opens/records returned session; committed capture events link back to requested project/source/route; Research UI fills the active browser viewport in screenshots. | Set the real launch helper endpoint in ignored deployment env and verify a real capture session. |
 | REPO-01 | Single canonical Web OSINT repo | Partial | Runtime/deployment can be launched from `web-osint-platform` without relying on a separate editable live source tree. | Continue live-vs-canonical comparison for dashboard, docs, and scripts after the X notifications collector migration. |
-| REPO-02 | Environment-only deployment config | Partial | All sensitive/local deployment values are supplied by env vars or ignored local files; repo contains `.env.example` and documented variable names only. | Continue replacing tracked service templates/docs that still expose local data roots or loopback service ports. |
-| REPO-03 | Deployment data separation | Todo | Durable state remains under external data roots supplied by env vars; repo contains no durable data or generated runtime state. | Audit compose, scripts, and worker defaults for data-root assumptions. |
+| REPO-02 | Environment-only deployment config | Done | All sensitive/local deployment values are supplied by env vars or ignored local files; repo contains `.env.example` and documented variable names only. | Keep additions-only sanitizer and full tracked-content scans in CI/sanity checks. |
+| REPO-03 | Deployment data separation | Done | Durable state remains under external data roots supplied by env vars; repo contains no durable data or generated runtime state. | Keep durable-state file scans in CI/sanity checks. |
 | REPO-04 | Live tree retirement plan | Todo | The legacy live tree becomes either a deployment symlink/worktree/check-out of the canonical repo or is retired after migration. | Choose implementation: direct repo deployment, worktree, or symlinked deployment root. |
 | REPO-05 | CI/sanity checks for public upstream | Todo | Public upstream has checks for syntax, sanitization, docs, and basic service smoke where feasible. | Add lightweight scripts/checks that do not require secrets or live data. |
 
@@ -129,6 +129,7 @@ Migration steps:
 - 2026-06-27: Parameterized Compose host binds, host-side ports, and Redpanda external advertise hosts. The checked-in Compose file no longer fixes loopback host:port bindings; `.env.example` carries the public variable names and valid example values.
 - 2026-06-27: Sanitized agent rules and Connect test fixtures away from local deployment paths and live model-owner wording. Tests now use generic synthetic fixture paths, and repository agent guidance states that model files/downloads/caches/serving remain outside Web OSINT.
 - 2026-06-27: Removed old live database/collection fallback names from canary scripts. Canary defaults now remain sanitized; production database/user/collection values must come from env or CLI config.
+- 2026-06-27: Sanitized remaining tracked historical/design docs away from local deployment paths, loopback host:port examples, home-network addresses, and legacy model endpoint names. REPO-02 and REPO-03 are now marked done based on tracked-content scans and generated-state inventory checks.
 
 ## Verification Record
 
@@ -167,6 +168,7 @@ Latest verified state:
 - Compose bind cleanup checks: `docker compose --env-file .env.example -f compose/docker-compose.yml config` passed; targeted scan found no tracked compose loopback host:port bindings, hardcoded Redpanda external loopback advertise endpoints, local deployment paths, or model-owner variables.
 - Agent/test fixture cleanup checks: `gofmt -w connect/internal/webosint/projector_test.go connect/plugins/mediarequestbuilder/media_enrichment_request_builder_test.go` and `go test ./...` under `connect` passed; targeted scan found no local deployment paths, local endpoints, stale live collection names, or model-owner variables in `AGENTS.md` and the sanitized Connect fixtures.
 - Canary live-name cleanup checks: `python3 -m py_compile scripts/run_media_enrichment_canary.py scripts/run_e2e_canary.py scripts/run_connect_shadow_parity.py scripts/run_webpage_extraction_canary.py` passed; targeted scan found no stale live database/collection names, local deployment paths, local endpoints, or model-owner variables in those canary scripts.
+- Historical-doc sanitation checks: full tracked-content scan, excluding the intentionally untracked/internal `docs/DEVELOPMENT_HISTORY.md`, found no local deployment paths, home-network addresses, loopback host:port endpoints, stale live database/collection names, or model-owner variables. Generated-state inventory found no tracked DB, log, JSONL, parquet, model, vector-store, ClickHouse, Redpanda, Pebble, or media runtime artifacts.
 
 ## Next Checkpoint
 

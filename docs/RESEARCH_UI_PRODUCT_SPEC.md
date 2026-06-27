@@ -21,8 +21,8 @@ The metrics dashboard remains on the existing dashboard service. The Research UI
 Current target:
 
 ```text
-metrics dashboard: 192.168.1.16:18191
-research UI:       192.168.1.16:18192
+metrics dashboard: ${DASHBOARD_URL}
+research UI:       ${RESEARCH_UI_URL}
 ```
 
 Do not expose the Research UI publicly in v1. Keep it LAN/WireGuard scoped unless there is a separate exposure review.
@@ -345,7 +345,7 @@ The public research site is a projection of an approved release, not a live rend
 
 ## V1 Build Plan
 
-1. Create a separate `research-ui` service and route surface on `192.168.1.16:18192`.
+1. Create a separate `research-ui` service and route surface on `${RESEARCH_UI_URL}`.
 2. Build Inbox as the first page with review-task rows, not only source rows.
 3. Build the X source workbench using the Datalab X post as the first test case.
 4. Build the web/blog source workbench using the Datalab blog as the second test case.

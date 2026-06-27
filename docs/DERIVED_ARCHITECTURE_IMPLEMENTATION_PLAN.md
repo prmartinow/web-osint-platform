@@ -331,7 +331,7 @@ Implemented:
 - EvidenceDocument block selection
 - durable annotation, evidence selection, and proposed fact creation
 - first-cut entity links, claim stubs, normalized correction overlays, generic review-state transitions, and derived review-task Inbox rows
-- JSONL mirror under `/mnt/data/x-research/review/events/`
+- JSONL mirror under `${WEB_OSINT_DATA_ROOT}/review/events/`
 - Datalab smoke validation
 
 Remaining:

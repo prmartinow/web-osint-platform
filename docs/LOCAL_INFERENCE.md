@@ -16,7 +16,7 @@ The Web OSINT interface is the HTTP API URL:
 LOCAL_INFERENCE_URL=<local-inference-http-base-url>
 ```
 
-Do not add `QWEN_INFERENCE_URL` compatibility paths back into Web OSINT. Older
+Do not add legacy Qwen-specific endpoint compatibility paths back into Web OSINT. Older
 Qwen-branded service names are migration history only.
 
 ## Client Responsibilities

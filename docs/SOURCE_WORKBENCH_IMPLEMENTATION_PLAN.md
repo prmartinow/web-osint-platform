@@ -27,8 +27,8 @@ That document folds the research-agent outputs into the larger architecture: sou
 
 Already present:
 
-- Separate Research UI at `192.168.1.16:18192`.
-- Metrics dashboard remains separate at `192.168.1.16:18191`.
+- Separate Research UI at `${RESEARCH_UI_URL}`.
+- Metrics dashboard remains separate at `${DASHBOARD_URL}`.
 - Inbox over `evidence_events`.
 - Source detail endpoint over ClickHouse rows.
 - Artifact access through `/api/artifact`.
@@ -41,7 +41,7 @@ First-cut review foundation already implemented:
 - Added `research_review_events`, `evidence_selections`, `review_annotations`, and `proposed_facts`.
 - Added review APIs and a Research UI `Review` tab.
 - Added EvidenceDocument block selection.
-- Added append-only JSONL mirror under `/mnt/data/x-research/review/events/`.
+- Added append-only JSONL mirror under `${WEB_OSINT_DATA_ROOT}/review/events/`.
 - Validated durable annotation, evidence selection, and proposed fact persistence on the Datalab Chandra 2.1 case.
 - Added first-cut `entity_links`, `claim_records`, `normalized_corrections`,
   and generic review-state transitions. Normalized corrections are stored as
@@ -120,7 +120,7 @@ Acceptable first implementation if Redpanda write plumbing slows the slice:
 
 ```text
 Research UI POST
--> append-only JSONL under /mnt/data/x-research/review/
+-> append-only JSONL under ${WEB_OSINT_DATA_ROOT}/review/
 -> ClickHouse INSERT
 ```
 

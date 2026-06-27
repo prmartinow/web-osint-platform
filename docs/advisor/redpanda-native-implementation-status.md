@@ -80,7 +80,7 @@ Live test container:
 container: x-research-connect-shadow-p1p2
 image:     web-osint-connect-shadow:p1p2-test
 group:     web-osint-connect-shadow-p1p2-v1
-ready:     127.0.0.1:14196/ready
+ready:     ${REDPANDA_CONNECT_SHADOW_P1P2_URL}/ready
 lag:       0 after canaries
 ```
 
@@ -88,7 +88,7 @@ Focused P1/P2 parity canary:
 
 ```text
 run_id:                       connect_shadow_parity_20260619T001008Z_bef2a0
-result:                       /mnt/data/x-research/canaries/connect-shadow/runs/connect_shadow_parity_20260619T001008Z_bef2a0.json
+result:                       ${WEB_OSINT_DATA_ROOT}/canaries/connect-shadow/runs/connect_shadow_parity_20260619T001008Z_bef2a0.json
 matched_source_kinds:          media, search_result, user_input, web_page
 shadow_observed_events:        4
 shadow_media_request_events:   1
@@ -100,7 +100,7 @@ Existing P0/E2E canary still passes with the P1/P2 sidecar running:
 
 ```text
 run_id:                                e2e_canary_20260619T001037Z_4beadb
-result:                                /mnt/data/x-research/canaries/runs/e2e_canary_20260619T001037Z_4beadb.json
+result:                                ${WEB_OSINT_DATA_ROOT}/canaries/runs/e2e_canary_20260619T001037Z_4beadb.json
 status:                                passed
 shadow_matches_published_capture:      true
 production_observed_matches_capture:   true
@@ -120,7 +120,7 @@ Live production router:
 container: x-research-connect-production
 image:     x-research-connect-production:p1p2-cutover
 group:     web-osint-connect-production-v1
-ready:     127.0.0.1:14194/ready
+ready:     ${REDPANDA_CONNECT_PRODUCTION_URL}/ready
 lag:       0 after canaries
 ```
 
@@ -129,15 +129,15 @@ Fallback state:
 ```text
 normalizer:       running with emit_observed_topics=false
 media router:     web-osint-media-router.service inactive but enabled
-shadow P0:        x-research-connect-shadow ready on 127.0.0.1:14195
-shadow P1/P2:     x-research-connect-shadow-p1p2 ready on 127.0.0.1:14196
+shadow P0:        x-research-connect-shadow ready on ${REDPANDA_CONNECT_SHADOW_URL}
+shadow P1/P2:     x-research-connect-shadow-p1p2 ready on ${REDPANDA_CONNECT_SHADOW_P1P2_URL}
 ```
 
 Post-cutover E2E canary:
 
 ```text
 run_id:                              e2e_canary_20260619T003321Z_b86372
-result:                              /mnt/data/x-research/canaries/runs/e2e_canary_20260619T003321Z_b86372.json
+result:                              ${WEB_OSINT_DATA_ROOT}/canaries/runs/e2e_canary_20260619T003321Z_b86372.json
 status:                              passed
 production_observed_matches_capture: true
 shadow_matches_published_capture:    true
@@ -149,7 +149,7 @@ Post-cutover focused P1/P2 shadow parity:
 
 ```text
 run_id:                       connect_shadow_parity_20260619T003435Z_704ec0
-result:                       /mnt/data/x-research/canaries/connect-shadow/runs/connect_shadow_parity_20260619T003435Z_704ec0.json
+result:                       ${WEB_OSINT_DATA_ROOT}/canaries/connect-shadow/runs/connect_shadow_parity_20260619T003435Z_704ec0.json
 matched_source_kinds:          media, search_result, user_input, web_page
 shadow_observed_events:        4
 shadow_media_request_events:   1

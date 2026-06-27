@@ -146,13 +146,7 @@ def require_data_root(path: Path, allow_non_data_root: bool) -> None:
         raise CanaryConfigError(f"unsafe durable data root: {resolved}")
 
 
-def deployment_defaults(data_root: Path) -> dict[str, str]:
-    if data_root.name == "x-research":
-        return {
-            "clickhouse_database": "x_research",
-            "clickhouse_user": "x_research",
-            "qdrant_collection": "x_research_evidence_v1",
-        }
+def deployment_defaults(_data_root: Path) -> dict[str, str]:
     return {
         "clickhouse_database": "web_osint",
         "clickhouse_user": "web_osint",

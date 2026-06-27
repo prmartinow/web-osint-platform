@@ -127,9 +127,7 @@ def require_config_value(name: str, value: str) -> str:
     return value
 
 
-def deployment_defaults(data_root: Path) -> dict[str, str]:
-    if data_root.name == "x-research":
-        return {"clickhouse_database": "x_research", "clickhouse_user": "x_research"}
+def deployment_defaults(_data_root: Path) -> dict[str, str]:
     return {"clickhouse_database": "web_osint", "clickhouse_user": "web_osint"}
 
 

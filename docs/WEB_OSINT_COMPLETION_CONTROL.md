@@ -128,6 +128,7 @@ Migration steps:
 - 2026-06-27: Converted the RPC tunnel helper away from baked remote loopback targets and local user examples. Tunnel target host/ports now come from ignored config env, and real `config/*.env` files are ignored while checked-in examples remain allowed.
 - 2026-06-27: Parameterized Compose host binds, host-side ports, and Redpanda external advertise hosts. The checked-in Compose file no longer fixes loopback host:port bindings; `.env.example` carries the public variable names and valid example values.
 - 2026-06-27: Sanitized agent rules and Connect test fixtures away from local deployment paths and live model-owner wording. Tests now use generic synthetic fixture paths, and repository agent guidance states that model files/downloads/caches/serving remain outside Web OSINT.
+- 2026-06-27: Removed old live database/collection fallback names from canary scripts. Canary defaults now remain sanitized; production database/user/collection values must come from env or CLI config.
 
 ## Verification Record
 
@@ -165,6 +166,7 @@ Latest verified state:
 - RPC tunnel cleanup checks: `bash -n scripts/open_rpc_tunnel.sh` passed; a temp-config missing `REMOTE_TUNNEL_HOST` failed before SSH execution; targeted scan found no hardcoded local endpoints, local deployment paths, or local SSH user examples in the tunnel script/config diff.
 - Compose bind cleanup checks: `docker compose --env-file .env.example -f compose/docker-compose.yml config` passed; targeted scan found no tracked compose loopback host:port bindings, hardcoded Redpanda external loopback advertise endpoints, local deployment paths, or model-owner variables.
 - Agent/test fixture cleanup checks: `gofmt -w connect/internal/webosint/projector_test.go connect/plugins/mediarequestbuilder/media_enrichment_request_builder_test.go` and `go test ./...` under `connect` passed; targeted scan found no local deployment paths, local endpoints, stale live collection names, or model-owner variables in `AGENTS.md` and the sanitized Connect fixtures.
+- Canary live-name cleanup checks: `python3 -m py_compile scripts/run_media_enrichment_canary.py scripts/run_e2e_canary.py scripts/run_connect_shadow_parity.py scripts/run_webpage_extraction_canary.py` passed; targeted scan found no stale live database/collection names, local deployment paths, local endpoints, or model-owner variables in those canary scripts.
 
 ## Next Checkpoint
 

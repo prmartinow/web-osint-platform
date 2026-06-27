@@ -9,10 +9,10 @@ or any source where static HTTP extraction is sparse.
 
 ## Requirements
 
-- Rebrowser CDP on `127.0.0.1:9225`.
+- Rebrowser CDP URL supplied through `REBROWSER_CDP_URL` or `--cdp-url`.
 - Playwright available in either local `node_modules` or the standard Rebrowser
   workspace at `$HOME/.codex/x-cdp-rebrowser-playwright/node_modules`.
-- SSH access to the RPC node.
+- SSH access to the RPC node when `--publish` is used.
 
 ## Capture And Publish
 
@@ -24,14 +24,21 @@ node collectors/rebrowser-rendered-web/rebrowser_rendered_capture.mjs \
   --publish
 ```
 
-By default, artifacts are written locally to a temporary directory, rsynced to:
+Publishing requires these values in CLI args, process env, or an ignored env
+file loaded by the shell:
 
 ```text
-/mnt/data/x-research/web/rebrowser-rendered/<date>/<collector_run_id>/<document_id>/
+REBROWSER_CDP_URL
+WEB_OSINT_RPC_SSH_HOST
+WEB_OSINT_RPC_SSH_PORT
+WEB_OSINT_RPC_DATA_ROOT
+WEB_OSINT_REMOTE_PANDAPROXY_URL
 ```
 
-Then the capture event is posted through RPC-local Pandaproxy by SSH. The
-result flows through the normal pipeline:
+Artifacts are written locally to a temporary directory, rsynced under
+`$WEB_OSINT_RPC_DATA_ROOT/web/rebrowser-rendered/...`, and the capture event is
+posted through the configured Pandaproxy URL by SSH. The result flows through
+the normal pipeline:
 
 ```text
 Rebrowser rendered capture

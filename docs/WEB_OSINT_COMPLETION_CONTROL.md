@@ -117,6 +117,7 @@ Migration steps:
 - 2026-06-27: Converted embedding, media OCR, media VL, media router, Qdrant backfill, and webpage extraction user-service templates away from legacy live-tree paths and local endpoints; templates now resolve repo roots, venv roots, data roots, brokers, ClickHouse, Qdrant, local-inference, and bind addresses from an ignored env file.
 - 2026-06-27: Converted `scripts/health.sh` to read service URLs from the ignored env file instead of hardcoded loopback ports, and added the matching public variable names to `.env.example`.
 - 2026-06-27: Converted the ingestion, media enrichment, Connect shadow parity, and webpage extraction canary scripts away from tracked live data-root, dashboard, and service endpoint defaults. Canary data roots, Pandaproxy, ClickHouse, Qdrant, and dashboard URLs now come from CLI arguments, process env, or ignored env files; `.env.example` documents only public placeholder variable names.
+- 2026-06-27: Converted the Rebrowser rendered-web collector away from tracked CDP, SSH, data-root, and Pandaproxy defaults. The collector now uses env/CLI settings for capture and publish configuration, and `--publish` validates required deployment values before opening a browser tab or uploading artifacts.
 
 ## Verification Record
 
@@ -143,6 +144,7 @@ Latest verified state:
 - Service-template cleanup checks: `systemd-analyze verify --user systemd/user/*.service` passed, and additions-only sanitizer found no new local paths, local endpoints, secrets, or model-owner variables in the template/env-example diff.
 - Health-script cleanup checks: `bash -n scripts/health.sh` passed; additions-only sanitizer found no new local paths, local endpoints, secrets, or model-owner variables.
 - Canary-default cleanup checks: `python3 -m py_compile scripts/run_e2e_canary.py scripts/run_connect_shadow_parity.py scripts/run_media_enrichment_canary.py scripts/run_webpage_extraction_canary.py` passed; missing required canary config now returns a clear config error before network or data writes; additions-only sanitizer found no new local paths, local endpoints, secrets, or model-owner variables.
+- Rendered-web collector cleanup checks: `node --check collectors/rebrowser-rendered-web/rebrowser_rendered_capture.mjs` passed; `--help` renders without printing configured endpoint values; missing `REBROWSER_CDP_URL` fails before browser or publish side effects; additions-only sanitizer found no new local paths, local endpoints, secrets, or model-owner variables.
 
 ## Next Checkpoint
 

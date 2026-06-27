@@ -11,11 +11,11 @@ const PRODUCER_VERSION = "v1";
 const MAX_EVENT_TEXT_CHARS = 120_000;
 const MAX_BLOCKS = 600;
 const MAX_ASSETS = 300;
-const DEFAULT_CDP_URL = "http://127.0.0.1:9225";
-const DEFAULT_RPC_HOST = "ops@192.168.1.16";
-const DEFAULT_RPC_PORT = "2224";
-const DEFAULT_RPC_DATA_ROOT = "/mnt/data/x-research";
-const DEFAULT_REMOTE_PANDAPROXY = "http://127.0.0.1:18082";
+const DEFAULT_CDP_URL = process.env.REBROWSER_CDP_URL || "";
+const DEFAULT_RPC_HOST = process.env.WEB_OSINT_RPC_SSH_HOST || "";
+const DEFAULT_RPC_PORT = process.env.WEB_OSINT_RPC_SSH_PORT || "";
+const DEFAULT_RPC_DATA_ROOT = process.env.WEB_OSINT_RPC_DATA_ROOT || process.env.WEB_OSINT_DATA_ROOT || "";
+const DEFAULT_REMOTE_PANDAPROXY = process.env.WEB_OSINT_REMOTE_PANDAPROXY_URL || process.env.PANDAPROXY_URL || process.env.REDPANDA_PROXY_URL || "";
 const TOPIC = "evidence.capture.events.v1";
 
 function usage() {
@@ -29,15 +29,15 @@ Options:
   --event-index N                   Capture event index. Default: 0
   --topic-label LABEL               Repeatable topic label.
   --context-json JSON               Optional context object JSON.
-  --cdp-url URL                     Rebrowser CDP URL. Default: ${DEFAULT_CDP_URL}
+  --cdp-url URL                     Rebrowser CDP URL. Default: REBROWSER_CDP_URL.
   --settle-ms N                     Post-load wait. Default: 2500
   --timeout-ms N                    Navigation timeout. Default: 60000
   --scroll / --no-scroll            Slow-scroll page before capture. Default: --scroll
   --publish                         Upload artifacts and publish to RPC Redpanda.
-  --rpc-host HOST                   SSH host. Default: ${DEFAULT_RPC_HOST}
-  --rpc-port PORT                   SSH port. Default: ${DEFAULT_RPC_PORT}
-  --rpc-data-root PATH              RPC data root. Default: ${DEFAULT_RPC_DATA_ROOT}
-  --remote-pandaproxy URL           RPC-local Pandaproxy URL. Default: ${DEFAULT_REMOTE_PANDAPROXY}
+  --rpc-host HOST                   SSH host. Default: WEB_OSINT_RPC_SSH_HOST.
+  --rpc-port PORT                   SSH port. Default: WEB_OSINT_RPC_SSH_PORT.
+  --rpc-data-root PATH              RPC data root. Default: WEB_OSINT_RPC_DATA_ROOT or WEB_OSINT_DATA_ROOT.
+  --remote-pandaproxy URL           RPC-local Pandaproxy URL. Default: WEB_OSINT_REMOTE_PANDAPROXY_URL, PANDAPROXY_URL, or REDPANDA_PROXY_URL.
   --output-dir PATH                 Local artifact dir. Default: temp dir.
   --keep-tab                        Leave the task-owned browser tab open.
   --allow-x                         Allow x.com/twitter.com URLs.
@@ -92,6 +92,24 @@ function parseArgs(argv) {
     else throw new Error(`Unknown argument: ${item}`);
   }
   return args;
+}
+
+function requireArg(value, flag, envName) {
+  if (!value) {
+    throw new Error(`${flag} is required; pass ${flag} or set ${envName}`);
+  }
+  return value;
+}
+
+function validateArgs(args) {
+  if (!args.url) throw new Error("Missing --url");
+  requireArg(args.cdpUrl, "--cdp-url", "REBROWSER_CDP_URL");
+  if (args.publish) {
+    requireArg(args.rpcHost, "--rpc-host", "WEB_OSINT_RPC_SSH_HOST");
+    requireArg(args.rpcPort, "--rpc-port", "WEB_OSINT_RPC_SSH_PORT");
+    requireArg(args.rpcDataRoot, "--rpc-data-root", "WEB_OSINT_RPC_DATA_ROOT or WEB_OSINT_DATA_ROOT");
+    requireArg(args.remotePandaproxy, "--remote-pandaproxy", "WEB_OSINT_REMOTE_PANDAPROXY_URL, PANDAPROXY_URL, or REDPANDA_PROXY_URL");
+  }
 }
 
 function sha256Text(value) {
@@ -612,7 +630,7 @@ async function main() {
     usage();
     return;
   }
-  if (!args.url) throw new Error("Missing --url");
+  validateArgs(args);
   assertUrlAllowed(args.url, args.allowX);
   const capturedAt = nowIso();
   const context = parseJsonObject(args.contextJson, {});

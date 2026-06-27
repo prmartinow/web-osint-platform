@@ -47,6 +47,14 @@ else
 fi
 
 if command -v docker >/dev/null 2>&1 && docker compose version >/dev/null 2>&1; then
+  cleanup_env=false
+  if [[ ! -f .env ]]; then
+    cp .env.example .env
+    cleanup_env=true
+  fi
+  if [[ "$cleanup_env" == true ]]; then
+    trap 'rm -f .env' EXIT
+  fi
   docker compose --env-file .env.example -f compose/docker-compose.yml config >/dev/null
 else
   echo "docker compose not found; skipping compose render check" >&2

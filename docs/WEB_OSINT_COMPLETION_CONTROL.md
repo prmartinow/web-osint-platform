@@ -55,8 +55,8 @@ The remaining work is production depth, visual QA, and Web OSINT repo consolidat
 | REPO-01 | Single canonical Web OSINT repo | Partial | Runtime/deployment can be launched from `web-osint-platform` without relying on a separate editable live source tree. | Continue live-vs-canonical comparison for dashboard, docs, and scripts after the X notifications collector migration. |
 | REPO-02 | Environment-only deployment config | Done | All sensitive/local deployment values are supplied by env vars or ignored local files; repo contains `.env.example` and documented variable names only. | Keep additions-only sanitizer and full tracked-content scans in CI/sanity checks. |
 | REPO-03 | Deployment data separation | Done | Durable state remains under external data roots supplied by env vars; repo contains no durable data or generated runtime state. | Keep durable-state file scans in CI/sanity checks. |
-| REPO-04 | Live tree retirement plan | Todo | The legacy live tree becomes either a deployment symlink/worktree/check-out of the canonical repo or is retired after migration. | Choose implementation: direct repo deployment, worktree, or symlinked deployment root. |
-| REPO-05 | CI/sanity checks for public upstream | Todo | Public upstream has checks for syntax, sanitization, docs, and basic service smoke where feasible. | Add lightweight scripts/checks that do not require secrets or live data. |
+| REPO-04 | Live tree retirement plan | Partial | The legacy live tree becomes either a deployment symlink/worktree/check-out of the canonical repo or is retired after migration. | Chosen shape is direct canonical-checkout deployment; final local legacy-tree mutation requires explicit operator approval. |
+| REPO-05 | CI/sanity checks for public upstream | Done | Public upstream has checks for syntax, sanitization, docs, and basic service smoke where feasible. | Keep `scripts/check_public_sanity.sh` and GitHub Actions in the merge gate. |
 
 ## Single-Repo Implementation Plan
 
@@ -130,6 +130,8 @@ Migration steps:
 - 2026-06-27: Sanitized agent rules and Connect test fixtures away from local deployment paths and live model-owner wording. Tests now use generic synthetic fixture paths, and repository agent guidance states that model files/downloads/caches/serving remain outside Web OSINT.
 - 2026-06-27: Removed old live database/collection fallback names from canary scripts. Canary defaults now remain sanitized; production database/user/collection values must come from env or CLI config.
 - 2026-06-27: Sanitized remaining tracked historical/design docs away from local deployment paths, loopback host:port examples, home-network addresses, and legacy model endpoint names. REPO-02 and REPO-03 are now marked done based on tracked-content scans and generated-state inventory checks.
+- 2026-06-27: Added public sanity checks through `scripts/check_public_sanity.sh` and `.github/workflows/sanity.yml`. The script enforces tracked-content sanitization, generated-state exclusions, Python/shell/JS syntax checks, Go tests, and Compose rendering where the toolchain is available; REPO-05 is now marked done.
+- 2026-06-27: Chose direct canonical-checkout deployment for live-tree retirement and documented the operator checklist in `docs/LIVE_TREE_RETIREMENT.md`. A local legacy tree still requires explicit operator approval before any filesystem mutation, so REPO-04 remains partial rather than pretending the local tree was retired.
 
 ## Verification Record
 
@@ -169,6 +171,8 @@ Latest verified state:
 - Agent/test fixture cleanup checks: `gofmt -w connect/internal/webosint/projector_test.go connect/plugins/mediarequestbuilder/media_enrichment_request_builder_test.go` and `go test ./...` under `connect` passed; targeted scan found no local deployment paths, local endpoints, stale live collection names, or model-owner variables in `AGENTS.md` and the sanitized Connect fixtures.
 - Canary live-name cleanup checks: `python3 -m py_compile scripts/run_media_enrichment_canary.py scripts/run_e2e_canary.py scripts/run_connect_shadow_parity.py scripts/run_webpage_extraction_canary.py` passed; targeted scan found no stale live database/collection names, local deployment paths, local endpoints, or model-owner variables in those canary scripts.
 - Historical-doc sanitation checks: full tracked-content scan, excluding the intentionally untracked/internal `docs/DEVELOPMENT_HISTORY.md`, found no local deployment paths, home-network addresses, loopback host:port endpoints, stale live database/collection names, or model-owner variables. Generated-state inventory found no tracked DB, log, JSONL, parquet, model, vector-store, ClickHouse, Redpanda, Pebble, or media runtime artifacts.
+- Public sanity checks: `scripts/check_public_sanity.sh` passed locally, including tracked-content sanitizer, generated-state inventory, Python compilation, shell syntax, Node syntax, normalizer Go tests, Connect Go tests, and Compose rendering with `.env.example`.
+- Live-tree retirement check: local inspection found a legacy non-git tree still exists outside the canonical checkout; no filesystem mutation was performed. `docs/LIVE_TREE_RETIREMENT.md` records the direct canonical-checkout deployment decision and the explicit approval gate for final legacy-tree retirement.
 
 ## Next Checkpoint
 

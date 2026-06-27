@@ -48,14 +48,21 @@ def env(name: str, default: str) -> str:
     return os.environ.get(name, default)
 
 
+def require_env(name: str) -> str:
+    value = os.environ.get(name, "")
+    if not value:
+        raise SystemExit(f"Missing {name}")
+    return value
+
+
 DATA_ROOT = evidence_data_root()
-REDPANDA_BROKERS = env("REDPANDA_BROKERS", env("KAFKA_BROKERS", "127.0.0.1:19092"))
-CLICKHOUSE_URL = env("CLICKHOUSE_URL", "http://127.0.0.1:18123").rstrip("/")
+REDPANDA_BROKERS = env("REDPANDA_BROKERS", env("KAFKA_BROKERS", ""))
+CLICKHOUSE_URL = os.environ.get("CLICKHOUSE_URL", "").rstrip("/")
 CLICKHOUSE_DATABASE = env("CLICKHOUSE_DATABASE", "web_osint")
 CLICKHOUSE_USER = env("CLICKHOUSE_USER", "web_osint")
 CLICKHOUSE_PASSWORD = env("CLICKHOUSE_PASSWORD", "")
-LOCAL_INFERENCE_URL = env("LOCAL_INFERENCE_URL", "http://127.0.0.1:18200").rstrip("/")
-QDRANT_URL = env("QDRANT_URL", "http://127.0.0.1:16333").rstrip("/")
+LOCAL_INFERENCE_URL = os.environ.get("LOCAL_INFERENCE_URL", "").rstrip("/")
+QDRANT_URL = os.environ.get("QDRANT_URL", "").rstrip("/")
 QDRANT_COLLECTION = env("QDRANT_COLLECTION", "web_osint_evidence_v1")
 
 ROUTER_INTERVAL = float(env("MEDIA_ROUTER_SCAN_INTERVAL_SECONDS", "60"))
@@ -292,6 +299,19 @@ class WorkerStats:
 stats = WorkerStats(role=env("MEDIA_WORKER_ROLE", "unknown"))
 
 
+def validate_base_config() -> None:
+    if not REDPANDA_BROKERS:
+        raise SystemExit("Missing REDPANDA_BROKERS or KAFKA_BROKERS")
+    require_env("CLICKHOUSE_URL")
+
+
+def validate_consumer_config(role: str) -> None:
+    validate_base_config()
+    require_env("LOCAL_INFERENCE_URL")
+    if role == "vl":
+        require_env("QDRANT_URL")
+
+
 class StatsHandler(BaseHTTPRequestHandler):
     def do_GET(self) -> None:
         if self.path not in {"/healthz", "/stats"}:
@@ -468,8 +488,9 @@ def router_scan_once(producer: Producer, queued_ocr: set[str], queued_vl: set[st
 
 
 def run_router() -> None:
+    validate_base_config()
     stats.role = "router"
-    threading.Thread(target=serve_http, args=(env("MEDIA_ROUTER_HTTP_ADDR", "127.0.0.1:18211"),), daemon=True).start()
+    threading.Thread(target=serve_http, args=(env("MEDIA_ROUTER_HTTP_ADDR", ":18211"),), daemon=True).start()
     producer = Producer({"bootstrap.servers": REDPANDA_BROKERS})
     queued_ocr: set[str] = set()
     queued_vl: set[str] = set()
@@ -852,6 +873,7 @@ def publish_failure(producer: Producer, topic: str, event: dict[str, Any], exc: 
 
 
 def run_consumer(role: str, topic: str, group_id: str, http_addr: str) -> None:
+    validate_consumer_config(role)
     stats.role = role
     ensure_media_tables()
     if role == "ocr":
@@ -918,14 +940,14 @@ def main() -> int:
                 "ocr",
                 OCR_REQUEST_TOPIC,
                 env("MEDIA_OCR_GROUP_ID", "web-osint-media-ocr-worker-v1"),
-                env("MEDIA_OCR_HTTP_ADDR", "127.0.0.1:18212"),
+                env("MEDIA_OCR_HTTP_ADDR", ":18212"),
             )
         elif args.role == "vl":
             run_consumer(
                 "vl",
                 VL_REQUEST_TOPIC,
                 env("MEDIA_VL_GROUP_ID", "web-osint-media-vl-worker-v1"),
-                env("MEDIA_VL_HTTP_ADDR", "127.0.0.1:18213"),
+                env("MEDIA_VL_HTTP_ADDR", ":18213"),
             )
     except StorageRootError as exc:
         print(f"[{now_iso()}] unsafe storage root: {exc}", file=sys.stderr, flush=True)

@@ -56,10 +56,10 @@ def env(name: str, default: str) -> str:
 
 DATA_ROOT = evidence_data_root()
 WEB_ROOT = ensure_dir(DATA_ROOT / "web")
-KAFKA_BROKERS = env("KAFKA_BROKERS", env("REDPANDA_BROKERS", "127.0.0.1:19092"))
+KAFKA_BROKERS = env("KAFKA_BROKERS", env("REDPANDA_BROKERS", ""))
 KAFKA_GROUP_ID = env("WEBPAGE_EXTRACTION_GROUP_ID", "web-osint-webpage-extraction-v1")
-PANDAPROXY_URL = env("PANDAPROXY_URL", "http://127.0.0.1:18082").rstrip("/")
-HTTP_ADDR = env("WEBPAGE_EXTRACTION_HTTP_ADDR", "127.0.0.1:18221")
+PANDAPROXY_URL = env("PANDAPROXY_URL", env("REDPANDA_PROXY_URL", "")).rstrip("/")
+HTTP_ADDR = env("WEBPAGE_EXTRACTION_HTTP_ADDR", ":18221")
 REQUEST_TIMEOUT = float(env("WEBPAGE_EXTRACTION_REQUEST_TIMEOUT", "45"))
 MAX_HTML_BYTES = int(env("WEBPAGE_EXTRACTION_MAX_HTML_BYTES", str(8 * 1024 * 1024)))
 MAX_TEXT_CHARS = int(env("WEBPAGE_EXTRACTION_MAX_TEXT_CHARS", "120000"))
@@ -899,6 +899,10 @@ def request_to_page(message: dict[str, Any], fallback_index: int) -> ExtractedPa
 def run_consumer() -> None:
     if Consumer is None:
         raise SystemExit("confluent-kafka is required for run mode. Run scripts/init_webpage_extraction_venv.sh.")
+    if not KAFKA_BROKERS:
+        raise SystemExit("Missing KAFKA_BROKERS or REDPANDA_BROKERS")
+    if not PANDAPROXY_URL:
+        raise SystemExit("Missing PANDAPROXY_URL or REDPANDA_PROXY_URL")
     start_stats_server(HTTP_ADDR)
     consumer = Consumer(
         {
@@ -967,6 +971,8 @@ def cmd_extract_url(args: argparse.Namespace) -> None:
     urls = collect_urls(args)
     if not urls:
         raise SystemExit("provide at least one --url or --urls-file")
+    if args.publish and not args.pandaproxy_url:
+        raise SystemExit("Missing PANDAPROXY_URL, REDPANDA_PROXY_URL, or --pandaproxy-url")
     collector_run_id = args.collector_run_id or f"webpage_extract_{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')}_{stable_hash(*urls)[:8]}"
     results = []
     for offset, url in enumerate(urls):

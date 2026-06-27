@@ -21,13 +21,20 @@ QUESTION_TOPIC = "osint.research_question.proposed.v1"
 TASK_TOPIC = "osint.research_task.created.v1"
 
 
+def require_env(name: str) -> str:
+    value = os.environ.get(name, "")
+    if not value:
+        raise SystemExit(f"Missing {name}")
+    return value
+
+
 class Config:
     def __init__(self) -> None:
-        self.clickhouse_url = os.environ.get("CLICKHOUSE_URL", "http://127.0.0.1:18123").rstrip("/")
+        self.clickhouse_url = require_env("CLICKHOUSE_URL").rstrip("/")
         self.clickhouse_db = os.environ.get("CLICKHOUSE_DATABASE", "web_osint")
         self.clickhouse_user = os.environ.get("CLICKHOUSE_USER", "web_osint")
         self.clickhouse_password = os.environ.get("CLICKHOUSE_PASSWORD", "")
-        self.redpanda_proxy_url = os.environ.get("REDPANDA_PROXY_URL", "http://127.0.0.1:18082").rstrip("/")
+        self.redpanda_proxy_url = (os.environ.get("REDPANDA_PROXY_URL") or require_env("PANDAPROXY_URL")).rstrip("/")
         self.http_addr = os.environ.get("HTTP_ADDR", ":8092")
         self.interval_seconds = int(os.environ.get("RESEARCH_PLANNER_INTERVAL_SECONDS", "300"))
         self.lookback_hours = int(os.environ.get("RESEARCH_PLANNER_LOOKBACK_HOURS", "24"))

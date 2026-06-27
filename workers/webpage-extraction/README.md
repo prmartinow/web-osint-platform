@@ -32,7 +32,7 @@ scripts/init_webpage_extraction_venv.sh
 ```bash
 WEB_OSINT_ALLOW_NON_DATA_ROOT=1 \
 OSINT_DATA_ROOT=/tmp/web-osint-extract-test \
-/mnt/data/web-osint-platform/.venv-webpage-extraction/bin/python \
+"${WEB_OSINT_WEBPAGE_EXTRACTION_PYTHON:-${WEB_OSINT_WEBPAGE_EXTRACTION_VENV:?set WEB_OSINT_WEBPAGE_EXTRACTION_VENV}/bin/python}" \
   workers/webpage-extraction/webpage_extraction_worker.py extract-url \
   --url https://example.com/ \
   --source-project smoke \
@@ -61,4 +61,4 @@ The worker consumes `osint.web.extraction.requested.v1`. A request is:
 }
 ```
 
-Stats are exposed at `127.0.0.1:18221/stats` by default.
+Stats are exposed through the configured `WEBPAGE_EXTRACTION_WORKER_URL`.

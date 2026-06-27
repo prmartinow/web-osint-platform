@@ -30,15 +30,22 @@ def env(name: str, default: str) -> str:
     return os.environ.get(name, default)
 
 
-REDPANDA_BROKERS = env("REDPANDA_BROKERS", env("KAFKA_BROKERS", "127.0.0.1:19092"))
+def require_env(name: str) -> str:
+    value = os.environ.get(name, "")
+    if not value:
+        raise SystemExit(f"Missing {name}")
+    return value
+
+
+REDPANDA_BROKERS = env("REDPANDA_BROKERS", env("KAFKA_BROKERS", ""))
 REDPANDA_GROUP_ID = env("REDPANDA_GROUP_ID", env("KAFKA_GROUP_ID", "web-osint-embedding-worker-v1"))
 TOPICS = [part.strip() for part in env("EMBEDDING_WORKER_TOPICS", ",".join(DEFAULT_TOPICS)).split(",") if part.strip()]
 AUDIT_TOPIC = env("EMBEDDING_AUDIT_TOPIC", "osint.semantic.embedded.v1")
 DEADLETTER_TOPIC = env("EMBEDDING_DEADLETTER_TOPIC", "osint.semantic.deadletter.v1")
-INFERENCE_URL = env("LOCAL_INFERENCE_URL", "http://127.0.0.1:18200").rstrip("/")
-QDRANT_URL = env("QDRANT_URL", "http://127.0.0.1:16333").rstrip("/")
+INFERENCE_URL = os.environ.get("LOCAL_INFERENCE_URL", "").rstrip("/")
+QDRANT_URL = os.environ.get("QDRANT_URL", "").rstrip("/")
 QDRANT_COLLECTION = env("QDRANT_COLLECTION", "web_osint_evidence_v1")
-HTTP_ADDR = env("HTTP_ADDR", "127.0.0.1:18201")
+HTTP_ADDR = env("HTTP_ADDR", env("EMBEDDING_WORKER_HTTP_ADDR", ":18201"))
 REQUEST_TIMEOUT = float(env("EMBEDDING_WORKER_REQUEST_TIMEOUT", "600"))
 POLL_TIMEOUT = float(env("EMBEDDING_WORKER_POLL_TIMEOUT", "1.0"))
 MAX_TEXT_CHARS = int(env("EMBEDDING_WORKER_MAX_TEXT_CHARS", "4000"))
@@ -94,6 +101,13 @@ class WorkerStats:
 
 
 stats = WorkerStats()
+
+
+def validate_config() -> None:
+    if not REDPANDA_BROKERS:
+        raise SystemExit("Missing REDPANDA_BROKERS or KAFKA_BROKERS")
+    require_env("LOCAL_INFERENCE_URL")
+    require_env("QDRANT_URL")
 
 
 def stable_hash(*parts: str) -> str:
@@ -413,6 +427,7 @@ def publish_deadletter(producer: Producer, topic: str, key: str, message: str, r
 
 
 def main() -> None:
+    validate_config()
     threading.Thread(target=serve_http, daemon=True).start()
     consumer = Consumer(
         {

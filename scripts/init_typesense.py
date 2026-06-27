@@ -7,7 +7,7 @@ from pathlib import Path
 
 
 CODE_ROOT = Path(os.environ.get("CODE_ROOT", Path(__file__).resolve().parents[1]))
-BASE_URL = os.environ.get("TYPESENSE_URL", "http://127.0.0.1:18108")
+BASE_URL = ""
 
 
 def load_env(path: Path) -> dict[str, str]:
@@ -38,8 +38,17 @@ def request(method: str, path: str, api_key: str, body: object | None = None):
         return json.loads(raw.decode("utf-8")) if raw else None
 
 
+def require_env_value(env: dict[str, str], key: str) -> str:
+    value = os.environ.get(key) or env.get(key, "")
+    if not value:
+        raise SystemExit(f"Missing {key}")
+    return value
+
+
 def main() -> None:
+    global BASE_URL
     env = load_env(CODE_ROOT / ".env")
+    BASE_URL = require_env_value(env, "TYPESENSE_URL").rstrip("/")
     api_key = os.environ.get("TYPESENSE_API_KEY") or env.get("TYPESENSE_API_KEY")
     if not api_key:
         raise SystemExit("Missing TYPESENSE_API_KEY")

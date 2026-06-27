@@ -1,10 +1,16 @@
 #!/usr/bin/env python3
 import json
+import os
+import sys
 import time
 import urllib.request
 
 
 topic = "evidence.capture.events.v1"
+pandaproxy_url = os.environ.get("PANDAPROXY_URL") or os.environ.get("REDPANDA_PROXY_URL", "")
+if not pandaproxy_url:
+    print("Missing PANDAPROXY_URL or REDPANDA_PROXY_URL", file=sys.stderr)
+    raise SystemExit(2)
 event = {
     "schema_version": "v1",
     "collector_run_id": "smoke_rpc_bootstrap",
@@ -31,7 +37,7 @@ body = {
     ]
 }
 req = urllib.request.Request(
-    f"http://127.0.0.1:18082/topics/{topic}",
+    f"{pandaproxy_url.rstrip('/')}/topics/{topic}",
     data=json.dumps(body).encode("utf-8"),
     method="POST",
     headers={
@@ -41,4 +47,3 @@ req = urllib.request.Request(
 )
 with urllib.request.urlopen(req, timeout=10) as response:
     print(response.read().decode("utf-8"))
-

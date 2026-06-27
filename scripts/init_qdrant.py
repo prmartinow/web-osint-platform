@@ -7,7 +7,7 @@ from pathlib import Path
 
 
 CODE_ROOT = Path(os.environ.get("CODE_ROOT", Path(__file__).resolve().parents[1]))
-BASE_URL = os.environ.get("QDRANT_URL", "http://127.0.0.1:16333")
+BASE_URL = ""
 DEFAULT_TEXT_VECTOR_SIZE = 4096
 DEFAULT_VL_VECTOR_SIZE = 4096
 
@@ -46,6 +46,13 @@ def env_bool(env: dict[str, str], key: str, default: bool = False) -> bool:
 
 def env_int(env: dict[str, str], key: str, default: int) -> int:
     return int(os.environ.get(key) or env.get(key, str(default)))
+
+
+def require_env_value(env: dict[str, str], key: str) -> str:
+    value = os.environ.get(key) or env.get(key, "")
+    if not value:
+        raise SystemExit(f"Missing {key}")
+    return value
 
 
 def vector_specs(env: dict[str, str]) -> dict[str, dict[str, object]]:
@@ -121,7 +128,9 @@ def ensure_vector_schema(collection: str, desired_vectors: dict[str, dict[str, o
 
 
 def main() -> None:
+    global BASE_URL
     env = load_env(CODE_ROOT / ".env")
+    BASE_URL = require_env_value(env, "QDRANT_URL").rstrip("/")
     collection = os.environ.get("QDRANT_COLLECTION", "web_osint_evidence_v1")
     desired_vectors = vector_specs(env)
 

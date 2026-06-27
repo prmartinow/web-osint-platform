@@ -5,11 +5,19 @@ CODE_ROOT="${CODE_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
 
 "$CODE_ROOT/scripts/start_stack.sh"
 
+set -a
+source "$CODE_ROOT/.env"
+set +a
+
+: "${PANDAPROXY_URL:?set PANDAPROXY_URL}"
+: "${QDRANT_URL:?set QDRANT_URL}"
+: "${CLICKHOUSE_URL:?set CLICKHOUSE_URL}"
+
 echo "Waiting for services..."
 for _ in $(seq 1 60); do
-  if curl -fsS http://127.0.0.1:18082/brokers >/dev/null 2>&1 \
-    && curl -fsS http://127.0.0.1:16333/healthz >/dev/null 2>&1 \
-    && curl -fsS http://127.0.0.1:18123/ping >/dev/null 2>&1; then
+  if curl -fsS "${PANDAPROXY_URL%/}/brokers" >/dev/null 2>&1 \
+    && curl -fsS "${QDRANT_URL%/}/healthz" >/dev/null 2>&1 \
+    && curl -fsS "${CLICKHOUSE_URL%/}/ping" >/dev/null 2>&1; then
     break
   fi
   sleep 2

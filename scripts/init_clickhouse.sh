@@ -5,8 +5,8 @@ CODE_ROOT="${CODE_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
 source "$CODE_ROOT/.env"
 
 SQL_FILE="$CODE_ROOT/sql/clickhouse_init.sql"
-export CLICKHOUSE_URL="http://127.0.0.1:18123/?database=default"
-export CLICKHOUSE_USER="web_osint"
+export CLICKHOUSE_URL="${CLICKHOUSE_INIT_URL:-${CLICKHOUSE_URL:?set CLICKHOUSE_URL or CLICKHOUSE_INIT_URL}}"
+export CLICKHOUSE_USER="${CLICKHOUSE_USER:-web_osint}"
 
 python3 - "$SQL_FILE" <<'PY'
 import os

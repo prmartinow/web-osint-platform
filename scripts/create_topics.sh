@@ -1,7 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-BROKERS="${BROKERS:-127.0.0.1:19092}"
+BROKERS="${BROKERS:-${REDPANDA_BROKERS:-${KAFKA_BROKERS:-}}}"
+if [[ -z "$BROKERS" ]]; then
+  echo "Set BROKERS, REDPANDA_BROKERS, or KAFKA_BROKERS before running create_topics.sh" >&2
+  exit 2
+fi
 
 if [[ -z "${REDPANDA_CONTAINER:-}" ]]; then
   for candidate in web-osint-redpanda x-research-redpanda; do

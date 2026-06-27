@@ -4,6 +4,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 import re
 import sys
 import time
@@ -13,7 +14,7 @@ from typing import Any
 
 
 DEFAULT_TOPIC = "evidence.capture.events.v1"
-DEFAULT_PANDAPROXY_URL = "http://127.0.0.1:18082"
+DEFAULT_PANDAPROXY_URL = os.environ.get("PANDAPROXY_URL") or os.environ.get("REDPANDA_PROXY_URL", "")
 DEFAULT_CHUNK_CHARS = 3600
 SUPPORTED_SUFFIXES = {".md", ".markdown", ".txt"}
 URL_RE = re.compile(r"https?://[^\s)>\]\"']+")
@@ -317,6 +318,9 @@ def main() -> int:
     if args.dry_run:
         print(json.dumps(event, ensure_ascii=False, indent=2))
         return 0
+    if not args.pandaproxy_url:
+        print("Missing PANDAPROXY_URL or --pandaproxy-url", file=sys.stderr)
+        return 2
     response = post_event(args.pandaproxy_url, args.topic, event)
     print(
         json.dumps(

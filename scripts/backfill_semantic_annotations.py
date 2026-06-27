@@ -13,7 +13,14 @@ import urllib.request
 from typing import Any
 
 
-CLICKHOUSE_URL = os.environ.get("CLICKHOUSE_URL", "http://127.0.0.1:18123").rstrip("/")
+def require_env(name: str) -> str:
+    value = os.environ.get(name, "")
+    if not value:
+        raise SystemExit(f"Missing {name}")
+    return value
+
+
+CLICKHOUSE_URL = require_env("CLICKHOUSE_URL").rstrip("/")
 CLICKHOUSE_DATABASE = os.environ.get("CLICKHOUSE_DATABASE", "web_osint")
 CLICKHOUSE_USER = os.environ.get("CLICKHOUSE_USER", "web_osint")
 CLICKHOUSE_PASSWORD = os.environ.get("CLICKHOUSE_PASSWORD", "")

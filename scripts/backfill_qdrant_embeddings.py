@@ -14,15 +14,19 @@ from datetime import datetime, timezone
 from typing import Any
 
 
-CLICKHOUSE_URL = os.environ.get("CLICKHOUSE_URL", "http://127.0.0.1:18123").rstrip("/")
+def require_env(name: str) -> str:
+    value = os.environ.get(name, "")
+    if not value:
+        raise SystemExit(f"Missing {name}")
+    return value
+
+
+CLICKHOUSE_URL = require_env("CLICKHOUSE_URL").rstrip("/")
 CLICKHOUSE_DATABASE = os.environ.get("CLICKHOUSE_DATABASE", "web_osint")
 CLICKHOUSE_USER = os.environ.get("CLICKHOUSE_USER", "web_osint")
 CLICKHOUSE_PASSWORD = os.environ.get("CLICKHOUSE_PASSWORD", "")
-LOCAL_INFERENCE_URL = os.environ.get(
-    "LOCAL_INFERENCE_URL",
-    "http://127.0.0.1:18200",
-).rstrip("/")
-QDRANT_URL = os.environ.get("QDRANT_URL", "http://127.0.0.1:16333").rstrip("/")
+LOCAL_INFERENCE_URL = require_env("LOCAL_INFERENCE_URL").rstrip("/")
+QDRANT_URL = require_env("QDRANT_URL").rstrip("/")
 QDRANT_COLLECTION = os.environ.get("QDRANT_COLLECTION", "web_osint_evidence_v1")
 LIMIT = int(os.environ.get("BACKFILL_LIMIT", "0"))
 OFFSET = int(os.environ.get("BACKFILL_OFFSET", "0"))

@@ -119,6 +119,7 @@ Migration steps:
 - 2026-06-27: Converted the ingestion, media enrichment, Connect shadow parity, and webpage extraction canary scripts away from tracked live data-root, dashboard, and service endpoint defaults. Canary data roots, Pandaproxy, ClickHouse, Qdrant, and dashboard URLs now come from CLI arguments, process env, or ignored env files; `.env.example` documents only public placeholder variable names.
 - 2026-06-27: Converted the Rebrowser rendered-web collector away from tracked CDP, SSH, data-root, and Pandaproxy defaults. The collector now uses env/CLI settings for capture and publish configuration, and `--publish` validates required deployment values before opening a browser tab or uploading artifacts.
 - 2026-06-27: Removed remaining tracked durable data-root defaults from Compose, setup scripts, shared data-root helpers, and dashboard media/OCR defaults. Durable roots must now be supplied through `WEB_OSINT_DATA_ROOT`, `OSINT_DATA_ROOT`, or explicit worker/service env; dashboard artifact links are filtered against configured safe roots rather than one fixed mount prefix.
+- 2026-06-27: Sanitized the operating guide away from live deployment paths and local endpoints. Operator examples now use env-configured endpoint/data-root variables, and `.env.example` documents the public placeholder names for Research UI, dashboard, Redpanda Connect, Redpanda admin, and reference-source roots.
 
 ## Verification Record
 
@@ -147,6 +148,7 @@ Latest verified state:
 - Canary-default cleanup checks: `python3 -m py_compile scripts/run_e2e_canary.py scripts/run_connect_shadow_parity.py scripts/run_media_enrichment_canary.py scripts/run_webpage_extraction_canary.py` passed; missing required canary config now returns a clear config error before network or data writes; additions-only sanitizer found no new local paths, local endpoints, secrets, or model-owner variables.
 - Rendered-web collector cleanup checks: `node --check collectors/rebrowser-rendered-web/rebrowser_rendered_capture.mjs` passed; `--help` renders without printing configured endpoint values; missing `REBROWSER_CDP_URL` fails before browser or publish side effects; additions-only sanitizer found no new local paths, local endpoints, secrets, or model-owner variables.
 - Data-root cleanup checks: `bash -n scripts/init_dirs.sh scripts/init_env.sh scripts/init_embedding_worker_venv.sh scripts/init_media_enrichment_venv.sh`, `python3 -m py_compile scripts/osint_paths.py scripts/run_e2e_canary.py dashboard/server.py`, and `docker compose --env-file .env.example -f compose/docker-compose.yml config` passed; missing setup data-root config now fails before directory or env-file writes; additions-only sanitizer found no new local paths, local endpoints, secrets, or model-owner variables.
+- Operating-guide cleanup checks: targeted pattern scan of `docs/OPERATING.md` and `.env.example` found no live data-root paths, local source paths, home-network addresses, loopback host:port endpoints, or SSH account targets; additions-only sanitizer found no new local paths, local endpoints, secrets, or model-owner variables.
 
 ## Next Checkpoint
 

@@ -6,20 +6,21 @@
 scripts/bootstrap.sh
 ```
 
-The stack binds service ports to `127.0.0.1` on the RPC node:
+The stack binds service ports according to Compose and the local deployment
+environment. Keep direct data-service ports private by default and put
+deployment-specific addresses in ignored env files. Common endpoint variables:
 
-- Redpanda broker Kafka-compatible listener: `127.0.0.1:19092`
-- Redpanda Pandaproxy: `127.0.0.1:18082`
-- Redpanda Schema Registry: `127.0.0.1:18081`
-- Redpanda Admin: `127.0.0.1:19644`
-- Typesense: `127.0.0.1:18108`
-- Qdrant: `127.0.0.1:16333`
-- ClickHouse HTTP: `127.0.0.1:18123`
-- ClickHouse native: `127.0.0.1:19000`
-- Normalizer lookup API: `127.0.0.1:18090`
-- Research planner API: `127.0.0.1:18091`
-- Redpanda Connect production router: `127.0.0.1:14194`
-- Redpanda Connect shadow router: `127.0.0.1:14195`
+- `PANDAPROXY_URL`
+- `REDPANDA_ADMIN_URL`
+- `TYPESENSE_URL`
+- `QDRANT_URL`
+- `CLICKHOUSE_URL`
+- `NORMALIZER_URL`
+- `RESEARCH_PLANNER_URL`
+- `REDPANDA_CONNECT_PRODUCTION_URL`
+- `REDPANDA_CONNECT_SHADOW_URL`
+- `DASHBOARD_URL`
+- `RESEARCH_UI_URL`
 
 Use an SSH tunnel for remote collector publishing. Keep service ports private by default.
 
@@ -32,11 +33,11 @@ scripts/health.sh
 The normalizer/materializer API:
 
 ```bash
-curl http://127.0.0.1:18090/healthz
-curl http://127.0.0.1:18090/stats
-curl 'http://127.0.0.1:18090/lookup?key=post/<post_id>'
-curl http://127.0.0.1:18091/stats
-curl http://127.0.0.1:14194/ready
+curl "${NORMALIZER_URL:?set NORMALIZER_URL}/healthz"
+curl "${NORMALIZER_URL:?set NORMALIZER_URL}/stats"
+curl "${NORMALIZER_URL:?set NORMALIZER_URL}/lookup?key=post/<post_id>"
+curl "${RESEARCH_PLANNER_URL:?set RESEARCH_PLANNER_URL}/stats"
+curl "${REDPANDA_CONNECT_PRODUCTION_URL:?set REDPANDA_CONNECT_PRODUCTION_URL}/ready"
 ```
 
 Exact lookup keys currently use these prefixes:
@@ -125,7 +126,13 @@ node collectors/rebrowser-rendered-web/rebrowser_rendered_capture.mjs \
   --publish
 ```
 
-The rendered collector opens a task-owned Rebrowser tab on `127.0.0.1:9225`, captures rendered DOM/text/links/images/tables, writes a full-page screenshot plus `EvidenceDocument`, uploads artifacts to `/mnt/data/x-research/web/rebrowser-rendered/...`, publishes through RPC-local Pandaproxy, and closes the task tab. It refuses X/Twitter URLs by default because those need the X-specific collector and pacing rules.
+The rendered collector opens a task-owned Rebrowser tab through the configured
+`REBROWSER_CDP_URL`, captures rendered DOM/text/links/images/tables, writes a
+full-page screenshot plus `EvidenceDocument`, uploads artifacts under
+`$WEB_OSINT_RPC_DATA_ROOT/web/rebrowser-rendered/...`, publishes through the
+configured remote Pandaproxy URL, and closes the task tab. It refuses
+X/Twitter URLs by default because those need the X-specific collector and
+pacing rules.
 
 Install its isolated venv under the data root:
 
@@ -136,7 +143,7 @@ scripts/init_webpage_extraction_venv.sh
 Run a one-off extraction without publishing:
 
 ```bash
-/mnt/data/web-osint-platform/.venv-webpage-extraction/bin/python \
+"${WEB_OSINT_WEBPAGE_EXTRACTION_PYTHON:-${WEB_OSINT_WEBPAGE_EXTRACTION_VENV:?set WEB_OSINT_WEBPAGE_EXTRACTION_VENV}/bin/python}" \
   workers/webpage-extraction/webpage_extraction_worker.py extract-url \
   --url https://www.example.com/blog/model-launch \
   --source-project launch-blog-research \
@@ -146,7 +153,7 @@ Run a one-off extraction without publishing:
 Publish extracted pages through Pandaproxy into the normal capture pipeline:
 
 ```bash
-/mnt/data/web-osint-platform/.venv-webpage-extraction/bin/python \
+"${WEB_OSINT_WEBPAGE_EXTRACTION_PYTHON:-${WEB_OSINT_WEBPAGE_EXTRACTION_VENV:?set WEB_OSINT_WEBPAGE_EXTRACTION_VENV}/bin/python}" \
   workers/webpage-extraction/webpage_extraction_worker.py extract-url \
   --url https://www.example.com/blog/model-launch \
   --source-project launch-blog-research \
@@ -154,7 +161,8 @@ Publish extracted pages through Pandaproxy into the normal capture pipeline:
   --publish
 ```
 
-Run the launch-blog canary from the live RPC tree:
+Run the launch-blog canary from the canonical repo with an ignored deployment
+env:
 
 ```bash
 python3 scripts/run_webpage_extraction_canary.py --env-file .env
@@ -170,7 +178,7 @@ Run the Research UI as a separate Compose service:
 
 ```bash
 docker compose --env-file .env -f compose/docker-compose.yml up -d --build research-ui
-curl http://127.0.0.1:18192/healthz
+curl "${RESEARCH_UI_URL:?set RESEARCH_UI_URL}/healthz"
 ```
 
 The service is intentionally read-oriented in v1. It queries ClickHouse evidence rows, related semantic/OCR/VL enrichment rows, and safe artifact files under the configured Web OSINT data root. The production deployment can bind it to a LAN-scoped host address while keeping direct data services on RPC localhost.
@@ -182,7 +190,7 @@ mkdir -p ~/.config/systemd/user
 cp systemd/user/web-osint-webpage-extraction-worker.service ~/.config/systemd/user/
 systemctl --user daemon-reload
 systemctl --user enable --now web-osint-webpage-extraction-worker.service
-curl http://127.0.0.1:18221/healthz
+curl "${WEBPAGE_EXTRACTION_WORKER_URL:?set WEBPAGE_EXTRACTION_WORKER_URL}/healthz"
 ```
 
 ### Manual Research Documents
@@ -193,8 +201,8 @@ Dry-run a folder:
 
 ```bash
 python3 scripts/produce_research_documents.py \
-  /mnt/data/x-research/user-documents/agent-tooling \
-  --source-root /mnt/data/x-research/user-documents/agent-tooling \
+  "$WEB_OSINT_DATA_ROOT/user-documents/agent-tooling" \
+  --source-root "$WEB_OSINT_DATA_ROOT/user-documents/agent-tooling" \
   --source-project agent-harness \
   --topic-label agent-harness \
   --dry-run
@@ -204,8 +212,8 @@ Publish to Redpanda through Pandaproxy:
 
 ```bash
 python3 scripts/produce_research_documents.py \
-  /mnt/data/x-research/user-documents/agent-tooling \
-  --source-root /mnt/data/x-research/user-documents/agent-tooling \
+  "$WEB_OSINT_DATA_ROOT/user-documents/agent-tooling" \
+  --source-root "$WEB_OSINT_DATA_ROOT/user-documents/agent-tooling" \
   --source-project agent-harness \
   --topic-label agent-harness
 ```
@@ -234,8 +242,8 @@ emission gate disabled:
 ```bash
 WEB_OSINT_EMIT_OBSERVED_TOPICS=false \
   docker compose --env-file .env -f compose/docker-compose.yml --profile production-routing up -d --build normalizer redpanda-connect-production
-curl http://127.0.0.1:14194/ready
-curl http://127.0.0.1:18090/stats
+curl "${REDPANDA_CONNECT_PRODUCTION_URL:?set REDPANDA_CONNECT_PRODUCTION_URL}/ready"
+curl "${NORMALIZER_URL:?set NORMALIZER_URL}/stats"
 ```
 
 While production Connect owns media request fan-out, stop the legacy router but
@@ -261,8 +269,7 @@ The script chunks long documents before publishing so embedding coverage favors 
 Reference source checkouts live outside the repo on the RPC data disk:
 
 ```text
-/mnt/data/web-osint-platform/reference-src/
-/home/ops/dev/reference-src -> /mnt/data/web-osint-platform/reference-src
+$WEB_OSINT_REFERENCE_SRC_ROOT/
 ```
 
 Use `redpanda-connect-v4.46.0` for exact behavior of the current custom Connect
@@ -273,10 +280,10 @@ upstream changes.
 Refresh only current-branch references by default:
 
 ```bash
-cd /mnt/data/web-osint-platform/reference-src/redpanda-connect
+cd "${WEB_OSINT_REFERENCE_SRC_ROOT:?set WEB_OSINT_REFERENCE_SRC_ROOT}/redpanda-connect"
 git fetch --depth 1 origin main && git checkout -q FETCH_HEAD
 
-cd /mnt/data/web-osint-platform/reference-src/redpanda
+cd "${WEB_OSINT_REFERENCE_SRC_ROOT:?set WEB_OSINT_REFERENCE_SRC_ROOT}/redpanda"
 git fetch --depth 1 origin dev && git checkout -q FETCH_HEAD
 ```
 
@@ -333,16 +340,19 @@ thread-pool variables for client workers.
 
 ## End-To-End Canary
 
-Use the end-to-end canary after pipeline, inference, or dashboard changes. It creates a synthetic Markdown research document under `/mnt/data`, publishes it to Redpanda through the normal manual-document capture path, then waits for:
+Use the end-to-end canary after pipeline, inference, or dashboard changes. It
+creates a synthetic Markdown research document under the configured data root,
+publishes it to Redpanda through the normal manual-document capture path, then
+waits for:
 
 ```text
 capture_event -> observed user_input row -> embedding audit topic -> Qdrant point -> dashboard research search hit
 ```
 
-Run it from the RPC live tree:
+Run it from the canonical repo with an ignored deployment env:
 
 ```bash
-cd /home/ops/dev/x-research
+cd "${WEB_OSINT_REPO_ROOT:?set WEB_OSINT_REPO_ROOT}"
 python3 scripts/run_e2e_canary.py --env-file .env
 ```
 
@@ -356,8 +366,8 @@ Exit codes:
 The canary writes durable operator artifacts:
 
 ```text
-/mnt/data/x-research/canaries/runs/<run_id>.json
-/mnt/data/x-research/metrics/e2e_canary.prom
+$WEB_OSINT_DATA_ROOT/canaries/runs/<run_id>.json
+$WEB_OSINT_DATA_ROOT/metrics/e2e_canary.prom
 ClickHouse: ops_canary_runs, ops_canary_steps
 ```
 

@@ -25,6 +25,8 @@ const state = {
   topicDetailId: '',
   topicDetailTab: 'overview',
   compareViewId: 'claims',
+  compareSelectedCellKey: '',
+  compareData: null,
   benchmarkId: 'benchmark',
   draftId: 'working-draft',
   publicationBundleId: '',
@@ -5343,34 +5345,171 @@ async function loadComparePage() {
   }
 }
 
+function compareCellKey(rowIndex, cellIndex) {
+  return `${rowIndex}:${cellIndex}`;
+}
+
+function compareStateClass(value) {
+  const text = String(value || '').toLowerCase();
+  if (text === 'reproduced' || text === 'independently-measured') return 'ok';
+  if (text === 'vendor-reported') return 'info';
+  if (text === 'disputed' || text === 'stale' || text === 'na') return 'danger';
+  return 'warn';
+}
+
+function compareStateBadge(value) {
+  const text = String(value || 'missing');
+  return `<span class="status-badge ${compareStateClass(text)}">${escapeHtml(titleCase(text.replace(/-/g, ' ')))}</span>`;
+}
+
+function compareCellEntries(rows, columns) {
+  const entries = [];
+  rows.forEach((row, rowIndex) => {
+    (row.cells || []).forEach((cell, cellIndex) => {
+      entries.push({
+        key: compareCellKey(rowIndex, cellIndex),
+        row,
+        column: columns[cellIndex] || { id: cell.entity, label: cell.entity },
+        cell,
+      });
+    });
+  });
+  return entries;
+}
+
+function renderCompareEvidenceItem(item) {
+  const meta = [item.kind, item.status, item.anchor_type, item.anchor_label, fmtDate(item.updated_at || item.captured_at)].filter(Boolean).join(' - ');
+  return `
+    <article class="compare-evidence-item">
+      <header>
+        <strong>${escapeHtml(item.label || item.kind || 'Evidence')}</strong>
+        ${item.object_id ? `<code>${escapeHtml(item.object_id)}</code>` : ''}
+      </header>
+      ${meta ? `<p class="muted">${escapeHtml(meta)}</p>` : ''}
+      ${item.detail ? `<p>${escapeHtml(item.detail)}</p>` : '<p class="muted">No detail text captured for this evidence record.</p>'}
+      <div class="tag-line">
+        ${item.source_evidence_id ? `<button class="text-button" type="button" data-id="${escapeHtml(item.source_evidence_id)}">Open source</button>` : ''}
+        ${item.canonical_url ? `<span class="pill">${escapeHtml(item.canonical_url)}</span>` : ''}
+      </div>
+    </article>
+  `;
+}
+
+function renderCompareAssertion(assertion) {
+  const evidence = assertion.evidence || [];
+  return `
+    <article class="compare-assertion">
+      <header>
+        <strong>${escapeHtml(assertion.value || assertion.claim_text || assertion.claim_id || 'Assertion')}</strong>
+        ${compareStateBadge(assertion.review_state || 'draft')}
+      </header>
+      <p>${escapeHtml(assertion.claim_text || '')}</p>
+      <div class="tag-line">
+        ${assertion.evidence_relation ? `<span class="pill">${escapeHtml(assertion.evidence_relation)}</span>` : ''}
+        ${assertion.contradiction_state ? `<span class="pill">${escapeHtml(assertion.contradiction_state)}</span>` : ''}
+        ${assertion.source_label ? `<span class="pill">${escapeHtml(assertion.source_label)}</span>` : ''}
+        ${assertion.source_evidence_id ? `<button class="text-button" type="button" data-id="${escapeHtml(assertion.source_evidence_id)}">Open source</button>` : ''}
+      </div>
+      ${evidence.length ? `<div class="compare-assertion-evidence">${evidence.map(renderCompareEvidenceItem).join('')}</div>` : '<p class="muted">No exact evidence records are linked to this assertion.</p>'}
+    </article>
+  `;
+}
+
+function renderCompareEvidenceDrawer(entry) {
+  if (!entry) {
+    return `
+      <aside class="compare-evidence-drawer">
+        <div class="empty-state">
+          <h2>Evidence drawer</h2>
+          <p>Select a populated comparison cell to inspect linked claims, exact evidence records, and source anchors.</p>
+        </div>
+      </aside>
+    `;
+  }
+  const cell = entry.cell || {};
+  const assertions = cell.assertions || [];
+  const evidence = cell.evidence || [];
+  const sourceIds = cell.source_ids || [];
+  return `
+    <aside class="compare-evidence-drawer" id="compareEvidenceDrawer">
+      <div class="pane-title">
+        <h2>${escapeHtml(entry.column?.label || cell.entity || 'Entity')}</h2>
+        ${compareStateBadge(cell.state)}
+      </div>
+      <p class="muted">${escapeHtml(titleCase(entry.row?.property || 'property'))}</p>
+      <strong>${escapeHtml(cell.value || 'No value captured')}</strong>
+      <p>${escapeHtml(cell.state_reason || '')}</p>
+      <div class="tag-line">
+        <span class="pill">${escapeHtml(assertions.length)} assertion(s)</span>
+        <span class="pill">${escapeHtml(evidence.length)} selected evidence record(s)</span>
+        ${sourceIds.map((sourceId) => `<button class="text-button" type="button" data-id="${escapeHtml(sourceId)}">Open source</button>`).join('')}
+      </div>
+      <section>
+        <h3>Selected Evidence</h3>
+        ${evidence.length ? evidence.map(renderCompareEvidenceItem).join('') : '<p class="muted">This cell has no exact source, selection, or fact evidence linked to the selected assertion.</p>'}
+      </section>
+      <section>
+        <h3>Assertions</h3>
+        ${assertions.length ? assertions.map(renderCompareAssertion).join('') : '<p class="muted">No assertion exists for this entity/property pair.</p>'}
+      </section>
+    </aside>
+  `;
+}
+
 function renderComparePage(data) {
   const columns = data.columns || [];
   const rows = data.rows || [];
+  state.compareData = data;
+  const entries = compareCellEntries(rows, columns);
+  const preferredEntry = entries.find((entry) => entry.key === state.compareSelectedCellKey)
+    || entries.find((entry) => entry.cell?.claim_id || Number(entry.cell?.assertion_count || 0) > 0)
+    || null;
+  state.compareSelectedCellKey = preferredEntry?.key || '';
   $('routePage').innerHTML = `
     ${pageHeader('Compare', `${escapeHtml(columns.length)} entities · ${escapeHtml(rows.length)} properties`)}
-    <section class="compare-shell panel">
+    <section class="compare-shell">
       <div class="compare-legend">${(data.legend || []).map((item) => `<span class="pill">${escapeHtml(item)}</span>`).join('')}</div>
-      <div class="compare-table-wrap">
-        <table class="ledger-table compare-table">
-          <thead><tr><th>Property</th>${columns.map((col) => `<th>${escapeHtml(col.label || col.id)}</th>`).join('')}</tr></thead>
-          <tbody>
-            ${rows.length ? rows.map((row) => `
-              <tr>
-                <th>${escapeHtml(titleCase(row.property || 'property'))}</th>
-                ${(row.cells || []).map((cell) => `
-                  <td>
-                    ${statusBadge(cell.state)}
-                    <strong>${escapeHtml(cell.value || '')}</strong>
-                    ${cell.source_evidence_id ? `<button class="text-button" type="button" data-id="${escapeHtml(cell.source_evidence_id)}">Evidence</button>` : '<span class="muted">No evidence</span>'}
-                  </td>
-                `).join('')}
-              </tr>
-            `).join('') : '<tr><td colspan="99">No scoped claims available for comparison.</td></tr>'}
-          </tbody>
-        </table>
+      <div class="compare-workspace">
+        <div class="compare-table-wrap">
+          <table class="ledger-table compare-table">
+            <thead><tr><th>Property</th>${columns.map((col) => `<th>${escapeHtml(col.label || col.id)}</th>`).join('')}</tr></thead>
+            <tbody>
+              ${rows.length ? rows.map((row, rowIndex) => `
+                <tr>
+                  <th>${escapeHtml(titleCase(row.property || 'property'))}</th>
+                  ${(row.cells || []).map((cell, cellIndex) => {
+                    const key = compareCellKey(rowIndex, cellIndex);
+                    const populated = cell.claim_id || Number(cell.assertion_count || 0) > 0;
+                    return `
+                      <td class="compare-cell ${state.compareSelectedCellKey === key ? 'selected' : ''}" data-compare-cell="${escapeHtml(key)}">
+                        <div class="compare-cell-head">${compareStateBadge(cell.state)}<span>${escapeHtml(cell.assertion_count || 0)} assertion(s)</span></div>
+                        <strong>${escapeHtml(cell.value || 'No value')}</strong>
+                        <p>${escapeHtml(cell.state_reason || '')}</p>
+                        <div class="tag-line">
+                          ${cell.source_evidence_id ? `<button class="text-button" type="button" data-id="${escapeHtml(cell.source_evidence_id)}">Source</button>` : '<span class="muted">No source</span>'}
+                          ${populated ? `<button class="text-button" type="button" data-compare-inspect="${escapeHtml(key)}">Inspect</button>` : ''}
+                        </div>
+                      </td>
+                    `;
+                  }).join('')}
+                </tr>
+              `).join('') : '<tr><td colspan="99">No scoped claims available for comparison.</td></tr>'}
+            </tbody>
+          </table>
+        </div>
+        ${renderCompareEvidenceDrawer(preferredEntry)}
       </div>
     </section>
   `;
+  document.querySelectorAll('[data-compare-inspect], .compare-cell[data-compare-cell]').forEach((node) => node.addEventListener('click', (event) => {
+    if (node.dataset.compareInspect) event.stopPropagation();
+    if (event.target.closest('[data-id]')) return;
+    const key = node.dataset.compareInspect || node.dataset.compareCell || '';
+    const entry = entries.find((item) => item.key === key);
+    if (!entry || (!entry.cell?.claim_id && Number(entry.cell?.assertion_count || 0) <= 0)) return;
+    state.compareSelectedCellKey = key;
+    renderComparePage(data);
+  }));
   bindObjectRows();
 }
 

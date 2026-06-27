@@ -4517,26 +4517,237 @@ def topic_detail(params):
     }, "topic-detail.v1", now_iso(), False, ["navigate", "review", "open_source"])
 
 
-def compare_cell_state(claim, peer_values):
-    if not claim:
-        return "Missing"
-    relation = str(claim.get("evidence_relation") or "").lower()
-    status = str(claim.get("review_state") or claim.get("status") or "").lower()
-    if relation in ("refutes", "contradicts") or status == "disputed" or len(peer_values) > 1:
-        return "Disputed"
+COMPARE_STATES = ["Missing", "NA", "Vendor-reported", "Independently-measured", "Reproduced", "Disputed", "Stale", "Incomparable"]
+COMPARE_VENDOR_SOURCE_KINDS = {"x_post", "x_account", "x_page"}
+COMPARE_INDEPENDENT_SOURCE_KINDS = {"media", "search_result", "google_search_page"}
+
+
+def qualifier_search_text(qualifier):
+    if not qualifier:
+        return ""
+    if isinstance(qualifier, (dict, list)):
+        return json_text(qualifier).lower()
+    return str(qualifier).lower()
+
+
+def qualifier_has_any(qualifier, tokens):
+    text = qualifier_search_text(qualifier)
+    return any(token in text for token in tokens)
+
+
+def compare_claim_rank(row):
+    status = str(row.get("review_state") or row.get("status") or "").lower()
     if status in ("accepted", "published"):
-        return "Independently-measured"
-    if claim.get("source_kind") in ("x_post", "x_account", "web_page"):
-        return "Vendor-reported"
+        return 0
+    if status in ("under_review", "draft", "proposed"):
+        return 1
+    if status in ("disputed", "changes_requested"):
+        return 2
     if status in ("rejected", "superseded"):
-        return "NA"
-    return "Vendor-reported"
+        return 3
+    return 4
+
+
+def compare_select_claim(matches):
+    if not matches:
+        return None
+    return sorted(matches, key=compare_claim_rank)[0]
+
+
+def compare_cell_decision(claim, matches, peer_values):
+    if not claim:
+        return {"state": "Missing", "reason": "No scoped claim exists for this property and entity."}
+    statuses = {str(row.get("review_state") or row.get("status") or "").lower() for row in matches}
+    relations = {str(row.get("evidence_relation") or "").lower() for row in matches}
+    contradictions = {str(row.get("contradiction_state") or "").lower() for row in matches}
+    qualifiers = [row.get("qualifier") for row in matches]
+    if statuses and statuses <= {"rejected", "superseded"}:
+        return {"state": "NA", "reason": "All matching assertions are rejected or superseded."}
+    if any(qualifier_has_any(value, ("not_applicable", "not applicable", "n/a", '"na"', "no_result")) for value in qualifiers):
+        return {"state": "NA", "reason": "The linked assertion marks this comparison as not applicable."}
+    if any(qualifier_has_any(value, ("incompatible", "different_setup", "different setup", "different_metric", "not_comparable", "not comparable")) for value in qualifiers):
+        return {"state": "Incomparable", "reason": "Qualifier metadata marks the assertion as incompatible with the comparison set."}
+    if any(qualifier_has_any(value, ("stale", "outdated", "superseded_by", "superseded by")) for value in qualifiers):
+        return {"state": "Stale", "reason": "Qualifier metadata marks the assertion as stale or superseded by newer evidence."}
+    if (
+        relations & {"refutes", "contradicts"}
+        or statuses & {"disputed"}
+        or contradictions & {"disputed", "conflict"}
+        or len(peer_values) > 1
+    ):
+        return {"state": "Disputed", "reason": "Competing values or refuting evidence are attached to this property."}
+    if any(qualifier_has_any(value, ("reproduced", "replicated", "rerun", "repeatable")) for value in qualifiers) or relations & {"reproduced", "replicated"}:
+        return {"state": "Reproduced", "reason": "Qualifier or evidence relation explicitly marks this result as reproduced."}
+    source_kind = str(claim.get("source_kind") or "").lower()
+    if statuses & {"accepted", "published"} and (
+        source_kind in COMPARE_INDEPENDENT_SOURCE_KINDS
+        or any(qualifier_has_any(value, ("independent", "third_party", "third party", "measured")) for value in qualifiers)
+    ):
+        return {"state": "Independently-measured", "reason": "Accepted evidence is marked as independent or comes from an independent source kind."}
+    if claim.get("source_evidence_id"):
+        source_reason = "Source-linked assertion without independent or reproduced metadata."
+        if source_kind in COMPARE_VENDOR_SOURCE_KINDS or any(qualifier_has_any(value, ("vendor", "official", "first_party", "first party")) for value in qualifiers):
+            source_reason = "The assertion is source-linked to vendor or official reporting."
+        return {"state": "Vendor-reported", "reason": source_reason}
+    return {"state": "Incomparable", "reason": "The assertion has no linked source evidence."}
+
+
+def compare_support_maps(claims):
+    selection_ids = sorted({row.get("evidence_selection_id") for row in claims if row.get("evidence_selection_id")})
+    source_ids = sorted({row.get("source_evidence_id") for row in claims if row.get("source_evidence_id")})
+    selection_map = {}
+    facts_by_selection = {}
+    facts_by_source = {}
+    if selection_ids:
+        quoted = ", ".join(sql_string(value) for value in selection_ids)
+        selections = ch_data(
+            f"""
+            SELECT selection_id, source_evidence_id, selection_kind, quote,
+              context_before, context_after, source_anchor_json, status, updated_at
+            FROM evidence_selections FINAL
+            WHERE selection_id IN ({quoted})
+            ORDER BY updated_at DESC
+            LIMIT {len(selection_ids)}
+            """,
+            fallback=[],
+        )
+        selection_map = {row.get("selection_id"): row for row in selections}
+    if selection_ids or source_ids:
+        clauses = []
+        if selection_ids:
+            clauses.append(f"evidence_selection_id IN ({', '.join(sql_string(value) for value in selection_ids)})")
+        if source_ids:
+            clauses.append(f"source_evidence_id IN ({', '.join(sql_string(value) for value in source_ids)})")
+        facts = ch_data(
+            f"""
+            SELECT proposed_fact_id, source_evidence_id, evidence_selection_id,
+              fact_type, field_path, raw_value, normalized_value, unit,
+              evidence_quote, source_anchor_json, status, updated_at
+            FROM proposed_facts FINAL
+            WHERE {" OR ".join(clauses)}
+            ORDER BY updated_at DESC
+            LIMIT 240
+            """,
+            fallback=[],
+        )
+        facts_by_selection = group_rows(facts, "evidence_selection_id")
+        facts_by_source = group_rows(facts, "source_evidence_id")
+    return selection_map, facts_by_selection, facts_by_source
+
+
+def compare_fact_matches_claim(fact, claim):
+    value = str(claim.get("value") or claim.get("claim_text") or "").strip().lower()
+    if not value:
+        return False
+    fact_text = " ".join(str(fact.get(key) or "") for key in ("raw_value", "normalized_value", "evidence_quote")).lower()
+    return value in fact_text or any(part and part in value for part in (str(fact.get("raw_value") or "").lower(), str(fact.get("normalized_value") or "").lower()))
+
+
+def compare_evidence_item(kind, object_id, label, detail="", status="", source_evidence_id="", source_anchor=None, **extra):
+    anchor = source_anchor if isinstance(source_anchor, dict) else {}
+    item = {
+        "kind": kind,
+        "object_id": object_id or "",
+        "label": label or title_case_label(kind),
+        "detail": compact_text(detail, 1200),
+        "status": status or "",
+        "source_evidence_id": source_evidence_id or "",
+        "anchor_type": anchor_type_for(extra, anchor),
+        "anchor_label": anchor_label_for(extra, anchor),
+    }
+    item.update(extra)
+    return item
+
+
+def compare_claim_evidence(claim, selection_map, facts_by_selection, facts_by_source):
+    if not claim:
+        return []
+    source_id = claim.get("source_evidence_id") or ""
+    selection_id = claim.get("evidence_selection_id") or ""
+    evidence = []
+    if source_id:
+        evidence.append(compare_evidence_item(
+            "source_record",
+            source_id,
+            claim.get("source_label") or claim.get("source_kind") or "Source",
+            claim.get("snippet") or claim.get("title") or claim.get("canonical_url") or source_id,
+            "captured",
+            source_id,
+            title=claim.get("title") or "",
+            canonical_url=claim.get("canonical_url") or "",
+            captured_at=claim.get("captured_at") or "",
+        ))
+    claim_anchor = parse_raw_json(claim.get("source_anchor_json", ""))
+    evidence.append(compare_evidence_item(
+        "claim_stub",
+        claim.get("claim_id") or "",
+        "Claim assertion",
+        claim.get("claim_text") or claim.get("value") or "",
+        claim.get("review_state") or claim.get("status") or "",
+        source_id,
+        claim_anchor,
+        evidence_relation=claim.get("evidence_relation") or "",
+        updated_at=claim.get("updated_at") or "",
+    ))
+    selection = selection_map.get(selection_id)
+    if selection:
+        selection_anchor = parse_raw_json(selection.get("source_anchor_json", ""))
+        evidence.append(compare_evidence_item(
+            "evidence_selection",
+            selection.get("selection_id") or "",
+            title_case_label(selection.get("selection_kind") or "evidence selection"),
+            first_nonempty(selection.get("quote"), selection.get("context_before"), selection.get("context_after")),
+            selection.get("status") or "",
+            selection.get("source_evidence_id") or source_id,
+            selection_anchor,
+            selection_kind=selection.get("selection_kind") or "",
+            updated_at=selection.get("updated_at") or "",
+        ))
+    facts = list(facts_by_selection.get(selection_id, []))
+    if not facts and source_id:
+        facts = [fact for fact in facts_by_source.get(source_id, []) if compare_fact_matches_claim(fact, claim)]
+    for fact in facts[:3]:
+        fact_anchor = parse_raw_json(fact.get("source_anchor_json", ""))
+        fact_value = first_nonempty(fact.get("normalized_value"), fact.get("raw_value"), fact.get("evidence_quote"))
+        evidence.append(compare_evidence_item(
+            "proposed_fact",
+            fact.get("proposed_fact_id") or "",
+            fact.get("fact_type") or "Proposed fact",
+            fact_value,
+            fact.get("status") or "",
+            fact.get("source_evidence_id") or source_id,
+            fact_anchor,
+            field_path=fact.get("field_path") or "",
+            unit=fact.get("unit") or "",
+            updated_at=fact.get("updated_at") or "",
+        ))
+    return evidence
+
+
+def compare_claim_summary(row, selection_map, facts_by_selection, facts_by_source):
+    evidence = compare_claim_evidence(row, selection_map, facts_by_selection, facts_by_source)
+    return {
+        "claim_id": row.get("claim_id") or "",
+        "claim_text": row.get("claim_text") or "",
+        "value": row.get("value") or "",
+        "review_state": row.get("review_state") or "",
+        "contradiction_state": row.get("contradiction_state") or "",
+        "evidence_relation": row.get("evidence_relation") or "",
+        "source_evidence_id": row.get("source_evidence_id") or "",
+        "source_label": row.get("source_label") or source_kind_label(row.get("source_kind")),
+        "source_title": row.get("title") or "",
+        "evidence_selection_id": row.get("evidence_selection_id") or "",
+        "updated_at": row.get("updated_at") or "",
+        "qualifier": row.get("qualifier") or {},
+        "evidence": evidence,
+    }
 
 
 def compare_view(params):
     project = resolve_project_id((params.get("project_id", params.get("project", [""]))[0] or "").strip())
     view_id = (params.get("view_id", [""])[0] or "claims").strip()
     claims = [row for row in scoped_claim_rows(project, 240) if row.get("subject_scoped")]
+    selection_map, facts_by_selection, facts_by_source = compare_support_maps(claims)
     subjects = []
     for row in claims:
         subject = row.get("subject") or ""
@@ -4554,14 +4765,23 @@ def compare_view(params):
         for subject in subjects:
             matches = [row for row in claims if row.get("subject") == subject and (row.get("property") or row.get("claim_type") or "general") == prop]
             values = {str(row.get("value") or row.get("claim_text") or "").lower() for row in matches}
-            selected = matches[0] if matches else None
+            selected = compare_select_claim(matches)
+            decision = compare_cell_decision(selected, matches, values)
+            assertions = [compare_claim_summary(row, selection_map, facts_by_selection, facts_by_source) for row in matches[:8]]
+            evidence = compare_claim_evidence(selected, selection_map, facts_by_selection, facts_by_source) if selected else []
+            source_ids = sorted({row.get("source_evidence_id") for row in matches if row.get("source_evidence_id")})
             cells.append({
                 "entity": subject,
-                "state": compare_cell_state(selected, values),
+                "state": decision["state"],
+                "state_reason": decision["reason"],
                 "value": selected.get("value") if selected else "",
                 "claim_id": selected.get("claim_id") if selected else "",
                 "source_evidence_id": selected.get("source_evidence_id") if selected else "",
-                "evidence": [source_for_ledger_row({selected.get("source_evidence_id"): selected}, selected.get("source_evidence_id"))] if selected else [],
+                "source_ids": source_ids,
+                "evidence_count": len(evidence),
+                "assertion_count": len(matches),
+                "assertions": assertions,
+                "evidence": evidence,
                 "qualifier": selected.get("qualifier") if selected else {},
             })
         rows.append({"property": prop, "cells": cells})
@@ -4569,7 +4789,7 @@ def compare_view(params):
         "scope": {"project": project or "all", "view_id": view_id, "surface": "compare"},
         "columns": [{"id": subject, "label": subject} for subject in subjects],
         "rows": rows,
-        "legend": ["Missing", "NA", "Vendor-reported", "Independently-measured", "Reproduced", "Disputed", "Stale", "Incomparable"],
+        "legend": COMPARE_STATES,
         "summary": {
             "entities": len(subjects),
             "properties": len(rows),

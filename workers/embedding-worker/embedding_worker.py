@@ -42,6 +42,7 @@ HTTP_ADDR = env("HTTP_ADDR", "127.0.0.1:18201")
 REQUEST_TIMEOUT = float(env("EMBEDDING_WORKER_REQUEST_TIMEOUT", "600"))
 POLL_TIMEOUT = float(env("EMBEDDING_WORKER_POLL_TIMEOUT", "1.0"))
 MAX_TEXT_CHARS = int(env("EMBEDDING_WORKER_MAX_TEXT_CHARS", "4000"))
+CONSUMER_MAX_POLL_INTERVAL_MS = int(env("EMBEDDING_WORKER_MAX_POLL_INTERVAL_MS", "1200000"))
 
 
 def now_iso() -> str:
@@ -161,6 +162,9 @@ def task_from_message(topic: str, key: str, event: dict[str, Any]) -> EvidenceTa
     source_project = clean_text(event.get("source_project"))
     captured_at = clean_text(event.get("captured_at") or event.get("searched_at"))
     common_payload = {
+        "collector_run_id": clean_text(event.get("collector_run_id")),
+        "capture_method": clean_text(event.get("capture_method")),
+        "captured_at": captured_at,
         "source_project": source_project,
         "captured_at_day": day_string(captured_at),
         "topics": as_list(event.get("topics")),
@@ -182,6 +186,7 @@ def task_from_message(topic: str, key: str, event: dict[str, Any]) -> EvidenceTa
                 "canonical_url": clean_text(event.get("canonical_url")),
                 "posted_at_day": day_string(event.get("posted_at")),
                 "has_media": bool(event.get("media_ids")),
+                "text_preview": text,
             },
             vector_inputs=[VectorInput("text_dense", text)] if text else [],
         )
@@ -199,6 +204,7 @@ def task_from_message(topic: str, key: str, event: dict[str, Any]) -> EvidenceTa
                 "source_kind": "x_account",
                 "author_handle": handle,
                 "canonical_url": clean_text(event.get("profile_url")),
+                "text_preview": text,
             },
             vector_inputs=[VectorInput("account_dense", text)] if text else [],
         )
@@ -224,6 +230,7 @@ def task_from_message(topic: str, key: str, event: dict[str, Any]) -> EvidenceTa
                 "media_kind": clean_text(event.get("media_kind")),
                 "has_media": True,
                 "has_ocr": bool(ocr_text),
+                "text_preview": ocr_text or caption,
             },
             vector_inputs=inputs,
         )
@@ -244,6 +251,7 @@ def task_from_message(topic: str, key: str, event: dict[str, Any]) -> EvidenceTa
                 "domain": host_of(url),
                 "query": clean_text(event.get("query")),
                 "rank": event.get("rank"),
+                "text_preview": text,
             },
             vector_inputs=[VectorInput("text_dense", text)] if text else [],
         )
@@ -263,6 +271,7 @@ def task_from_message(topic: str, key: str, event: dict[str, Any]) -> EvidenceTa
                 "canonical_url": url,
                 "domain": clean_text(event.get("domain")) or host_of(url),
                 "has_media": bool(event.get("media_ids")),
+                "text_preview": text,
             },
             vector_inputs=[VectorInput("text_dense", text)] if text else [],
         )
@@ -280,6 +289,8 @@ def task_from_message(topic: str, key: str, event: dict[str, Any]) -> EvidenceTa
                 "source_kind": "user_input",
                 "canonical_url": clean_text(event.get("canonical_url") or event.get("url")),
                 "has_media": bool(event.get("attachments")),
+                "input_kind": clean_text(event.get("input_kind")),
+                "text_preview": text,
             },
             vector_inputs=[VectorInput("text_dense", text)] if text else [],
         )
@@ -344,6 +355,8 @@ def handle_message(producer: Producer, topic: str, key: str, value: bytes) -> bo
         "evidence_id": task.evidence_id,
         "point_id": uuid_from(task.point_key),
         "source_kind": task.source_kind,
+        "collector_run_id": task.payload.get("collector_run_id", ""),
+        "source_project": task.payload.get("source_project", ""),
         "vector_names": sorted(vector_map.keys()),
         "embedding_model": "Qwen3-Embedding-8B",
         "embedding_dimension": len(next(iter(vector_map.values()))) if vector_map else 0,
@@ -407,6 +420,7 @@ def main() -> None:
             "group.id": REDPANDA_GROUP_ID,
             "auto.offset.reset": "earliest",
             "enable.auto.commit": False,
+            "max.poll.interval.ms": CONSUMER_MAX_POLL_INTERVAL_MS,
         }
     )
     producer = Producer({"bootstrap.servers": REDPANDA_BROKERS})

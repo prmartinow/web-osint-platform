@@ -40,6 +40,7 @@ EMBEDDING_WORKER_URL = os.environ.get("EMBEDDING_WORKER_URL", "http://127.0.0.1:
 MEDIA_ROUTER_URL = os.environ.get("MEDIA_ROUTER_URL", "http://127.0.0.1:18211").rstrip("/")
 MEDIA_OCR_WORKER_URL = os.environ.get("MEDIA_OCR_WORKER_URL", "http://127.0.0.1:18212").rstrip("/")
 MEDIA_VL_WORKER_URL = os.environ.get("MEDIA_VL_WORKER_URL", "http://127.0.0.1:18213").rstrip("/")
+MEDIA_ROUTER_OPTIONAL = os.environ.get("MEDIA_ROUTER_OPTIONAL", "true").lower() in {"1", "true", "yes", "on"}
 RESEARCH_SEARCH_TIMEOUT_SECONDS = int(os.environ.get("RESEARCH_SEARCH_TIMEOUT_SECONDS", "300"))
 RESEARCH_QUERY_EMBEDDING_PROMPT = os.environ.get(
     "RESEARCH_QUERY_EMBEDDING_PROMPT",
@@ -1370,6 +1371,17 @@ def model_stage(params):
     qwen_status = service_json("qwen", lambda: http_json(f"{LOCAL_INFERENCE_URL}/healthz", timeout=8))
     embedding_status = service_json("embedding_worker", lambda: http_json(f"{EMBEDDING_WORKER_URL}/stats", timeout=8))
     router_status = service_json("media_router", lambda: http_json(f"{MEDIA_ROUTER_URL}/stats", timeout=8))
+    if MEDIA_ROUTER_OPTIONAL and not router_status.get("ok"):
+        router_status = {
+            "ok": True,
+            "data": {
+                "ok": True,
+                "optional": True,
+                "role": "legacy-router",
+                "last_error": "",
+                "note": "Legacy Python media router is disabled; Redpanda Connect production routing emits OCR/VL requests.",
+            },
+        }
     ocr_status = service_json("media_ocr", lambda: http_json(f"{MEDIA_OCR_WORKER_URL}/stats", timeout=8))
     vl_status = service_json("media_vl", lambda: http_json(f"{MEDIA_VL_WORKER_URL}/stats", timeout=8))
 
@@ -1384,7 +1396,7 @@ def model_stage(params):
     worker_statuses = [
         ("local-inference", "model API", qwen_status),
         ("embedding-worker", "text embedding", embedding_status),
-        ("media-router", "media routing", router_status),
+        ("media-router", "legacy media routing", router_status),
         ("media-ocr-worker", "OCR", ocr_status),
         ("media-vl-worker", "VL embedding", vl_status),
     ]
@@ -1410,6 +1422,7 @@ def model_stage(params):
             "queued_ocr": data.get("queued_ocr", ""),
             "queued_vl": data.get("queued_vl", ""),
             "last_error": data.get("last_error") or status.get("error", ""),
+            "note": data.get("note", ""),
         })
 
     output_counts = []

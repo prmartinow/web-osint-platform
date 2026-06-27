@@ -112,6 +112,7 @@ Migration steps:
 - 2026-06-27: Normalized Rebrowser LaunchCapture responses, recorded returned launch sessions as review events tied to the requested project/source/route, opened returned session URLs from the UI, replaced launch alerts with inline status, added the public `REBROWSER_LAUNCH_URL` example name, and tightened viewport sizing so the Research UI fills the browser window instead of rendering as a partial-width/partial-height shell.
 - 2026-06-27: Migrated the Rebrowser X notifications collector into the canonical repo shape and sanitized it for upstream: CDP URL, helper path, RPC SSH target, RPC data root, Pandaproxy endpoint, and expected X account now come from CLI flags or env vars rather than hardcoded local deployment values.
 - 2026-06-27: Removed the remaining stale model-root env usage from Web OSINT scripts/templates, moved webpage extraction venv selection to `WEB_OSINT_WEBPAGE_EXTRACTION_VENV` plus `WEB_OSINT_DATA_ROOT`, and changed local-inference docs plus `.env.example` to use env placeholders rather than tracked local endpoints.
+- 2026-06-27: Made the dashboard tolerate a disabled legacy media router when Redpanda Connect owns OCR/VL request routing, and added longer Kafka max-poll intervals plus provenance fields for embedding/media enrichment workers.
 
 ## Verification Record
 
@@ -133,6 +134,7 @@ Latest verified state:
 - Rebrowser LaunchCapture endpoint smoke verified URL-only launches record a queued event when `REBROWSER_LAUNCH_URL` is not configured. A temporary local launch helper verified the configured path returns a normalized committed session, open URL, and two event ids without adding deployment values to Git. Browser/CDP checks verified the UI reports `Capture committed`, opens the returned session route, live desktop fills a 1920x1080 viewport, and live mobile has no page-level horizontal overflow. The active live env still requires a real helper URL before RUI-08 can be marked `Done`.
 - Rebrowser X notifications collector migration checks: `node --check collectors/rebrowser-x-notifications/x_notifications_capture.mjs` passed; `--help` renders without requiring live env; missing required config fails before browser/publish side effects; targeted sanitizer found no collector hardcoded loopback endpoints, home-network addresses, deployment data roots, SSH account targets, or expected account handles.
 - Local-inference/model-root cleanup checks: `bash -n scripts/init_webpage_extraction_venv.sh`, `python3 -m py_compile scripts/run_webpage_extraction_canary.py scripts/osint_paths.py`, and `systemd-analyze verify --user systemd/user/web-osint-webpage-extraction-worker.service` passed. A repository search found no remaining stale model-root env/helper references.
+- Worker/dashboard cleanup checks: `python3 -m py_compile dashboard/server.py workers/embedding-worker/embedding_worker.py workers/media-enrichment/media_enrichment_worker.py` passed. The normalizer maintenance-delete work remains unstaged for a separate sanitization pass because it needs the matching compose flag and local-default cleanup.
 
 ## Next Checkpoint
 

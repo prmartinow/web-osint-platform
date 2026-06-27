@@ -64,6 +64,7 @@ MAX_IMAGE_BYTES = int(env("MEDIA_MAX_IMAGE_BYTES", str(25 * 1024 * 1024)))
 MAX_IMAGE_PIXELS = int(env("MEDIA_MAX_IMAGE_PIXELS", str(40_000_000)))
 VL_MAX_SIDE = int(env("MEDIA_VL_MAX_SIDE", "1600"))
 REQUEST_TIMEOUT = float(env("MEDIA_WORKER_REQUEST_TIMEOUT", "600"))
+CONSUMER_MAX_POLL_INTERVAL_MS = int(env("MEDIA_CONSUMER_MAX_POLL_INTERVAL_MS", "1800000"))
 OCR_SELFTEST_TOKEN = "SELFTESTALPHA123"
 OCR_SELFTEST_EXPECTED = "TESTALPHA123"
 
@@ -863,6 +864,7 @@ def run_consumer(role: str, topic: str, group_id: str, http_addr: str) -> None:
             "group.id": group_id,
             "auto.offset.reset": "earliest",
             "enable.auto.commit": False,
+            "max.poll.interval.ms": CONSUMER_MAX_POLL_INTERVAL_MS,
         }
     )
     consumer.subscribe([topic])

@@ -29,6 +29,8 @@ const state = {
   compareData: null,
   benchmarkId: 'benchmark',
   draftId: 'working-draft',
+  draftSelectedParagraphId: '',
+  currentDraftData: null,
   publicationBundleId: '',
   publicationDetailTab: 'overview',
   rows: [],
@@ -5613,23 +5615,214 @@ async function loadDraftPage() {
   }
 }
 
-function renderDraftPage(data) {
-  const paragraphs = data.paragraphs || [];
-  $('routePage').innerHTML = `
-    ${pageHeader(data.header?.title || 'Draft Editor', `Revision ${escapeHtml(data.header?.revision || '')} · ${escapeHtml((data.references || []).length)} references`)}
-    <section class="draft-shell">
-      <aside class="panel draft-outline">${(data.outline || []).map((item) => `<button class="saved-item" type="button"><span>${escapeHtml(item.label)}</span><strong>${escapeHtml(item.status)}</strong></button>`).join('')}</aside>
-      <section class="panel draft-editor-pane">
-        ${paragraphs.map((paragraph) => `
-          <article class="draft-paragraph ${paragraph.support_state === 'unsupported' ? 'unsupported' : ''}">
-            <p>${escapeHtml(paragraph.text || '')}</p>
-            <div class="tag-line">${statusBadge(paragraph.support_state)} ${(paragraph.references || []).map((ref) => `<span class="pill">${escapeHtml(ref.object_type)}:${escapeHtml(ref.object_id)}</span>`).join('')}</div>
-          </article>
-        `).join('') || '<div class="empty-state"><h2>No draft paragraphs</h2><p>No claims are available for this draft.</p></div>'}
-      </section>
-      <aside class="panel draft-evidence-rail">${renderMiniSourceList(data.evidence_rail || [])}</aside>
+function draftParagraphById(data, paragraphId) {
+  return (data.paragraphs || []).find((paragraph) => paragraph.paragraph_id === paragraphId) || null;
+}
+
+function draftParagraphPayloads(data) {
+  return (data.paragraphs || []).map((paragraph) => {
+    const selector = `[data-draft-text="${cssEscape(paragraph.paragraph_id || '')}"]`;
+    const text = document.querySelector(selector)?.value ?? paragraph.text ?? '';
+    return {
+      paragraph_id: paragraph.paragraph_id || '',
+      section_id: paragraph.section_id || 'evidence',
+      text,
+      support_state: paragraph.support_state || '',
+      references: paragraph.references || [],
+    };
+  });
+}
+
+function draftSavePayload(data) {
+  const header = data.header || {};
+  return {
+    project: header.project || state.project || '',
+    draft_id: header.draft_id || state.draftId || 'working-draft',
+    title: header.title || 'Draft',
+    actor: REVIEW_UI_ACTOR,
+    paragraphs: draftParagraphPayloads(data),
+    idempotency_key: idempotencyKey('draft-save', header.project || state.project || '', header.draft_id || state.draftId || '', header.revision || ''),
+  };
+}
+
+function draftReferenceLabel(ref) {
+  return [ref.object_type, ref.object_id].filter(Boolean).join(':');
+}
+
+function renderDraftReference(ref) {
+  return `
+    <span class="draft-reference ${ref.stale ? 'stale' : ''}">
+      ${escapeHtml(draftReferenceLabel(ref))}
+      ${ref.stale ? '<em>stale</em>' : ''}
+      ${ref.source_evidence_id ? `<button class="text-button" type="button" data-id="${escapeHtml(ref.source_evidence_id)}">Open source</button>` : ''}
+    </span>
+  `;
+}
+
+function renderDraftParagraph(paragraph) {
+  const refs = paragraph.references || [];
+  const selected = state.draftSelectedParagraphId === paragraph.paragraph_id;
+  const stale = refs.some((ref) => ref.stale);
+  return `
+    <article class="draft-paragraph ${paragraph.support_state === 'unsupported' ? 'unsupported' : ''} ${stale ? 'stale' : ''} ${selected ? 'selected' : ''}" data-draft-paragraph="${escapeHtml(paragraph.paragraph_id || '')}">
+      <header>
+        <div>
+          <strong>${escapeHtml(titleCase(paragraph.section_id || 'section'))}</strong>
+          <div class="tag-line">${statusBadge(paragraph.support_state || 'draft')} ${stale ? statusBadge('stale') : ''}</div>
+        </div>
+        <div class="draft-paragraph-actions">
+          <button class="secondary" type="button" data-draft-select="${escapeHtml(paragraph.paragraph_id || '')}">Select</button>
+          <button class="secondary" type="button" data-draft-propose-diff="${escapeHtml(paragraph.paragraph_id || '')}">Propose diff</button>
+        </div>
+      </header>
+      <textarea data-draft-text="${escapeHtml(paragraph.paragraph_id || '')}" rows="5">${escapeHtml(paragraph.text || '')}</textarea>
+      <div class="draft-reference-list">
+        ${refs.length ? refs.map(renderDraftReference).join('') : '<span class="muted">No object-linked citations.</span>'}
+      </div>
+    </article>
+  `;
+}
+
+function renderDraftEvidenceRail(data) {
+  const selected = draftParagraphById(data, state.draftSelectedParagraphId);
+  const sources = data.evidence_rail || [];
+  return `
+    <div class="pane-title"><h2>Evidence Rail</h2><span class="count">${escapeHtml(sources.length)}</span></div>
+    <p class="muted">${selected ? `Insert citations into ${selected.paragraph_id}` : 'Select a paragraph before inserting citations.'}</p>
+    <div class="mini-source-list">
+      ${sources.length ? sources.map((source) => `
+        <article class="mini-source-row">
+          <strong>${escapeHtml(source.title || source.canonical_url || source.evidence_id || '(untitled source)')}</strong>
+          <span>${escapeHtml([source.source_label || source.source_kind, source.source_project, fmtDate(source.last_ingested_at || source.captured_at)].filter(Boolean).join(' - '))}</span>
+          <div class="tag-line">
+            <button class="text-button" type="button" data-id="${escapeHtml(source.evidence_id || '')}">Open source</button>
+            <button class="text-button" type="button" data-draft-insert-source="${escapeHtml(source.evidence_id || '')}" ${selected ? '' : 'disabled'}>Insert citation</button>
+          </div>
+        </article>
+      `).join('') : '<div class="empty-state"><h2>No evidence</h2><p>No source rows are available for this draft.</p></div>'}
+    </div>
+  `;
+}
+
+function renderDraftDiffs(data) {
+  const diffs = data.proposed_diffs || [];
+  return `
+    <section class="draft-diff-panel">
+      <div class="pane-title"><h2>Proposed Diffs</h2><span class="count">${escapeHtml(diffs.length)}</span></div>
+      ${diffs.length ? diffs.map((diff) => `
+        <article class="draft-diff">
+          <header><strong>${escapeHtml(diff.diff_kind || 'diff')}</strong>${statusBadge(diff.status || 'proposed')}</header>
+          <p>${escapeHtml(diff.rationale || '')}</p>
+          <div class="diff-pair">
+            <pre>${escapeHtml(diff.before_text || '')}</pre>
+            <pre>${escapeHtml(diff.after_text || '')}</pre>
+          </div>
+        </article>
+      `).join('') : '<p class="muted">No proposed diffs have been persisted for this draft.</p>'}
     </section>
   `;
+}
+
+async function saveDraftRevision(data) {
+  const status = $('draftSaveStatus');
+  try {
+    if (status) status.textContent = 'Saving...';
+    const result = await postJson('/api/drafts/save', draftSavePayload(data));
+    if (status) status.textContent = 'Saved revision.';
+    renderDraftPage(result.draft || data);
+  } catch (error) {
+    if (status) status.textContent = error.message;
+  }
+}
+
+async function insertDraftCitation(data, sourceId) {
+  const selected = draftParagraphById(data, state.draftSelectedParagraphId);
+  const source = (data.evidence_rail || []).find((row) => row.evidence_id === sourceId);
+  const status = $('draftSaveStatus');
+  if (!selected || !sourceId) return;
+  try {
+    if (status) status.textContent = 'Inserting citation...';
+    const result = await postJson('/api/drafts/citation', {
+      project: data.header?.project || state.project || '',
+      draft_id: data.header?.draft_id || state.draftId || 'working-draft',
+      paragraph_id: selected.paragraph_id,
+      object_type: 'source_record',
+      object_id: sourceId,
+      source_evidence_id: sourceId,
+      source_version: source?.last_ingested_at || source?.captured_at || '',
+      citation_text: source?.title && !String(source.title).startsWith('http') ? source.title : sourceId,
+      actor: REVIEW_UI_ACTOR,
+      idempotency_key: idempotencyKey('draft-citation', data.header?.project || state.project || '', selected.paragraph_id, sourceId),
+    });
+    if (status) status.textContent = 'Citation inserted.';
+    renderDraftPage(result.draft || data);
+  } catch (error) {
+    if (status) status.textContent = error.message;
+  }
+}
+
+async function createDraftDiff(data, paragraphId) {
+  const paragraph = draftParagraphById(data, paragraphId);
+  const status = $('draftSaveStatus');
+  if (!paragraph) return;
+  try {
+    if (status) status.textContent = 'Persisting proposed diff...';
+    const result = await postJson('/api/drafts/proposed-diff', {
+      project: data.header?.project || state.project || '',
+      draft_id: data.header?.draft_id || state.draftId || 'working-draft',
+      paragraph_id: paragraph.paragraph_id,
+      diff_kind: paragraph.support_state === 'unsupported' ? 'support_gap' : 'revision_note',
+      before_text: paragraph.text || '',
+      after_text: paragraph.text || '',
+      rationale: paragraph.support_state === 'unsupported' ? 'Add an object-linked citation before publication.' : 'Review proposed wording before publication.',
+      actor: REVIEW_UI_ACTOR,
+      idempotency_key: idempotencyKey('draft-diff', data.header?.project || state.project || '', paragraph.paragraph_id, paragraph.text || ''),
+    });
+    if (status) status.textContent = 'Proposed diff persisted.';
+    renderDraftPage(result.draft || data);
+  } catch (error) {
+    if (status) status.textContent = error.message;
+  }
+}
+
+function renderDraftPage(data) {
+  const paragraphs = data.paragraphs || [];
+  state.currentDraftData = data;
+  if (!state.draftSelectedParagraphId || !paragraphs.some((paragraph) => paragraph.paragraph_id === state.draftSelectedParagraphId)) {
+    state.draftSelectedParagraphId = paragraphs[0]?.paragraph_id || '';
+  }
+  const checks = data.checks || [];
+  $('routePage').innerHTML = `
+    ${pageHeader(data.header?.title || 'Draft Editor', `Revision ${escapeHtml(data.header?.revision || '')} - ${escapeHtml((data.references || []).length)} object reference(s)`, `
+      <button type="button" id="draftSaveRevision">Save revision</button>
+      <span id="draftSaveStatus" class="status-badge">${escapeHtml(data.header?.status || 'draft')}</span>
+    `)}
+    <section class="draft-checks">
+      ${checks.map((check) => `<span class="status-badge ${check.state === 'pass' ? 'ok' : check.state === 'blocked' ? 'danger' : 'warn'}">${escapeHtml(check.label || check.id)}${check.count !== undefined ? ': ' + escapeHtml(check.count) : ''}</span>`).join('')}
+    </section>
+    <section class="draft-shell">
+      <aside class="panel draft-outline">${(data.outline || []).map((item) => `<button class="saved-item" type="button" data-draft-outline="${escapeHtml(item.id || '')}"><span>${escapeHtml(item.label)}</span><strong>${escapeHtml(item.status)}${item.count !== undefined ? ' / ' + escapeHtml(item.count) : ''}</strong></button>`).join('')}</aside>
+      <section class="panel draft-editor-pane">
+        ${paragraphs.map(renderDraftParagraph).join('') || '<div class="empty-state"><h2>No draft paragraphs</h2><p>No claims are available for this draft.</p></div>'}
+        ${renderDraftDiffs(data)}
+      </section>
+      <aside class="panel draft-evidence-rail">${renderDraftEvidenceRail(data)}</aside>
+    </section>
+  `;
+  $('draftSaveRevision')?.addEventListener('click', () => saveDraftRevision(data));
+  document.querySelectorAll('[data-draft-select]').forEach((button) => button.addEventListener('click', () => {
+    state.draftSelectedParagraphId = button.dataset.draftSelect || '';
+    renderDraftPage(data);
+  }));
+  document.querySelectorAll('[data-draft-outline]').forEach((button) => button.addEventListener('click', () => {
+    const first = paragraphs.find((paragraph) => paragraph.section_id === button.dataset.draftOutline);
+    if (first) {
+      state.draftSelectedParagraphId = first.paragraph_id;
+      renderDraftPage(data);
+    }
+  }));
+  document.querySelectorAll('[data-draft-insert-source]').forEach((button) => button.addEventListener('click', () => insertDraftCitation(data, button.dataset.draftInsertSource || '')));
+  document.querySelectorAll('[data-draft-propose-diff]').forEach((button) => button.addEventListener('click', () => createDraftDiff(data, button.dataset.draftProposeDiff || '')));
   bindObjectRows();
 }
 

@@ -633,6 +633,66 @@ def ensure_review_tables():
         ORDER BY (source_evidence_id, claim_id)
         """,
         """
+        CREATE TABLE IF NOT EXISTS draft_revisions
+        (
+            revision_id String,
+            draft_id String,
+            project String,
+            revision_number UInt32,
+            title String,
+            paragraphs_json String,
+            status LowCardinality(String),
+            actor String,
+            created_at DateTime64(3, 'UTC'),
+            updated_at DateTime64(3, 'UTC')
+        )
+        ENGINE = ReplacingMergeTree(updated_at)
+        PARTITION BY toYYYYMM(created_at)
+        ORDER BY (project, draft_id, revision_id)
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS draft_citations
+        (
+            citation_id String,
+            draft_id String,
+            project String,
+            paragraph_id String,
+            object_type LowCardinality(String),
+            object_id String,
+            object_version String,
+            source_evidence_id String,
+            source_version String,
+            citation_text String,
+            status LowCardinality(String),
+            actor String,
+            created_at DateTime64(3, 'UTC'),
+            updated_at DateTime64(3, 'UTC')
+        )
+        ENGINE = ReplacingMergeTree(updated_at)
+        PARTITION BY toYYYYMM(created_at)
+        ORDER BY (project, draft_id, paragraph_id, citation_id)
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS draft_proposed_diffs
+        (
+            diff_id String,
+            draft_id String,
+            project String,
+            paragraph_id String,
+            diff_kind LowCardinality(String),
+            before_text String,
+            after_text String,
+            rationale String,
+            status LowCardinality(String),
+            actor String,
+            created_at DateTime64(3, 'UTC'),
+            updated_at DateTime64(3, 'UTC')
+        )
+        ENGINE = ReplacingMergeTree(updated_at)
+        PARTITION BY toYYYYMM(created_at)
+        ORDER BY (project, draft_id, paragraph_id, diff_id)
+        """,
+        """
         CREATE TABLE IF NOT EXISTS publication_snapshots
         (
             snapshot_id String,
@@ -4850,18 +4910,106 @@ def benchmark_detail(params):
     }, "benchmark-detail.v1", now_iso(), False, ["navigate", "review", "open_source"])
 
 
-def draft_editor(params):
-    project = resolve_project_id((params.get("project_id", params.get("project", [""]))[0] or "").strip())
-    draft_id = (params.get("draft_id", [""])[0] or "working-draft").strip()
-    brief = read_project_brief(project, project)
-    claims = [row for row in scoped_claim_rows(project, 160) if row.get("review_state") in ("accepted", "published", "under_review", "draft", "proposed")]
-    sources = hydrate_source_rows([row.get("source_evidence_id") for row in claims])
-    outline = [
-        {"id": "summary", "label": "Summary", "status": "draft"},
-        {"id": "evidence", "label": "Evidence base", "status": "draft"},
-        {"id": "open_questions", "label": "Open questions", "status": "draft"},
-        {"id": "limitations", "label": "Limitations", "status": "draft"},
-    ]
+ALLOWED_DRAFT_OBJECT_TYPES = {"claim_stub", "source_record", "evidence_selection", "proposed_fact", "entity_link", "taxonomy_term"}
+
+
+def parse_json_list(value):
+    if not value:
+        return []
+    try:
+        parsed = json.loads(value)
+    except Exception:
+        return []
+    return parsed if isinstance(parsed, list) else []
+
+
+def draft_source_version(source):
+    return first_nonempty(source.get("last_ingested_at"), source.get("last_captured_at"), source.get("captured_at"))
+
+
+def stable_draft_citation_id(draft_id, paragraph_id, object_type, object_id, source_evidence_id):
+    raw = "|".join(str(value or "") for value in (draft_id, paragraph_id, object_type, object_id, source_evidence_id))
+    return "draft_citation/" + hashlib.sha1(raw.encode("utf-8")).hexdigest()[:24]
+
+
+def validate_draft_reference(ref):
+    object_type = compact_text(ref.get("object_type"), 80)
+    object_id = compact_text(ref.get("object_id"), 1000)
+    source_id = compact_text(ref.get("source_evidence_id"), 1000)
+    if object_type not in ALLOWED_DRAFT_OBJECT_TYPES:
+        raise ResearchUiError(400, "Draft citations must reference platform object IDs")
+    if not object_id:
+        raise ResearchUiError(400, "Draft citation object_id is required")
+    citation_text = compact_text(ref.get("citation_text") or ref.get("source_title") or object_id, 2000)
+    if citation_text.lower().startswith(("http://", "https://")):
+        citation_text = object_id
+    forbidden = (object_id, source_id)
+    if any(str(value).lower().startswith(("http://", "https://")) for value in forbidden if value):
+        raise ResearchUiError(400, "Draft citations cannot store free-floating URLs")
+    return {
+        "object_type": object_type,
+        "object_id": object_id,
+        "object_version": compact_text(ref.get("object_version"), 500),
+        "source_evidence_id": source_id,
+        "source_version": compact_text(ref.get("source_version"), 500),
+        "citation_text": citation_text,
+        "status": compact_text(ref.get("status") or "active", 80),
+    }
+
+
+def latest_draft_revision(project, draft_id):
+    rows = ch_data(
+        f"""
+        SELECT revision_id, draft_id, project, revision_number, title,
+          paragraphs_json, status, actor, created_at, updated_at
+        FROM draft_revisions FINAL
+        WHERE project = {sql_string(project)} AND draft_id = {sql_string(draft_id)}
+        ORDER BY revision_number DESC, updated_at DESC
+        LIMIT 1
+        """,
+        fallback=[],
+    )
+    if not rows:
+        return None
+    row = rows[0]
+    row["paragraphs"] = parse_json_list(row.get("paragraphs_json"))
+    return row
+
+
+def draft_citation_rows(project, draft_id):
+    return ch_data(
+        f"""
+        SELECT citation_id, draft_id, project, paragraph_id, object_type,
+          object_id, object_version, source_evidence_id, source_version,
+          citation_text, status, actor, created_at, updated_at
+        FROM draft_citations FINAL
+        WHERE project = {sql_string(project)}
+          AND draft_id = {sql_string(draft_id)}
+          AND status != 'removed'
+        ORDER BY updated_at ASC
+        LIMIT 500
+        """,
+        fallback=[],
+    )
+
+
+def draft_diff_rows(project, draft_id):
+    return ch_data(
+        f"""
+        SELECT diff_id, draft_id, project, paragraph_id, diff_kind,
+          before_text, after_text, rationale, status, actor, created_at, updated_at
+        FROM draft_proposed_diffs FINAL
+        WHERE project = {sql_string(project)}
+          AND draft_id = {sql_string(draft_id)}
+          AND status != 'dismissed'
+        ORDER BY updated_at DESC
+        LIMIT 120
+        """,
+        fallback=[],
+    )
+
+
+def derived_draft_paragraphs(brief, claims, sources):
     paragraphs = []
     if brief.get("research_question"):
         paragraphs.append({
@@ -4882,7 +5030,10 @@ def draft_editor(params):
                 "object_id": claim.get("claim_id"),
                 "object_version": claim.get("updated_at") or "",
                 "source_evidence_id": claim.get("source_evidence_id") or "",
+                "source_version": draft_source_version(source),
                 "source_title": source.get("title") or "",
+                "citation_text": source.get("title") or claim.get("claim_id") or "",
+                "status": "derived",
             }],
             "support_state": "supported" if claim.get("source_evidence_id") else "unsupported",
         })
@@ -4894,22 +5045,336 @@ def draft_editor(params):
             "references": [],
             "support_state": "open_question",
         })
+    return paragraphs
+
+
+def decorate_draft_reference(ref, source_map):
+    normalized = dict(ref)
+    source_id = normalized.get("source_evidence_id") or ""
+    source = source_for_ledger_row(source_map, source_id) if source_id else {}
+    current_source_version = draft_source_version(source)
+    stale = bool(source_id and normalized.get("source_version") and current_source_version and normalized.get("source_version") != current_source_version)
+    normalized["citation_id"] = normalized.get("citation_id") or stable_draft_citation_id(
+        normalized.get("draft_id") or "",
+        normalized.get("paragraph_id") or "",
+        normalized.get("object_type") or "",
+        normalized.get("object_id") or "",
+        source_id,
+    )
+    normalized["source_title"] = normalized.get("source_title") or source.get("title") or ""
+    normalized["current_source_version"] = current_source_version
+    normalized["stale"] = stale
+    normalized["stale_reason"] = "Source capture changed since citation insertion." if stale else ""
+    return normalized
+
+
+def attach_draft_references(paragraphs, citations, source_map, project, draft_id):
+    by_paragraph = group_rows(citations, "paragraph_id")
+    decorated = []
+    for paragraph in paragraphs:
+        paragraph = dict(paragraph)
+        paragraph_id = compact_text(paragraph.get("paragraph_id"), 300)
+        refs = []
+        seen = set()
+        for ref in list(paragraph.get("references") or []) + by_paragraph.get(paragraph_id, []):
+            try:
+                normalized = validate_draft_reference(ref)
+            except ResearchUiError:
+                continue
+            normalized["draft_id"] = draft_id
+            normalized["project"] = project
+            normalized["paragraph_id"] = paragraph_id
+            normalized["citation_id"] = ref.get("citation_id") or stable_draft_citation_id(
+                draft_id,
+                paragraph_id,
+                normalized["object_type"],
+                normalized["object_id"],
+                normalized["source_evidence_id"],
+            )
+            key = (normalized["object_type"], normalized["object_id"], normalized["source_evidence_id"])
+            if key in seen:
+                continue
+            seen.add(key)
+            refs.append(decorate_draft_reference(normalized, source_map))
+        paragraph["references"] = refs
+        if refs:
+            paragraph["support_state"] = "supported"
+        elif paragraph.get("support_state") not in ("context", "open_question"):
+            paragraph["support_state"] = "unsupported"
+        decorated.append(paragraph)
+    return decorated
+
+
+def draft_outline(paragraphs):
+    labels = {
+        "summary": "Summary",
+        "evidence": "Evidence base",
+        "open_questions": "Open questions",
+        "limitations": "Limitations",
+    }
+    rows = []
+    for section_id, label in labels.items():
+        section_rows = [row for row in paragraphs if row.get("section_id") == section_id]
+        unsupported = [row for row in section_rows if row.get("support_state") == "unsupported"]
+        rows.append({
+            "id": section_id,
+            "label": label,
+            "status": "blocked" if unsupported else ("draft" if section_rows else "empty"),
+            "count": len(section_rows),
+        })
+    return rows
+
+
+def draft_editor(params):
+    project = resolve_project_id((params.get("project_id", params.get("project", [""]))[0] or "").strip())
+    draft_id = (params.get("draft_id", [""])[0] or "working-draft").strip()
+    brief = read_project_brief(project, project)
+    claims = [row for row in scoped_claim_rows(project, 160) if row.get("review_state") in ("accepted", "published", "under_review", "draft", "proposed")]
+    source_ids = [row.get("source_evidence_id") for row in claims]
+    citations = draft_citation_rows(project, draft_id)
+    source_ids.extend(row.get("source_evidence_id") for row in citations)
+    sources = hydrate_source_rows(source_ids)
+    revision = latest_draft_revision(project, draft_id)
+    paragraphs = revision.get("paragraphs") if revision else derived_draft_paragraphs(brief, claims, sources)
+    paragraphs = attach_draft_references(paragraphs, citations, sources, project, draft_id)
+    references = [ref for paragraph in paragraphs for ref in paragraph.get("references") or []]
     unsupported = [row for row in paragraphs if not row.get("references") and row.get("support_state") not in ("context", "open_question")]
+    stale_refs = [ref for ref in references if ref.get("stale")]
+    diffs = draft_diff_rows(project, draft_id)
+    evidence_rail = list(sources.values())[:80]
+    revision_number = int((revision or {}).get("revision_number") or brief.get("version") or 1)
+    title = (revision or {}).get("title") or f"{brief.get('project_name') or project} draft"
     return read_envelope({
-        "header": {"draft_id": draft_id, "project": project, "title": f"{brief.get('project_name') or project} draft", "revision": brief.get("version") or "1"},
+        "header": {
+            "draft_id": draft_id,
+            "project": project,
+            "title": title,
+            "revision": revision_number,
+            "revision_id": (revision or {}).get("revision_id") or "",
+            "status": (revision or {}).get("status") or "draft",
+            "updated_at": (revision or {}).get("updated_at") or brief.get("updated_at") or "",
+        },
         "layout": {"outline_px": 260, "evidence_rail_px": 380},
-        "outline": outline,
+        "outline": draft_outline(paragraphs),
         "paragraphs": paragraphs,
-        "references": [ref for paragraph in paragraphs for ref in paragraph.get("references") or []],
-        "evidence_rail": list(sources.values())[:80],
-        "proposed_diffs": [],
+        "references": references,
+        "evidence_rail": evidence_rail,
+        "proposed_diffs": diffs,
         "checks": [
-            {"id": "object_linked_refs", "state": "pass" if any(p.get("references") for p in paragraphs) else "needs_work", "label": "Citations are object references"},
+            {"id": "object_linked_refs", "state": "pass" if references and all(ref.get("object_type") in ALLOWED_DRAFT_OBJECT_TYPES for ref in references) else "needs_work", "label": "Citations are object references"},
             {"id": "unsupported_paragraphs", "state": "pass" if not unsupported else "blocked", "label": "Unsupported paragraphs are visible", "count": len(unsupported)},
-            {"id": "source_version_stale", "state": "needs_work", "label": "Citation staleness check uses source capture versions"},
+            {"id": "source_version_stale", "state": "pass" if not stale_refs else "blocked", "label": "Citation staleness check uses source capture versions", "count": len(stale_refs)},
+            {"id": "proposed_diffs", "state": "pass" if diffs else "needs_work", "label": "Proposed diffs are persisted", "count": len(diffs)},
         ],
         "unsupported_paragraphs": unsupported,
-    }, "draft-editor.v1", now_iso(), False, ["navigate", "edit_draft", "insert_citation", "review"])
+        "stale_citations": stale_refs,
+    }, "draft-editor.v2", now_iso(), bool(stale_refs), ["navigate", "edit_draft", "insert_citation", "review"])
+
+
+def draft_params_from_payload(payload):
+    project = resolve_project_id(compact_text(payload.get("project") or payload.get("project_id"), 300))
+    draft_id = compact_text(payload.get("draft_id") or "working-draft", 300)
+    if not project:
+        raise ResearchUiError(400, "project is required")
+    return project, draft_id
+
+
+def normalize_draft_paragraph_payload(payload):
+    rows = payload.get("paragraphs")
+    if not isinstance(rows, list):
+        raise ResearchUiError(400, "paragraphs must be a list")
+    normalized = []
+    for index, row in enumerate(rows):
+        if not isinstance(row, dict):
+            continue
+        paragraph_id = compact_text(row.get("paragraph_id") or f"draft-paragraph/{index + 1}", 300)
+        references = []
+        for ref in row.get("references") or []:
+            if not isinstance(ref, dict):
+                continue
+            reference = validate_draft_reference(ref)
+            reference["paragraph_id"] = paragraph_id
+            reference["citation_id"] = ref.get("citation_id") or stable_draft_citation_id(
+                compact_text(payload.get("draft_id") or "working-draft", 300),
+                paragraph_id,
+                reference["object_type"],
+                reference["object_id"],
+                reference["source_evidence_id"],
+            )
+            references.append(reference)
+        support_state = compact_text(row.get("support_state") or ("supported" if references else "unsupported"), 80)
+        normalized.append({
+            "paragraph_id": paragraph_id,
+            "section_id": compact_text(row.get("section_id") or "evidence", 120),
+            "text": compact_text(row.get("text"), 50000),
+            "references": references,
+            "support_state": support_state,
+        })
+    return normalized
+
+
+def draft_citation_insert_rows(project, draft_id, paragraphs_or_refs, actor):
+    refs = []
+    if isinstance(paragraphs_or_refs, list):
+        for item in paragraphs_or_refs:
+            if not isinstance(item, dict):
+                continue
+            if item.get("paragraph_id") and item.get("object_type"):
+                refs.append(item)
+            else:
+                paragraph_id = compact_text(item.get("paragraph_id"), 300)
+                for ref in item.get("references") or []:
+                    if isinstance(ref, dict):
+                        refs.append({**ref, "paragraph_id": paragraph_id})
+    source_map = hydrate_source_rows([ref.get("source_evidence_id") for ref in refs])
+    now = now_iso()
+    rows = []
+    seen = set()
+    for ref in refs:
+        normalized = validate_draft_reference(ref)
+        paragraph_id = compact_text(ref.get("paragraph_id"), 300)
+        source_id = normalized["source_evidence_id"]
+        source = source_for_ledger_row(source_map, source_id) if source_id else {}
+        source_version = normalized["source_version"] or draft_source_version(source)
+        citation_id = compact_text(ref.get("citation_id"), 300) or stable_draft_citation_id(
+            draft_id,
+            paragraph_id,
+            normalized["object_type"],
+            normalized["object_id"],
+            source_id,
+        )
+        if citation_id in seen:
+            continue
+        seen.add(citation_id)
+        rows.append({
+            "citation_id": citation_id,
+            "draft_id": draft_id,
+            "project": project,
+            "paragraph_id": paragraph_id,
+            "object_type": normalized["object_type"],
+            "object_id": normalized["object_id"],
+            "object_version": normalized["object_version"],
+            "source_evidence_id": source_id,
+            "source_version": source_version,
+            "citation_text": normalized["citation_text"],
+            "status": normalized["status"],
+            "actor": actor,
+            "created_at": ref.get("created_at") or now,
+            "updated_at": now,
+        })
+    return rows
+
+
+def create_draft_revision(payload):
+    project, draft_id = draft_params_from_payload(payload)
+    actor = compact_text(payload.get("actor") or REVIEW_ACTOR, 200)
+    paragraphs = normalize_draft_paragraph_payload({**payload, "draft_id": draft_id})
+    latest = latest_draft_revision(project, draft_id)
+    revision_number = int((latest or {}).get("revision_number") or 0) + 1
+    now = now_iso()
+    revision_id = compact_text(payload.get("revision_id"), 300) or make_id("draft_revision")
+    title = compact_text(payload.get("title") or f"{project} draft", 500)
+    ch_insert_json_each_row("draft_revisions", [{
+        "revision_id": revision_id,
+        "draft_id": draft_id,
+        "project": project,
+        "revision_number": revision_number,
+        "title": title,
+        "paragraphs_json": json_text(paragraphs),
+        "status": compact_text(payload.get("status") or "draft", 80),
+        "actor": actor,
+        "created_at": now,
+        "updated_at": now,
+    }])
+    citation_rows = draft_citation_insert_rows(project, draft_id, paragraphs, actor)
+    ch_insert_json_each_row("draft_citations", citation_rows)
+    event = persist_review_event(build_review_event("draft.revision.saved", {
+        "source_evidence_id": project_source_evidence_id(project),
+        "project": project,
+        "subject_type": "draft_revision",
+        "subject_id": revision_id,
+        "draft_id": draft_id,
+        "revision_number": revision_number,
+        "actor": actor,
+        "idempotency_key": compact_text(payload.get("idempotency_key"), 500),
+        "source_anchor": {"kind": "draft_revision", "draft_id": draft_id, "revision_id": revision_id},
+    }))
+    params = {"project_id": [project], "draft_id": [draft_id]}
+    return {"event": event, "draft": draft_editor(params)}
+
+
+def insert_draft_citation(payload):
+    project, draft_id = draft_params_from_payload(payload)
+    actor = compact_text(payload.get("actor") or REVIEW_ACTOR, 200)
+    paragraph_id = compact_text(payload.get("paragraph_id"), 300)
+    if not paragraph_id:
+        raise ResearchUiError(400, "paragraph_id is required")
+    object_type = compact_text(payload.get("object_type") or "source_record", 80)
+    source_id = compact_text(payload.get("source_evidence_id") or (payload.get("object_id") if object_type == "source_record" else ""), 1000)
+    ref = {
+        "paragraph_id": paragraph_id,
+        "citation_id": compact_text(payload.get("citation_id"), 300),
+        "object_type": object_type,
+        "object_id": compact_text(payload.get("object_id") or source_id, 1000),
+        "object_version": compact_text(payload.get("object_version"), 500),
+        "source_evidence_id": source_id,
+        "source_version": compact_text(payload.get("source_version"), 500),
+        "citation_text": compact_text(payload.get("citation_text") or payload.get("source_title") or payload.get("object_id") or source_id, 2000),
+        "status": compact_text(payload.get("status") or "active", 80),
+    }
+    citation_rows = draft_citation_insert_rows(project, draft_id, [ref], actor)
+    ch_insert_json_each_row("draft_citations", citation_rows)
+    event = persist_review_event(build_review_event("draft.citation.inserted", {
+        "source_evidence_id": project_source_evidence_id(project),
+        "project": project,
+        "subject_type": "draft_citation",
+        "subject_id": citation_rows[0]["citation_id"] if citation_rows else "",
+        "draft_id": draft_id,
+        "paragraph_id": paragraph_id,
+        "object_type": ref["object_type"],
+        "object_id": ref["object_id"],
+        "actor": actor,
+        "idempotency_key": compact_text(payload.get("idempotency_key"), 500),
+        "source_anchor": {"kind": "draft_citation", "draft_id": draft_id, "paragraph_id": paragraph_id},
+    }))
+    return {"event": event, "draft": draft_editor({"project_id": [project], "draft_id": [draft_id]})}
+
+
+def create_draft_proposed_diff(payload):
+    project, draft_id = draft_params_from_payload(payload)
+    paragraph_id = compact_text(payload.get("paragraph_id"), 300)
+    if not paragraph_id:
+        raise ResearchUiError(400, "paragraph_id is required")
+    actor = compact_text(payload.get("actor") or REVIEW_ACTOR, 200)
+    now = now_iso()
+    diff_id = compact_text(payload.get("diff_id"), 300) or make_id("draft_diff")
+    row = {
+        "diff_id": diff_id,
+        "draft_id": draft_id,
+        "project": project,
+        "paragraph_id": paragraph_id,
+        "diff_kind": compact_text(payload.get("diff_kind") or "support_gap", 80),
+        "before_text": compact_text(payload.get("before_text"), 50000),
+        "after_text": compact_text(payload.get("after_text"), 50000),
+        "rationale": compact_text(payload.get("rationale") or "Needs an object-linked citation before publication.", 20000),
+        "status": compact_text(payload.get("status") or "proposed", 80),
+        "actor": actor,
+        "created_at": payload.get("created_at") or now,
+        "updated_at": now,
+    }
+    ch_insert_json_each_row("draft_proposed_diffs", [row])
+    event = persist_review_event(build_review_event("draft.diff.proposed", {
+        "source_evidence_id": project_source_evidence_id(project),
+        "project": project,
+        "subject_type": "draft_proposed_diff",
+        "subject_id": diff_id,
+        "draft_id": draft_id,
+        "paragraph_id": paragraph_id,
+        "actor": actor,
+        "idempotency_key": compact_text(payload.get("idempotency_key"), 500),
+        "source_anchor": {"kind": "draft_proposed_diff", "draft_id": draft_id, "paragraph_id": paragraph_id},
+    }))
+    return {"event": event, "draft": draft_editor({"project_id": [project], "draft_id": [draft_id]})}
 
 
 def frozen_publication_manifest(bundle):
@@ -6790,6 +7255,12 @@ class ResearchUiHandler(BaseHTTPRequestHandler):
                 return self.send_json(update_project_brief(payload), status=201)
             if parsed.path == "/api/project-brief/review":
                 return self.send_json(update_project_brief(payload, review_request=True), status=201)
+            if parsed.path == "/api/drafts/save":
+                return self.send_json(create_draft_revision(payload), status=201)
+            if parsed.path == "/api/drafts/citation":
+                return self.send_json(insert_draft_citation(payload), status=201)
+            if parsed.path == "/api/drafts/proposed-diff":
+                return self.send_json(create_draft_proposed_diff(payload), status=201)
             if parsed.path == "/api/library/actions":
                 return self.send_json(create_library_action(payload), status=201)
             if parsed.path == "/api/evidence/selections":

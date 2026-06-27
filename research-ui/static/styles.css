@@ -4875,6 +4875,51 @@ pre {
   color: var(--muted);
   font-size: 12px;
 }
+.handoff-artifact-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 10px;
+}
+.handoff-artifact {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+  overflow: hidden;
+  padding: 12px;
+  border: 1px solid var(--soft-line);
+  border-radius: 8px;
+  background: var(--panel-2);
+}
+.handoff-artifact header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+.handoff-artifact header div {
+  min-width: 0;
+}
+.handoff-artifact p,
+.handoff-artifact strong,
+.handoff-artifact span,
+.handoff-artifact footer {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.handoff-artifact span,
+.handoff-artifact footer {
+  color: var(--muted);
+  font-size: 12px;
+}
+.handoff-artifact .status-badge {
+  flex: 0 0 auto;
+  white-space: nowrap;
+  overflow-wrap: normal;
+}
+.handoff-artifact code {
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
 .draft-shell {
   display: grid;
   grid-template-columns: 260px minmax(0, 1fr) 380px;

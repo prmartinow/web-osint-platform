@@ -4003,6 +4003,46 @@ function publishingStateClass(value) {
   return 'warn';
 }
 
+function handoffObjectSummary(row) {
+  const counts = row.object_counts || row.artifact?.object_counts || {};
+  const labels = [
+    ['source_capture_ids', 'sources'],
+    ['claim_ids', 'claims'],
+    ['evidence_selection_ids', 'evidence'],
+    ['entity_link_ids', 'entities'],
+    ['taxonomy_term_ids', 'taxonomy'],
+  ];
+  return labels
+    .map(([key, label]) => `${Number(counts[key] || 0)} ${label}`)
+    .join(' · ');
+}
+
+function renderHandoffArtifacts(rows) {
+  const artifacts = rows || [];
+  if (!artifacts.length) {
+    return '<p class="muted">No handoff artifacts have been generated for this snapshot yet.</p>';
+  }
+  return `
+    <div class="handoff-artifact-list">
+      ${artifacts.map((row) => `
+        <article class="handoff-artifact">
+          <header>
+            <div>
+              <strong>${escapeHtml(titleCase(row.artifact_kind || 'public_export_manifest'))}</strong>
+              <span>${escapeHtml(row.handoff_id || '')}</span>
+            </div>
+            ${statusBadge(row.status || 'ready')}
+          </header>
+          <p>${escapeHtml(handoffObjectSummary(row))}</p>
+          <p><strong>Manifest</strong> <code>${escapeHtml(row.manifest_hash || '')}</code></p>
+          <p><strong>Public config</strong> ${escapeHtml([row.public_config?.package_type, row.public_config?.target, row.public_config?.visibility].filter(Boolean).join(' · '))}</p>
+          <footer>${escapeHtml(fmtDate(row.created_at) || '')} · ${escapeHtml(row.actor || '')}</footer>
+        </article>
+      `).join('')}
+    </div>
+  `;
+}
+
 function renderPublishingPreview(data) {
   const preview = data.preview || {};
   const row = preview.row || null;
@@ -4095,6 +4135,10 @@ function renderPublishingPreview(data) {
         <h4>Configured handoff targets</h4>
         ${(preview.handoff || []).map((item) => `<p><strong>${escapeHtml(item.label || '')}</strong><br>${escapeHtml(item.detail || '')}</p>`).join('')}
       </article>
+      <article class="review-preview-card">
+        <h4>Generated artifacts</h4>
+        ${renderHandoffArtifacts(preview.handoff_artifacts || [])}
+      </article>
     </section>
     <section class="${sectionClass('history')}" data-publishing-preview-section="history">
       <article class="review-preview-card">
@@ -4136,6 +4180,7 @@ async function persistPublishingAction(row, action) {
   const endpoint = {
     create_snapshot: '/api/publishing/snapshot',
     request_review: '/api/publishing/request-review',
+    create_handoff: '/api/publishing/handoff',
     publish_snapshot: '/api/publishing/publish',
     supersede_release: '/api/publishing/supersede',
   }[action];
@@ -4205,12 +4250,12 @@ function bindPublishingKeyboard() {
     if (['o', 'c', 'b', 's', 'r', 'e', 'p', 'h'].includes(key)) {
       event.preventDefault();
       const row = (state.publishingRows || []).find((item) => publishingBundleKey(item) === state.publishingSelectedId);
-      // Map key -> the existing publishing action vocabulary. Snapshot/publish
+      // Map key -> the existing publishing action vocabulary. Mutating actions
       // respect disabled_actions (no-op when the row marks them unavailable).
       const actionMap = { o: 'open_package', c: 'run_checks', b: 'focus_blockers', s: 'create_snapshot', r: 'request_review', e: 'create_handoff', p: 'publish_snapshot', h: 'history' };
       const action = actionMap[key];
       const disabled = new Set(row?.disabled_actions || ['create_snapshot', 'request_review', 'create_handoff', 'publish_snapshot', 'supersede_release']);
-      if (['create_snapshot', 'publish_snapshot'].includes(action) && disabled.has(action)) {
+      if (['create_snapshot', 'request_review', 'create_handoff', 'publish_snapshot', 'supersede_release'].includes(action) && disabled.has(action)) {
         const status = $('publishingActionStatus');
         if (status) status.textContent = `${action} is not available for this bundle.`;
         return;
@@ -4218,11 +4263,10 @@ function bindPublishingKeyboard() {
       try {
         if (action === 'open_package') {
           openPublicationDetail(row);
-        } else if (action === 'history' || action === 'focus_blockers' || action === 'create_handoff') {
+        } else if (action === 'history' || action === 'focus_blockers') {
           // Read-only / preview actions: switch preview tab where one exists.
           if (action === 'focus_blockers') state.publishingPreviewTab = 'readiness';
           else if (action === 'history') state.publishingPreviewTab = 'audit';
-          else state.publishingPreviewTab = 'readiness';
           replaceRouteHash();
           loadRoutePage();
         } else {
@@ -5981,6 +6025,7 @@ async function persistPublicationDetailAction(action, data) {
     request_review: '/api/publishing/request-review',
     approve_snapshot: '/api/publishing/approve',
     request_changes: '/api/publishing/request-changes',
+    create_handoff: '/api/publishing/handoff',
     publish_snapshot: '/api/publishing/publish',
     supersede_release: '/api/publishing/supersede',
   }[action];
@@ -6023,6 +6068,7 @@ function renderPublicationDetailPage(data) {
           <button class="secondary" data-publication-action="request_review" ${snapshot.snapshot_id ? '' : 'disabled'}>Request review</button>
           <button class="secondary" data-publication-action="approve_snapshot" ${snapshot.snapshot_id ? '' : 'disabled'}>Approve</button>
           <button class="secondary" data-publication-action="request_changes" ${snapshot.snapshot_id ? '' : 'disabled'}>Request changes</button>
+          <button class="secondary" data-publication-action="create_handoff" ${snapshot.review_state === 'approved' ? '' : 'disabled'}>Create handoff</button>
           <button data-publication-action="publish_snapshot" ${snapshot.review_state === 'approved' ? '' : 'disabled'}>Publish</button>
           <button class="secondary danger-button" data-publication-action="supersede_release" ${bundle.release_state === 'published' ? '' : 'disabled'}>Supersede</button>
           <span id="publicationDetailStatus" class="muted"></span>
@@ -6035,6 +6081,7 @@ function renderPublicationDetailPage(data) {
           { label: 'Evidence', value: data.manifest_summary?.evidence || 0 },
           { label: 'Sources', value: data.manifest_summary?.sources || 0 },
           { label: 'Taxonomy IDs', value: data.manifest_summary?.taxonomy_terms || 0 },
+          { label: 'Handoffs', value: data.manifest_summary?.handoffs || 0 },
         ])}
       </section>
       <section class="panel detail-card" data-publication-section="checks">
@@ -6048,6 +6095,7 @@ function renderPublicationDetailPage(data) {
       <section class="panel detail-card" data-publication-section="claims"><h3>Claims</h3>${(data.claims || []).map((claim) => `<p><strong>${escapeHtml(claim.claim_text || '')}</strong><br>${statusBadge(claim.review_state)} ${claim.source_evidence_id ? `<button class="text-button" data-id="${escapeHtml(claim.source_evidence_id)}">Source</button>` : ''}</p>`).join('') || '<p class="muted">No claims.</p>'}</section>
       <section class="panel detail-card" data-publication-section="evidence"><h3>Evidence</h3>${renderMiniSourceList(data.sources || [])}</section>
       <section class="panel detail-card" data-publication-section="contradictions"><h3>Contradictions</h3>${(data.contradictions || []).map((claim) => `<p>${statusBadge(claim.contradiction_state)} ${escapeHtml(claim.claim_text || '')}</p>`).join('') || '<p class="muted">No unresolved contradictions in this manifest.</p>'}</section>
+      <section class="panel detail-card" data-publication-section="handoff"><h3>Handoff artifacts</h3>${renderHandoffArtifacts(data.handoffs || [])}</section>
       <section class="panel detail-card" data-publication-section="discussion"><h3>Discussion</h3>${(data.discussion || []).map((event) => `<p><strong>${escapeHtml(event.event_type)}</strong><br>${escapeHtml(fmtDate(event.created_at))} · ${escapeHtml(event.actor || '')}</p>`).join('') || '<p class="muted">No review discussion yet.</p>'}</section>
       <section class="panel detail-card" data-publication-section="public_preview"><h3>Public preview</h3><p>${escapeHtml(data.public_preview?.title || bundle.title || '')}</p><p>${escapeHtml(data.public_preview?.claim_count || 0)} claims · ${escapeHtml(data.public_preview?.citation_count || 0)} citations</p></section>
     </section>

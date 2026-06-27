@@ -777,6 +777,28 @@ def ensure_review_tables():
         PARTITION BY toYYYYMM(created_at)
         ORDER BY (bundle_id, release_id)
         """,
+        """
+        CREATE TABLE IF NOT EXISTS publication_handoffs
+        (
+            handoff_id String,
+            snapshot_id String,
+            bundle_id String,
+            project String,
+            artifact_kind LowCardinality(String),
+            manifest_hash String,
+            object_ids_json String,
+            public_config_json String,
+            artifact_json String,
+            status LowCardinality(String),
+            actor String,
+            note String,
+            created_at DateTime64(3, 'UTC'),
+            updated_at DateTime64(3, 'UTC')
+        )
+        ENGINE = ReplacingMergeTree(updated_at)
+        PARTITION BY toYYYYMM(created_at)
+        ORDER BY (project, bundle_id, snapshot_id, handoff_id)
+        """,
     ]
     for query in ddl:
         ch_execute(query)
@@ -4052,6 +4074,7 @@ def publishing_preview(row):
             {"label": "Data export", "detail": "JSON claim/evidence bundle with stable identifiers."},
             {"label": "Research archive", "detail": "Snapshot manifest, checks, audit, and source references."},
         ],
+        "handoff_artifacts": row.get("handoffs") or [],
         "history": row.get("history") or [],
     }
 
@@ -4130,6 +4153,52 @@ def latest_publication_releases(bundle_ids):
     return latest
 
 
+def decorate_publication_handoff(row):
+    row = dict(row or {})
+    row["object_ids"] = parse_json_dict(row.get("object_ids_json", ""))
+    row["public_config"] = parse_json_dict(row.get("public_config_json", ""))
+    row["artifact"] = parse_json_dict(row.get("artifact_json", ""))
+    row["object_counts"] = {
+        key: len(value) if isinstance(value, list) else 0
+        for key, value in row["object_ids"].items()
+    }
+    return row
+
+
+def publication_handoff_rows(bundle_ids=None, snapshot_id=""):
+    bundle_ids = [bundle_id for bundle_id in dict.fromkeys(bundle_ids or []) if bundle_id]
+    clauses = []
+    if bundle_ids:
+        clauses.append("bundle_id IN (" + ", ".join(sql_string(bundle_id) for bundle_id in bundle_ids) + ")")
+    snapshot_id = compact_text(snapshot_id, 200)
+    if snapshot_id:
+        clauses.append(f"snapshot_id = {sql_string(snapshot_id)}")
+    if not clauses:
+        return []
+    rows = ch_data(
+        f"""
+        SELECT handoff_id, snapshot_id, bundle_id, project, artifact_kind,
+          manifest_hash, object_ids_json, public_config_json, artifact_json,
+          status, actor, note, created_at, updated_at
+        FROM publication_handoffs FINAL
+        WHERE {' AND '.join(clauses)}
+        ORDER BY updated_at DESC
+        LIMIT 120
+        """,
+        fallback=[],
+    )
+    return [decorate_publication_handoff(row) for row in rows]
+
+
+def publication_handoffs_by_bundle(bundle_ids):
+    grouped = {bundle_id: [] for bundle_id in dict.fromkeys(bundle_ids or []) if bundle_id}
+    for row in publication_handoff_rows(list(grouped.keys())):
+        bundle_id = row.get("bundle_id") or ""
+        if bundle_id in grouped:
+            grouped[bundle_id].append(row)
+    return grouped
+
+
 def snapshot_check(snapshot):
     if not snapshot:
         return {
@@ -4149,8 +4218,9 @@ def snapshot_check(snapshot):
     }
 
 
-def apply_publication_persistence(row, snapshot=None, release=None):
+def apply_publication_persistence(row, snapshot=None, release=None, handoffs=None):
     row = dict(row)
+    handoffs = handoffs or []
     original_blocked_checks = sum(1 for check in row.get("checks") or [] if check.get("state") == "blocked")
     base_blockers = max(0, int(row.get("blocker_count") or 0) - original_blocked_checks)
     checks = []
@@ -4175,11 +4245,11 @@ def apply_publication_persistence(row, snapshot=None, release=None):
         row["manifest_hash"] = snapshot.get("manifest_hash") or row.get("manifest_hash") or ""
         row["snapshot_created_at"] = snapshot.get("created_at") or ""
         row["snapshot_updated_at"] = snapshot.get("updated_at") or ""
-        row["permitted_actions"].extend(["request_review", "create_handoff"])
+        row["permitted_actions"].append("request_review")
         if row["review_state"] == "approved":
-            row["permitted_actions"].append("publish_snapshot")
+            row["permitted_actions"].extend(["create_handoff", "publish_snapshot"])
         else:
-            row["disabled_actions"].append("publish_snapshot")
+            row["disabled_actions"].extend(["create_handoff", "publish_snapshot"])
         if row["release_state"] == "published":
             row["display_state"] = "published"
             row["permitted_actions"].append("supersede_release")
@@ -4199,12 +4269,22 @@ def apply_publication_persistence(row, snapshot=None, release=None):
             "created_at": snapshot.get("updated_at") or snapshot.get("created_at") or now_iso(),
             "detail": f"{snapshot.get('snapshot_id')} / {snapshot.get('review_state') or 'draft'}",
         }]
+        if handoffs:
+            row["history"] = row["history"] + [{
+                "event_type": "publication.handoff.loaded",
+                "actor": handoffs[0].get("actor") or "research-ui",
+                "created_at": handoffs[0].get("updated_at") or handoffs[0].get("created_at") or now_iso(),
+                "detail": f"{handoffs[0].get('artifact_kind') or 'handoff'} / {handoffs[0].get('handoff_id') or ''}",
+            }]
     else:
         row["latest_snapshot_id"] = ""
         row["snapshot_state"] = "none"
         row["review_state"] = "draft"
         row["release_state"] = "unpublished"
         row["disabled_actions"] = ["request_review", "create_handoff", "publish_snapshot", "supersede_release"]
+    row["handoff_count"] = len(handoffs)
+    row["latest_handoff_id"] = handoffs[0].get("handoff_id") if handoffs else ""
+    row["handoffs"] = handoffs[:6]
     row["blocker_count"] = base_blockers + sum(1 for check in checks if check.get("state") == "blocked")
     row["optimistic_version"] = compact_text(first_nonempty(row.get("snapshot_updated_at"), row.get("updated_at"), row.get("manifest_hash")), 120)
     return row
@@ -4241,7 +4321,16 @@ def publishing_read_model(params):
             rows.append(make_publication_bundle_row(row, counts, coverage, "export_bundle"))
     snapshots = latest_publication_snapshots([row.get("bundle_id") for row in rows])
     releases = latest_publication_releases([row.get("bundle_id") for row in rows])
-    rows = [apply_publication_persistence(row, snapshots.get(row.get("bundle_id")), releases.get(row.get("bundle_id"))) for row in rows]
+    handoffs = publication_handoffs_by_bundle([row.get("bundle_id") for row in rows])
+    rows = [
+        apply_publication_persistence(
+            row,
+            snapshots.get(row.get("bundle_id")),
+            releases.get(row.get("bundle_id")),
+            handoffs.get(row.get("bundle_id")),
+        )
+        for row in rows
+    ]
     if q:
         lowered = q.lower()
         rows = [row for row in rows if lowered in " ".join(str(row.get(key) or "") for key in ("title", "project", "package_type_label", "target", "display_state")).lower()]
@@ -5628,6 +5717,78 @@ def frozen_publication_manifest(bundle):
     return manifest, manifest_hash
 
 
+def publication_manifest_object_ids(manifest):
+    keys = (
+        "source_capture_ids",
+        "claim_ids",
+        "evidence_selection_ids",
+        "entity_link_ids",
+        "taxonomy_term_ids",
+    )
+    object_ids = {}
+    for key in keys:
+        values = manifest.get(key) or []
+        if not isinstance(values, list):
+            values = []
+        object_ids[key] = [compact_text(value, 1000) for value in values if compact_text(value, 1000)]
+    return object_ids
+
+
+def publication_public_config(manifest, bundle=None):
+    bundle = bundle or {}
+    manifest_bundle = manifest.get("bundle") if isinstance(manifest.get("bundle"), dict) else {}
+    manifest_config = manifest.get("public_config") if isinstance(manifest.get("public_config"), dict) else {}
+    return {
+        "target": compact_text(first_nonempty(manifest_config.get("target"), manifest_bundle.get("target"), bundle.get("target")), 300),
+        "package_type": compact_text(first_nonempty(manifest_config.get("package_type"), manifest_bundle.get("package_type"), bundle.get("package_type")), 120),
+        "visibility": compact_text(manifest_config.get("visibility") or "internal_until_release", 120),
+        "draft_revision": compact_text(first_nonempty(manifest_bundle.get("draft_revision"), bundle.get("draft_revision")), 120),
+        "manifest_version": compact_text(first_nonempty(manifest_bundle.get("manifest_version"), bundle.get("manifest_version")), 120),
+    }
+
+
+def publication_handoff_artifact(snapshot, bundle, handoff_id, artifact_kind, created_at):
+    manifest = snapshot.get("manifest") if isinstance(snapshot.get("manifest"), dict) else {}
+    manifest_bundle = manifest.get("bundle") if isinstance(manifest.get("bundle"), dict) else {}
+    object_ids = publication_manifest_object_ids(manifest)
+    public_config = publication_public_config(manifest, bundle)
+    object_counts = {
+        key: len(values) if isinstance(values, list) else 0
+        for key, values in object_ids.items()
+    }
+    manifest_hash = snapshot.get("manifest_hash") or manifest.get("manifest_hash") or ""
+    return {
+        "schema_version": "publication_handoff.v1",
+        "handoff_id": handoff_id,
+        "artifact_kind": artifact_kind,
+        "status": "ready",
+        "created_at": created_at,
+        "snapshot": {
+            "snapshot_id": snapshot.get("snapshot_id") or "",
+            "bundle_id": snapshot.get("bundle_id") or "",
+            "project": snapshot.get("project") or "",
+            "snapshot_state": snapshot.get("snapshot_state") or "",
+            "review_state": snapshot.get("review_state") or "",
+            "manifest_hash": manifest_hash,
+        },
+        "bundle": {
+            "bundle_id": manifest_bundle.get("bundle_id") or snapshot.get("bundle_id") or "",
+            "title": manifest_bundle.get("title") or bundle.get("title") or "",
+            "package_type": public_config.get("package_type") or "",
+            "target": public_config.get("target") or "",
+        },
+        "manifest_hash": manifest_hash,
+        "object_ids": object_ids,
+        "object_counts": object_counts,
+        "public_config": public_config,
+        "checks": [
+            {key: check.get(key) for key in ("id", "label", "state", "detail")}
+            for check in (snapshot.get("checks") or manifest.get("checks") or [])
+            if isinstance(check, dict)
+        ],
+    }
+
+
 def publication_bundle_by_id(bundle_id):
     model = publishing_read_model({"limit": ["200"]})
     for row in model.get("bundles") or []:
@@ -5664,6 +5825,7 @@ def publication_detail(params):
     bundle = publication_bundle_by_id(bundle_id)
     snapshot = latest_publication_snapshots([bundle_id]).get(bundle_id)
     release = latest_publication_releases([bundle_id]).get(bundle_id)
+    handoffs = publication_handoff_rows([bundle_id])
     if snapshot and snapshot.get("manifest"):
         manifest = snapshot.get("manifest") or {}
         manifest_hash = snapshot.get("manifest_hash") or manifest.get("manifest_hash") or ""
@@ -5685,14 +5847,16 @@ def publication_detail(params):
             "sources": len(manifest.get("sources") or []),
             "entities": len(manifest.get("entities") or []),
             "taxonomy_terms": len(manifest.get("taxonomy_term_ids") or []),
+            "handoffs": len(handoffs),
         },
-        "tabs": ["overview", "changed_content", "claims", "evidence", "contradictions", "checks", "discussion", "public_preview"],
+        "tabs": ["overview", "changed_content", "claims", "evidence", "contradictions", "checks", "handoff", "discussion", "public_preview"],
         "checks": checks,
         "changed_content": changed_content,
         "claims": (manifest.get("claims") or [])[:120],
         "evidence": (manifest.get("evidence") or [])[:120],
         "sources": (manifest.get("sources") or [])[:120],
         "entities": (manifest.get("entities") or [])[:120],
+        "handoffs": handoffs,
         "contradictions": [row for row in manifest.get("claims") or [] if row.get("contradiction_state") in ("conflict", "disputed") or row.get("review_state") == "disputed"],
         "discussion": ch_data(
             f"""
@@ -5711,7 +5875,7 @@ def publication_detail(params):
             "claim_count": len(manifest.get("claims") or []),
             "citation_count": len(manifest.get("source_capture_ids") or []),
         },
-        "actions": apply_publication_persistence(bundle, snapshot, release).get("permitted_actions") or [],
+        "actions": apply_publication_persistence(bundle, snapshot, release, handoffs).get("permitted_actions") or [],
     }, "publication-detail.v1", now_iso(), False, ["navigate", "create_snapshot", "review", "publish"])
 
 
@@ -5760,6 +5924,7 @@ def create_publication_snapshot(payload):
     insert_publication_snapshot_row(snapshot)
     event = persist_review_event(build_review_event("publication.snapshot.created", {
         **payload,
+        "source_evidence_id": project_source_evidence_id(snapshot["project"]),
         "project": snapshot["project"],
         "subject_type": "publication_snapshot",
         "subject_id": snapshot["snapshot_id"],
@@ -5787,6 +5952,82 @@ def latest_snapshot_for_update(payload):
     return bundle_id, snapshot
 
 
+def insert_publication_handoff_row(row):
+    ch_insert_json_each_row("publication_handoffs", [{
+        "handoff_id": row["handoff_id"],
+        "snapshot_id": row.get("snapshot_id") or "",
+        "bundle_id": row.get("bundle_id") or "",
+        "project": row.get("project") or "",
+        "artifact_kind": row.get("artifact_kind") or "public_export_manifest",
+        "manifest_hash": row.get("manifest_hash") or "",
+        "object_ids_json": json_text(row.get("object_ids") or {}),
+        "public_config_json": json_text(row.get("public_config") or {}),
+        "artifact_json": json_text(row.get("artifact") or {}),
+        "status": row.get("status") or "ready",
+        "actor": row.get("actor") or REVIEW_ACTOR,
+        "note": row.get("note") or "",
+        "created_at": row.get("created_at") or now_iso(),
+        "updated_at": row.get("updated_at") or now_iso(),
+    }])
+
+
+def create_publication_handoff(payload):
+    bundle_id, snapshot = latest_snapshot_for_update(payload)
+    if snapshot.get("review_state") != "approved":
+        raise ResearchUiError(409, "Snapshot must be approved before creating a handoff artifact")
+    bundle = publication_bundle_by_id(bundle_id)
+    now = now_iso()
+    artifact_kind = compact_text(payload.get("artifact_kind") or "public_export_manifest", 120)
+    handoff_id = compact_text(payload.get("handoff_id"), 200) or make_id("publication_handoff")
+    artifact = publication_handoff_artifact(snapshot, bundle, handoff_id, artifact_kind, now)
+    row = {
+        "handoff_id": handoff_id,
+        "snapshot_id": snapshot.get("snapshot_id") or "",
+        "bundle_id": bundle_id,
+        "project": snapshot.get("project") or "",
+        "artifact_kind": artifact_kind,
+        "manifest_hash": snapshot.get("manifest_hash") or artifact.get("manifest_hash") or "",
+        "object_ids": artifact.get("object_ids") or {},
+        "public_config": artifact.get("public_config") or {},
+        "artifact": artifact,
+        "status": "ready",
+        "actor": compact_text(payload.get("actor") or REVIEW_ACTOR, 200),
+        "note": compact_text(payload.get("note"), 20000),
+        "created_at": now,
+        "updated_at": now,
+    }
+    insert_publication_handoff_row(row)
+    event = persist_review_event(build_review_event("publication.handoff.created", {
+        **payload,
+        "source_evidence_id": project_source_evidence_id(row["project"]),
+        "project": row["project"],
+        "subject_type": "publication_handoff",
+        "subject_id": handoff_id,
+        "bundle_id": bundle_id,
+        "snapshot_id": row["snapshot_id"],
+        "handoff_id": handoff_id,
+        "artifact_kind": artifact_kind,
+        "manifest_hash": row["manifest_hash"],
+        "source_anchor": {
+            "kind": "publication_handoff",
+            "bundle_id": bundle_id,
+            "snapshot_id": row["snapshot_id"],
+            "handoff_id": handoff_id,
+            "manifest_hash": row["manifest_hash"],
+        },
+    }))
+    return {
+        "handoff": decorate_publication_handoff({
+            **row,
+            "object_ids_json": json_text(row.get("object_ids") or {}),
+            "public_config_json": json_text(row.get("public_config") or {}),
+            "artifact_json": json_text(row.get("artifact") or {}),
+        }),
+        "event": event,
+        "detail": publication_detail({"bundle_id": [bundle_id]}),
+    }
+
+
 def update_publication_snapshot(payload, *, snapshot_state, review_state, release_state=None, event_type):
     bundle_id, snapshot = latest_snapshot_for_update(payload)
     now = now_iso()
@@ -5802,6 +6043,7 @@ def update_publication_snapshot(payload, *, snapshot_state, review_state, releas
     insert_publication_snapshot_row(updated)
     event = persist_review_event(build_review_event(event_type, {
         **payload,
+        "source_evidence_id": project_source_evidence_id(updated.get("project") or ""),
         "project": updated.get("project") or "",
         "subject_type": "publication_snapshot",
         "subject_id": updated.get("snapshot_id") or "",
@@ -7445,6 +7687,8 @@ class ResearchUiHandler(BaseHTTPRequestHandler):
                 return self.send_json(approve_publication_snapshot(payload), status=201)
             if parsed.path == "/api/publishing/request-changes":
                 return self.send_json(request_publication_changes(payload), status=201)
+            if parsed.path == "/api/publishing/handoff":
+                return self.send_json(create_publication_handoff(payload), status=201)
             if parsed.path == "/api/publishing/publish":
                 return self.send_json(publish_publication_snapshot(payload), status=201)
             if parsed.path == "/api/publishing/supersede":

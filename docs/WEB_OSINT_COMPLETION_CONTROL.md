@@ -123,6 +123,7 @@ Migration steps:
 - 2026-06-27: Converted standalone operator scripts away from baked loopback service defaults. Topic bootstrap, stack bootstrap probes, ClickHouse init, Qdrant/Typesense init, manual-document publishing, smoke publishing, and semantic/Qdrant backfills now use env or ignored `.env` settings and fail before network writes when required endpoints are missing.
 - 2026-06-27: Converted Python worker endpoint defaults away from baked loopback service URLs. Embedding, webpage extraction, media enrichment, and research planner workers now take brokers, Pandaproxy, ClickHouse, Qdrant, and local-inference endpoints from env, with generic bind-address defaults for their stats servers.
 - 2026-06-27: Converted dashboard and Research UI service endpoints away from baked loopback defaults. The servers now require configured ClickHouse/search/vector/worker/local-inference/Redpanda endpoint env as applicable, and compose passes the documented env names into the host-network dashboard and Research UI services.
+- 2026-06-27: Converted the normalizer worker away from baked loopback broker/search/vector/ClickHouse defaults. The normalizer now fails during config load when required broker and service endpoint env is absent, before opening Pebble or Kafka resources.
 
 ## Verification Record
 
@@ -155,6 +156,7 @@ Latest verified state:
 - Operator-script endpoint cleanup checks: `python3 -m py_compile scripts/init_qdrant.py scripts/init_typesense.py scripts/produce_research_documents.py scripts/smoke_produce_event.py scripts/backfill_qdrant_embeddings.py scripts/backfill_semantic_annotations.py` and `bash -n scripts/init_clickhouse.sh scripts/create_topics.sh scripts/bootstrap.sh` passed; missing endpoint/broker config probes returned before network side effects; additions-only sanitizer found no new local paths, local endpoints, secrets, or model-owner variables.
 - Python-worker endpoint cleanup checks: `python3 -m py_compile workers/embedding-worker/embedding_worker.py workers/webpage-extraction/webpage_extraction_worker.py workers/media-enrichment/media_enrichment_worker.py workers/research-planner/research_planner.py` passed; research planner missing-config probe returned before network side effects. Direct startup probes for embedding/media/webpage workers require their worker venv dependencies, which were not installed in this shell.
 - Dashboard/Research UI endpoint cleanup checks: `python3 -m py_compile dashboard/server.py research-ui/server.py` and `docker compose --env-file .env.example -f compose/docker-compose.yml config` passed; missing endpoint config probes for both servers returned before startup; additions-only sanitizer found no new local paths, local endpoints, secrets, or model-owner variables.
+- Normalizer endpoint cleanup checks: `gofmt -w main.go`, `go test ./...`, and `go build -o /tmp/web-osint-normalizer-config-check .` under `workers/normalizer` passed; an empty-env binary startup probe exited with `configuration: missing REDPANDA_BROKERS or KAFKA_BROKERS`; targeted scan found no normalizer hardcoded loopback endpoints or local deployment paths.
 
 ## Next Checkpoint
 

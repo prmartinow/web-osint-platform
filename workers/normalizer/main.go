@@ -153,7 +153,10 @@ type chSemanticAnnotationRow struct {
 }
 
 func main() {
-	cfg := loadConfig()
+	cfg, err := loadConfig()
+	if err != nil {
+		log.Fatalf("configuration: %v", err)
+	}
 	db, err := openPebble(cfg.PebbleDir)
 	if err != nil {
 		log.Fatalf("open pebble: %v", err)
@@ -197,16 +200,32 @@ func main() {
 	a.run(context.Background())
 }
 
-func loadConfig() config {
+func loadConfig() (config, error) {
+	brokers := splitCSV(envFirst("REDPANDA_BROKERS", "KAFKA_BROKERS", ""))
+	if len(brokers) == 0 {
+		return config{}, errors.New("missing REDPANDA_BROKERS or KAFKA_BROKERS")
+	}
+	typesenseURL, err := requireEnv("TYPESENSE_URL")
+	if err != nil {
+		return config{}, err
+	}
+	qdrantURL, err := requireEnv("QDRANT_URL")
+	if err != nil {
+		return config{}, err
+	}
+	clickURL, err := requireEnv("CLICKHOUSE_URL")
+	if err != nil {
+		return config{}, err
+	}
 	cfg := config{
-		Brokers:       splitCSV(envFirst("REDPANDA_BROKERS", "KAFKA_BROKERS", "127.0.0.1:19092")),
+		Brokers:       brokers,
 		GroupID:       envFirst("REDPANDA_GROUP_ID", "KAFKA_GROUP_ID", "web-osint-normalizer-v1"),
 		PebbleDir:     env("PEBBLE_DIR", "/data/pebble"),
-		TypesenseURL:  strings.TrimRight(env("TYPESENSE_URL", "http://127.0.0.1:18108"), "/"),
+		TypesenseURL:  strings.TrimRight(typesenseURL, "/"),
 		TypesenseKey:  os.Getenv("TYPESENSE_API_KEY"),
-		QdrantURL:     strings.TrimRight(env("QDRANT_URL", "http://127.0.0.1:16333"), "/"),
+		QdrantURL:     strings.TrimRight(qdrantURL, "/"),
 		QdrantColl:    env("QDRANT_COLLECTION", "web_osint_evidence_v1"),
-		ClickURL:      strings.TrimRight(env("CLICKHOUSE_URL", "http://127.0.0.1:18123"), "/"),
+		ClickURL:      strings.TrimRight(clickURL, "/"),
 		ClickDB:       env("CLICKHOUSE_DATABASE", "web_osint"),
 		ClickUser:     env("CLICKHOUSE_USER", "web_osint"),
 		ClickPassword: os.Getenv("CLICKHOUSE_PASSWORD"),
@@ -214,7 +233,7 @@ func loadConfig() config {
 		EmitObserved:  envBool("WEB_OSINT_EMIT_OBSERVED_TOPICS", true),
 	}
 	cfg.EnableMaintenanceDelete = envBool("WEB_OSINT_ENABLE_MAINTENANCE_DELETE", false)
-	return cfg
+	return cfg, nil
 }
 
 func openPebble(dir string) (*pebble.DB, error) {
@@ -1763,6 +1782,13 @@ func env(key, fallback string) string {
 		return v
 	}
 	return fallback
+}
+
+func requireEnv(key string) (string, error) {
+	if v := strings.TrimSpace(os.Getenv(key)); v != "" {
+		return v, nil
+	}
+	return "", fmt.Errorf("missing %s", key)
 }
 
 func envBool(key string, fallback bool) bool {

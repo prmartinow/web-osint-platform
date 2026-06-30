@@ -6,7 +6,6 @@ Wants=network-online.target local-inference.service
 
 [Service]
 Type=simple
-EnvironmentFile=-%h/.config/web-osint-platform/web-osint.env
 Environment=WEB_OSINT_REPO_ROOT=/opt/web-osint-platform
 Environment=WEB_OSINT_DATA_ROOT=/srv/web-osint-platform/data
 Environment=WEB_OSINT_MEDIA_ENRICHMENT_VENV=/srv/web-osint-platform/.venv-media-enrichment
@@ -23,6 +22,7 @@ Environment=QDRANT_COLLECTION=web_osint_evidence_v1
 Environment=MEDIA_WORKER_ROLE=vl
 Environment=MEDIA_VL_HTTP_ADDR=replace-with-bind-host:18213
 Environment=TOKENIZERS_PARALLELISM=false
+EnvironmentFile=-%h/.config/web-osint-platform/web-osint.env
 ExecStartPre=/usr/bin/env bash -lc 'cd "${WEB_OSINT_REPO_ROOT:?set WEB_OSINT_REPO_ROOT}" && scripts/init_media_enrichment_venv.sh'
 ExecStart=/usr/bin/env bash -lc 'cd "${WEB_OSINT_REPO_ROOT:?set WEB_OSINT_REPO_ROOT}" && exec scripts/run_with_cpu_thread_guard.sh "$WEB_OSINT_MEDIA_ENRICHMENT_VENV/bin/python" workers/media-enrichment/media_enrichment_worker.py vl'
 Restart=on-failure

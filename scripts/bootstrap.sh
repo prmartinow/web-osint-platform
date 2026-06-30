@@ -28,7 +28,8 @@ done
 "$CODE_ROOT/scripts/init_qdrant.py"
 "$CODE_ROOT/scripts/init_clickhouse.sh"
 cd "$CODE_ROOT/compose"
-docker compose --env-file "$CODE_ROOT/.env" restart normalizer >/dev/null
+COMPOSE_PROJECT="${WEB_OSINT_COMPOSE_PROJECT:-${WEB_OSINT_CONTAINER_PREFIX:-web-osint-platform}}"
+docker compose -p "$COMPOSE_PROJECT" --env-file "$CODE_ROOT/.env" restart normalizer >/dev/null
 "$CODE_ROOT/scripts/health.sh"
 
 echo "web-osint bootstrap complete"

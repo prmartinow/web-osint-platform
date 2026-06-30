@@ -6,7 +6,6 @@ Wants=network-online.target local-inference.service
 
 [Service]
 Type=simple
-EnvironmentFile=-%h/.config/web-osint-platform/web-osint.env
 Environment=WEB_OSINT_REPO_ROOT=/opt/web-osint-platform
 Environment=WEB_OSINT_DATA_ROOT=/srv/web-osint-platform/data
 Environment=WEB_OSINT_EMBEDDING_WORKER_VENV=/srv/web-osint-platform/.venv-embedding-worker
@@ -18,6 +17,7 @@ Environment=LOCAL_INFERENCE_URL=https://local-inference.example.invalid
 Environment=QDRANT_URL=https://qdrant.example.invalid
 Environment=QDRANT_COLLECTION=web_osint_evidence_v1
 Environment=BACKFILL_BATCH_SIZE=1
+EnvironmentFile=-%h/.config/web-osint-platform/web-osint.env
 ExecStartPre=/usr/bin/env bash -lc 'cd "${WEB_OSINT_REPO_ROOT:?set WEB_OSINT_REPO_ROOT}" && scripts/init_embedding_worker_venv.sh'
 ExecStart=/usr/bin/env bash -lc 'cd "${WEB_OSINT_REPO_ROOT:?set WEB_OSINT_REPO_ROOT}" && exec scripts/run_with_cpu_thread_guard.sh "$WEB_OSINT_EMBEDDING_WORKER_VENV/bin/python" scripts/backfill_qdrant_embeddings.py'
 Restart=on-failure

@@ -11,7 +11,7 @@ Environment=PANDAPROXY_URL=https://pandaproxy.example.invalid
 Environment=REBROWSER_LAUNCH_HELPER_BIND=127.0.0.1
 Environment=REBROWSER_LAUNCH_HELPER_PORT=18231
 Environment=REBROWSER_DISPLAY=:96
-Environment=REBROWSER_CDP_URL=http://127.0.0.1:9250
+Environment=REBROWSER_CDP_URL=http://cdp.example.invalid:9250
 Environment=REBROWSER_CHROME_BIN=/path/to/chrome
 Environment=REBROWSER_PROFILE_DIR=/srv/web-osint-platform/browser-profile
 Environment=REBROWSER_SESSION_OPEN_URL=https://rebrowser-session.example.invalid/vnc.html

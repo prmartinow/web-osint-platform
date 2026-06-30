@@ -24,6 +24,15 @@ def env(name: str, default: str = "") -> str:
     return os.environ.get(name, default).strip()
 
 
+def require_env(name: str) -> str:
+    """Read a required env var; fail fast if absent (repo sanitation convention:
+    no committed loopback/deployment-path defaults for runtime endpoints)."""
+    value = env(name)
+    if not value:
+        raise RuntimeError(f"Missing required {name}")
+    return value
+
+
 def now_compact() -> str:
     return time.strftime("%Y%m%dT%H%M%SZ", time.gmtime())
 
@@ -71,11 +80,11 @@ def wait_for_cdp(cdp_url: str, seconds: float = 15.0) -> None:
 
 
 def ensure_browser(seed_url: str = "about:blank") -> None:
-    cdp_url = env("REBROWSER_CDP_URL", "http://127.0.0.1:9250")
+    cdp_url = require_env("REBROWSER_CDP_URL")
     if cdp_ready(cdp_url):
         return
 
-    chrome = env("REBROWSER_CHROME_BIN", "/mnt/data/takeout-browser-profile/ms-playwright/chromium-1223/chrome-linux64/chrome")
+    chrome = require_env("REBROWSER_CHROME_BIN")
     profile = Path(env("REBROWSER_PROFILE_DIR", str(Path.home() / "browser-sessions" / "rebrowser-screen-96-profile")))
     display = env("REBROWSER_DISPLAY", ":96")
     log_dir = Path(env("REBROWSER_LOG_DIR", str(Path.home() / "browser-sessions" / "logs")))
@@ -104,7 +113,7 @@ def ensure_browser(seed_url: str = "about:blank") -> None:
 
 
 def open_tab(url: str) -> dict[str, Any]:
-    cdp_url = env("REBROWSER_CDP_URL", "http://127.0.0.1:9250")
+    cdp_url = require_env("REBROWSER_CDP_URL")
     encoded = urllib.parse.quote(url, safe=":/?#[]@!$&'()*+,;=%")
     return cdp_json(cdp_url, f"/json/new?{encoded}", method="PUT", timeout=5.0)
 
@@ -145,7 +154,7 @@ def run_rendered_capture(payload: dict[str, Any], session_id: str) -> dict[str, 
         "--collector-run-id",
         collector_run_id,
         "--cdp-url",
-        env("REBROWSER_CDP_URL", "http://127.0.0.1:9250"),
+        require_env("REBROWSER_CDP_URL"),
         "--settle-ms",
         env("REBROWSER_LAUNCH_SETTLE_MS", "2500"),
         "--timeout-ms",
@@ -160,7 +169,7 @@ def run_rendered_capture(payload: dict[str, Any], session_id: str) -> dict[str, 
         command.append("--allow-x")
 
     child_env = os.environ.copy()
-    child_env.setdefault("PLAYWRIGHT_MODULE", "/home/ops/dev/chatbot-cli/node_modules/rebrowser-playwright-core/index.mjs")
+    child_env.setdefault("PLAYWRIGHT_MODULE", require_env("PLAYWRIGHT_MODULE"))
     result = subprocess.run(command, cwd=repo, env=child_env, text=True, capture_output=True, check=False)
     if result.returncode != 0:
         detail = (result.stderr or result.stdout).strip()[-4000:]
@@ -204,7 +213,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_GET(self) -> None:
         if self.path in ("/healthz", "/ready"):
-            ready = cdp_ready(env("REBROWSER_CDP_URL", "http://127.0.0.1:9250"))
+            ready = cdp_ready(require_env("REBROWSER_CDP_URL"))
             json_response(self, 200, {"ok": True, "cdp_ready": ready})
             return
         json_response(self, 404, {"error": "not found"})

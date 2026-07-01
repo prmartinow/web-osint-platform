@@ -29,6 +29,6 @@ exec "$CHROME" \
   --user-data-dir="$PROFILE" \
   --remote-debugging-address=127.0.0.1 --remote-debugging-port="$PORT" \
   --no-first-run --no-default-browser-check --disable-dev-shm-usage \
-  --disable-gpu-compositing \
+  --disable-gpu-compositing --no-sandbox \
   --window-size=1200,800 \
   about:blank

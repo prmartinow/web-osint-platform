@@ -6284,6 +6284,8 @@ function setRoute(route, push = true) {
 
 function renderInbox(rows) {
   state.rows = rows;
+  // Refresh the capture-activity log alongside the inbox (captures land here).
+  refreshCaptureActivity();
   const highPriority = rows.filter((row) => row.task_priority === 'high' || row.task_priority === 'blocking').length;
   $('inboxOpenTasks').textContent = `${rows.length} open task${rows.length === 1 ? '' : 's'}`;
   $('inboxHighPriority').textContent = `${highPriority} high priority`;
@@ -7583,10 +7585,87 @@ async function selectSource(id) {
   }
 }
 
-async function launchCaptureFlow(seed = '') {
-  const seedUrl = seed || window.prompt('Capture URL', '') || '';
+function launchCaptureFlow(seed = '') {
+  // Open the modal instead of window.prompt. The actual POST + feedback happen
+  // inside the modal so the user sees success/error in place.
+  openCaptureModal(seed);
+}
+
+function openCaptureModal(seed = '') {
+  closeCaptureModal(true);
+  const overlay = document.createElement('div');
+  overlay.id = 'captureModalOverlay';
+  overlay.className = 'capture-modal-overlay';
+  overlay.innerHTML = `
+    <div class="capture-modal panel" role="dialog" aria-modal="true" aria-labelledby="captureModalTitle">
+      <button class="capture-modal-close" data-capture-modal-close type="button" aria-label="Close">&times;</button>
+      <h3 id="captureModalTitle" class="capture-modal-title">Capture a source</h3>
+      <p class="capture-modal-hint">Enter a URL. The dedicated capture browser will open it and commit a frozen copy into the project.</p>
+      <form id="captureModalForm" class="capture-modal-form">
+        <input id="captureModalUrl" name="seed_url" type="url" required placeholder="https://example.org/page"
+               value="${escapeHtml(seed || '')}" autocomplete="off" />
+        <button id="captureModalSubmit" class="primary-action" type="submit">Capture</button>
+      </form>
+      <div id="captureModalStatus" class="capture-modal-status" aria-live="polite"></div>
+    </div>`;
+  document.body.appendChild(overlay);
+  const urlInput = overlay.querySelector('#captureModalUrl');
+  if (urlInput) { urlInput.focus(); if (seed) urlInput.select(); }
+  overlay.querySelector('[data-capture-modal-close]').addEventListener('click', () => closeCaptureModal());
+  overlay.addEventListener('click', (event) => { if (event.target === overlay) closeCaptureModal(); });
+  overlay.querySelector('#captureModalForm').addEventListener('submit', async (event) => {
+    event.preventDefault();
+    await runCaptureFromModal(urlInput.value.trim());
+  });
+  document.addEventListener('keydown', captureModalEscHandler);
+}
+
+function captureModalEscHandler(event) {
+  if (event.key === 'Escape') {
+    const overlay = $('captureModalOverlay');
+    if (overlay && !overlay.dataset.submitting) closeCaptureModal();
+  }
+}
+
+function closeCaptureModal(skipActivityRefresh) {
+  const overlay = $('captureModalOverlay');
+  if (overlay) {
+    if (overlay.dataset.dismissHandle) clearTimeout(Number(overlay.dataset.dismissHandle));
+    overlay.remove();
+  }
+  document.removeEventListener('keydown', captureModalEscHandler);
+  if (!skipActivityRefresh) refreshCaptureActivity();
+}
+
+function setCaptureModalState(stateName, message, opts) {
+  opts = opts || {};
+  const overlay = $('captureModalOverlay');
+  if (!overlay) return;
+  const status = overlay.querySelector('#captureModalStatus');
+  const submit = overlay.querySelector('#captureModalSubmit');
+  const closeBtn = overlay.querySelector('[data-capture-modal-close]');
+  const urlInput = overlay.querySelector('#captureModalUrl');
+  overlay.dataset.state = stateName;
+  overlay.dataset.submitting = stateName === 'submitting' ? '1' : '';
+  if (submit) { submit.disabled = stateName === 'submitting'; submit.textContent = stateName === 'submitting' ? 'Capturing…' : 'Capture'; }
+  if (urlInput) urlInput.disabled = stateName === 'submitting';
+  if (status) {
+    status.className = 'capture-modal-status ' + (stateName === 'error' ? 'capture-modal-error' : (stateName === 'success' ? 'capture-modal-success' : 'capture-modal-pending'));
+    status.textContent = message || '';
+  }
+  if (closeBtn) closeBtn.classList.toggle('capture-modal-close-pinned', stateName === 'error');
+  if (stateName === 'success') {
+    const handle = setTimeout(() => closeCaptureModal(), opts.dismissMs || 4000);
+    overlay.dataset.dismissHandle = String(handle);
+  } else if (overlay.dataset.dismissHandle) {
+    clearTimeout(Number(overlay.dataset.dismissHandle));
+    delete overlay.dataset.dismissHandle;
+  }
+}
+
+async function runCaptureFromModal(seedUrl) {
   if (!seedUrl.trim()) return;
-  setCaptureLaunchStatus('Launching capture...');
+  setCaptureModalState('submitting', 'Launching capture — opening the URL in the dedicated browser and committing the artifact.');
   const pendingWindow = window.open('about:blank', '_blank');
   if (pendingWindow) pendingWindow.opener = null;
   try {
@@ -7611,11 +7690,44 @@ async function launchCaptureFlow(seed = '') {
       pendingWindow.close();
     }
     setCaptureLaunchStatus(result.message || 'Capture launch recorded.');
+    setCaptureModalState('success', result.message || 'Capture accepted and committed.');
     await loadInbox();
   } catch (error) {
     if (pendingWindow) pendingWindow.close();
     setCaptureLaunchStatus(error.message);
+    setCaptureModalState('error', error.message || 'Capture failed.');
   }
+}
+
+async function refreshCaptureActivity() {
+  const panel = $('captureActivityPanel');
+  if (!panel) return;
+  try {
+    const data = await fetchJson('/api/capture/activity?limit=20');
+    const items = data.items || [];
+    state.captureActivity = items;
+    renderCaptureActivity(panel, items);
+  } catch (error) {
+    panel.innerHTML = `<p class="muted">Could not load capture activity: ${escapeHtml(error.message)}</p>`;
+  }
+}
+
+function renderCaptureActivity(panel, items) {
+  if (!items.length) { panel.innerHTML = '<p class="muted">No capture attempts yet.</p>'; return; }
+  const row = (item) => {
+    const statusClass = item.status === 'committed' ? 'ok' : (item.status === 'failed' ? 'danger' : (item.status === 'launched' ? 'info' : 'warn'));
+    return `
+      <li class="capture-activity-row" data-status="${escapeHtml(item.status)}">
+        <div class="capture-activity-row-head">
+          <span class="status-badge ${statusClass}">${escapeHtml(item.status)}</span>
+          <span class="capture-activity-url" title="${escapeHtml(item.seed_url || item.source_id || '')}">${escapeHtml(item.seed_url || item.source_id || '(no url)')}</span>
+          <span class="muted capture-activity-time">${escapeHtml((item.requested_at || '').slice(0,19).replace('T',' '))}</span>
+        </div>
+        ${item.error ? `<div class="capture-activity-error">${escapeHtml(item.error)}</div>` : ''}
+        ${(item.session_id || item.capture_event_id) ? `<div class="muted capture-activity-meta">session=${escapeHtml(item.session_id || '—')} capture=${escapeHtml(item.capture_event_id || '—')}</div>` : ''}
+      </li>`;
+  };
+  panel.innerHTML = `<ul class="capture-activity-list">${items.map(row).join('')}</ul>`;
 }
 
 function wireEvents() {

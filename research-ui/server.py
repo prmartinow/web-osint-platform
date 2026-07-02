@@ -6203,6 +6203,90 @@ def normalize_rebrowser_launch_response(body):
     }
 
 
+def capture_activity(params):
+    """CaptureActivityReadModel: recent rebrowser capture launch attempts and
+    their outcomes, projected from research_review_events. Each row is one
+    launch_request, enriched with the matching committed/launch_result/
+    failed outcome when present."""
+    limit = sql_int(params.get("limit", ["50"])[0], 50)
+    rows = ch_data(
+        f"""
+        SELECT event_id, event_type, project, source_evidence_id, subject_type,
+               subject_id, actor, created_at, payload_json, source_anchor_json
+        FROM research_review_events
+        WHERE event_type LIKE 'rebrowser.capture.%'
+        ORDER BY created_at DESC
+        LIMIT {int(limit * 3)}
+        """,
+        fallback=[],
+    )
+    # Bucket by the launch attempt. The launch_requested event carries the
+    # seed_url + source_id; later committed/launch_result/failed events share
+    # the same subject_id (seed_url or source_id) within a short window.
+    attempts = {}
+    order = []
+    for r in rows:
+        et = r.get("event_type") or ""
+        anchor = parse_raw_json(r.get("source_anchor_json") or "")
+        payload = parse_raw_json(r.get("payload_json") or "")
+        key = r.get("subject_id") or r.get("event_id")
+        seed = (payload.get("seed_url") or anchor.get("seed_url")
+                or payload.get("source_id") or anchor.get("source_id") or "")
+        if et.endswith(".launch_requested"):
+            if key not in attempts:
+                attempts[key] = {
+                    "request_event_id": r.get("event_id"),
+                    "project": r.get("project") or payload.get("project") or "",
+                    "seed_url": seed,
+                    "source_id": (payload.get("source_id") or anchor.get("source_id") or ""),
+                    "actor": r.get("actor") or payload.get("actor") or "",
+                    "requested_at": r.get("created_at") or "",
+                    "status": "requested",
+                    "outcome_event_id": "",
+                    "session_id": "",
+                    "capture_event_id": "",
+                    "error": "",
+                }
+                order.append(key)
+        elif key in attempts:
+            entry = attempts[key]
+            if et.endswith(".committed"):
+                entry["status"] = "committed"
+                entry["outcome_event_id"] = r.get("event_id")
+                sess = parse_raw_json(r.get("payload_json") or "{}").get("session") or {}
+                entry["session_id"] = sess.get("session_id") or ""
+                entry["capture_event_id"] = sess.get("capture_event_id") or ""
+            elif et.endswith(".launch_result"):
+                if entry["status"] != "committed":
+                    entry["status"] = "launched"
+                entry["outcome_event_id"] = r.get("event_id")
+            elif et.endswith(".launch_failed"):
+                entry["status"] = "failed"
+                entry["outcome_event_id"] = r.get("event_id")
+                entry["error"] = (payload.get("error") or payload.get("message")
+                                  or r.get("payload_json") or "")[:300]
+        else:
+            # outcome without a seen request (e.g. helper retry) — synthesize
+            attempts[key] = {
+                "request_event_id": "", "project": r.get("project") or "",
+                "seed_url": seed, "source_id": "",
+                "actor": r.get("actor") or "", "requested_at": r.get("created_at") or "",
+                "status": "committed" if et.endswith(".committed") else ("failed" if et.endswith(".launch_failed") else "launched"),
+                "outcome_event_id": r.get("event_id"),
+                "session_id": "", "capture_event_id": "", "error": "",
+            }
+            order.append(key)
+    items = [attempts[k] for k in order][:limit]
+    return read_envelope(
+        {"items": items, "count": len(items)},
+        version="capture-activity.v1",
+        generated_at=now_iso(),
+        stale=False,
+        permissions=["capture", "review"],
+        scope={"limit": limit},
+    )
+
+
 def launch_rebrowser_capture(payload):
     project = compact_text(payload.get("project_id") or payload.get("project") or "", 300)
     seed_url = compact_text(payload.get("seed_url") or payload.get("url") or "", 2000)
@@ -7712,6 +7796,8 @@ class ResearchUiHandler(BaseHTTPRequestHandler):
                 return self.send_json(home_summary(params))
             if parsed.path == "/api/facets":
                 return self.send_json(facets())
+            if parsed.path == "/api/capture/activity":
+                return self.send_json(capture_activity(params))
             if parsed.path == "/api/inbox":
                 return self.send_json(inbox(params))
             if parsed.path == "/api/projects":

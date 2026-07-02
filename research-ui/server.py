@@ -6287,6 +6287,41 @@ def capture_activity(params):
     )
 
 
+def rebrowser_launch_status(params):
+    """Proxy GET /api/rebrowser/launch-status?session_id=... to the helper's
+    /status endpoint. Keeps the helper non-public (the container already
+    reaches it via the docker0 gateway). Returns the helper's state dict
+    (status / phase / capture_event_id / title / canonical_url / error)."""
+    session_id = compact_text(params.get("session_id", [""])[0], 200)
+    if not session_id:
+        raise ResearchUiError(400, "session_id is required")
+    if not REBROWSER_LAUNCH_URL:
+        raise ResearchUiError(503, "Rebrowser launch helper is not configured")
+    base = REBROWSER_LAUNCH_URL.rsplit("/", 1)[0]  # strip "/launch" -> origin
+    status_url = f"{base}/status?session_id={urllib.parse.quote(session_id)}"
+    request = urllib.request.Request(status_url, method="GET")
+    try:
+        with urllib.request.urlopen(request, timeout=5) as response:
+            text = response.read().decode("utf-8", errors="replace")
+            body = json.loads(text) if text else {}
+    except urllib.error.HTTPError as exc:
+        detail = exc.read().decode("utf-8", errors="replace")[:600]
+        raise ResearchUiError(exc.code, f"Launch status failed: {detail}")
+    except Exception as exc:
+        raise ResearchUiError(502, f"Launch status failed: {exc}")
+    # Translate phase into a user-facing message the modal surfaces directly.
+    phase = body.get("phase") or body.get("status") or ""
+    messages = {
+        "opening": "Opening the page in the capture browser.",
+        "capturing": "Capturing — rendering and extracting the page content.",
+        "publishing": "Publishing the captured artifact into the pipeline.",
+        "done": "Capture committed.",
+        "failed": body.get("error") or "Capture failed.",
+    }
+    body["message"] = messages.get(phase, body.get("error") or f"Capture {phase or body.get('status')}.")
+    return body
+
+
 def launch_rebrowser_capture(payload):
     project = compact_text(payload.get("project_id") or payload.get("project") or "", 300)
     seed_url = compact_text(payload.get("seed_url") or payload.get("url") or "", 2000)
@@ -6323,18 +6358,22 @@ def launch_rebrowser_capture(payload):
             headers={"Content-Type": "application/json"},
         )
         try:
-            # The helper opens the URL in the capture browser, runs the rendered
-            # collector, and publishes -- real captures take 30-60s, so give it
-            # a real budget, not a quick ping timeout.
-            with urllib.request.urlopen(request, timeout=60) as response:
+            # The helper now runs the capture asynchronously: /launch kicks off
+            # the work and returns immediately with status "working" + a
+            # poll_url. So a short timeout is correct here -- the frontend polls
+            # /status (proxied below) for the real outcome.
+            with urllib.request.urlopen(request, timeout=10) as response:
                 text = response.read().decode("utf-8", errors="replace")
                 try:
                     response_body = json.loads(text) if text else {}
                 except Exception:
                     response_body = {"body": text[:2000]}
-                status = "launched"
+                status = response_body.get("status") or "launched"
                 normalized = normalize_rebrowser_launch_response(response_body)
-                result_event_type = "rebrowser.capture.committed" if normalized.get("committed") else "rebrowser.capture.launch_result"
+                # The capture is still in flight; emit only a launch_result now.
+                # The committed event will be recorded when the frontend polls
+                # /status to completion and POSTs the final outcome.
+                result_event_type = "rebrowser.capture.launch_result"
                 result_event = persist_review_event(build_review_event(result_event_type, {
                     "project": project,
                     "source_evidence_id": source_evidence_id,
@@ -6368,10 +6407,15 @@ def launch_rebrowser_capture(payload):
         "status": status,
         "launch": response_body,
         "session": normalized,
-        "open_url": normalized.get("open_url") if normalized else "",
+        "session_id": normalized.get("session_id") or response_body.get("session_id") or "",
+        # poll_url is relative to the helper; the frontend resolves it against
+        # REBROWSER_LAUNCH_URL's origin so it can poll for the capture outcome.
+        "poll_url": response_body.get("poll_url") or "",
         "event_id": event.get("event_id"),
         "event_ids": [item for item in (event.get("event_id"), result_event.get("event_id")) if item],
-        "message": "Capture launch recorded" if not configured else ("Capture committed" if normalized.get("committed") else "Capture session opened"),
+        "message": ("Capture working -- polling for the committed artifact."
+                    if status == "working"
+                    else ("Capture launch recorded" if not configured else "Capture session opened")),
     }
 
 
@@ -7801,6 +7845,8 @@ class ResearchUiHandler(BaseHTTPRequestHandler):
                 return self.send_json(facets())
             if parsed.path == "/api/capture/activity":
                 return self.send_json(capture_activity(params))
+            if parsed.path == "/api/rebrowser/launch-status":
+                return self.send_json(rebrowser_launch_status(params))
             if parsed.path == "/api/inbox":
                 return self.send_json(inbox(params))
             if parsed.path == "/api/projects":

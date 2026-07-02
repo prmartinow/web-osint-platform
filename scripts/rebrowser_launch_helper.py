@@ -8,6 +8,7 @@ import os
 import socket
 import subprocess
 import sys
+import threading
 import time
 import urllib.error
 import urllib.parse
@@ -208,13 +209,78 @@ def run_rendered_capture(payload: dict[str, Any], session_id: str) -> dict[str, 
     }
 
 
+# In-memory session-state store for async captures. Keyed by session_id; one
+# entry per /launch, mutated by the worker thread, read by /status. Bounded to
+# the last 100 sessions to avoid unbounded growth in a long-running helper.
+SESSIONS: dict[str, dict[str, Any]] = {}
+
+
+def _prune_sessions() -> None:
+    if len(SESSIONS) <= 100:
+        return
+    # Drop the oldest entries by started_at (preserves the most recent 100).
+    for key in sorted(SESSIONS, key=lambda k: SESSIONS[k].get("started_at", ""))[: len(SESSIONS) - 100]:
+        SESSIONS.pop(key, None)
+
+
+def _run_capture_session(session_id: str, payload: dict[str, Any], seed_url: str) -> None:
+    """Background worker: open the tab, run the collector, publish. Updates
+    SESSIONS[session_id] at each phase so /status can report progress."""
+    state = SESSIONS.get(session_id)
+    if not state:
+        return
+    try:
+        state["phase"] = "opening"
+        ensure_browser(seed_url or "about:blank")
+        target = open_tab(seed_url) if seed_url else {}
+        state["target_url"] = target.get("url") or seed_url
+        mode = env("REBROWSER_LAUNCH_CAPTURE_MODE", "rendered-web").lower()
+        if mode in ("rendered-web", "capture", "publish"):
+            state["phase"] = "capturing"
+            capture = run_rendered_capture(payload, session_id)
+            state.update({
+                "phase": "publishing",
+                "capture_event_id": capture.get("capture_event_id", ""),
+                "source_evidence_id": capture.get("source_evidence_id", ""),
+                "title": capture.get("title", ""),
+                "canonical_url": capture.get("canonical_url", ""),
+            })
+            state["status"] = "committed"
+            state["phase"] = "done"
+        else:
+            state["status"] = "launched"
+            state["phase"] = "done"
+    except Exception as exc:
+        state["status"] = "failed"
+        state["phase"] = "failed"
+        state["error"] = str(exc)[:1000]
+    finally:
+        _prune_sessions()
+
+
 class Handler(BaseHTTPRequestHandler):
     server_version = "WebOsintRebrowserLaunchHelper/1"
 
     def do_GET(self) -> None:
-        if self.path in ("/healthz", "/ready"):
+        parsed = urllib.parse.urlparse(self.path)
+        if parsed.path in ("/healthz", "/ready"):
             ready = cdp_ready(require_env("REBROWSER_CDP_URL"))
             json_response(self, 200, {"ok": True, "cdp_ready": ready})
+            return
+        # /status?session_id=<id> -- poll an in-flight or finished capture.
+        # Lets the launcher return immediately from /launch and lets the caller
+        # (research-ui) poll for state instead of holding a long request open.
+        if parsed.path == "/status":
+            params = urllib.parse.parse_qs(parsed.query)
+            session_id = (params.get("session_id", [""])[0] or "").strip()
+            if not session_id:
+                json_response(self, 400, {"error": "session_id is required"})
+                return
+            state = SESSIONS.get(session_id)
+            if not state:
+                json_response(self, 404, {"error": "unknown session_id"})
+                return
+            json_response(self, 200, dict(state))
             return
         json_response(self, 404, {"error": "not found"})
 
@@ -231,22 +297,35 @@ class Handler(BaseHTTPRequestHandler):
             if seed_url:
                 validate_url(seed_url)
             session_id = f"screen96-{now_compact()}"
-            ensure_browser(seed_url or "about:blank")
-            target = open_tab(seed_url) if seed_url else {}
-            mode = env("REBROWSER_LAUNCH_CAPTURE_MODE", "rendered-web").lower()
-            capture: dict[str, Any] = {}
-            status = "launched"
-            if mode in ("rendered-web", "capture", "publish"):
-                capture = run_rendered_capture(payload, session_id)
-                status = "committed"
-            open_url = env("REBROWSER_SESSION_OPEN_URL")
+            # Register the session immediately so /status can report it, then
+            # run the actual capture asynchronously. /launch returns at once
+            # with status "working"; the caller polls /status.
+            SESSIONS[session_id] = {
+                "session_id": session_id,
+                "status": "working",
+                "phase": "opening",
+                "seed_url": seed_url,
+                "started_at": now_compact(),
+                "capture_event_id": "",
+                "source_evidence_id": "",
+                "title": "",
+                "canonical_url": "",
+                "error": "",
+            }
+            threading.Thread(
+                target=_run_capture_session,
+                args=(session_id, payload, seed_url),
+                daemon=True,
+            ).start()
             json_response(self, 200, {
                 "session_id": session_id,
-                "status": status,
-                "open_url": open_url,
-                "target_id": target.get("id") or "",
-                "target_url": target.get("url") or seed_url,
-                **capture,
+                "status": "working",
+                "phase": "opening",
+                "poll_url": f"/status?session_id={urllib.parse.quote(session_id)}",
+                # No open_url: the legacy behavior opened a separate VNC/view
+                # tab, which leaked a placeholder URL into the research UI. The
+                # user is already on the research UI; capture progress is
+                # reported via /status polling.
             })
         except urllib.error.HTTPError as exc:
             detail = exc.read().decode("utf-8", errors="replace")[:1000]

@@ -7665,9 +7665,7 @@ function setCaptureModalState(stateName, message, opts) {
 
 async function runCaptureFromModal(seedUrl) {
   if (!seedUrl.trim()) return;
-  setCaptureModalState('submitting', 'Launching capture — opening the URL in the dedicated browser and committing the artifact.');
-  const pendingWindow = window.open('about:blank', '_blank');
-  if (pendingWindow) pendingWindow.opener = null;
+  setCaptureModalState('submitting', 'Launching capture — opening the URL in the dedicated browser.');
   try {
     const result = await postJson('/api/rebrowser/launch-capture', {
       project_id: state.project || state.home?.active_project?.project_id || '',
@@ -7675,28 +7673,52 @@ async function runCaptureFromModal(seedUrl) {
       return_route: routeHash(),
       actor: REVIEW_UI_ACTOR,
     });
-    const launchUrl = safeUrl(
-      result.open_url
-      || result.session?.open_url
-      || result.launch?.open_url
-      || result.launch?.session_url
-      || result.launch?.url
-      || ''
-    );
-    if (launchUrl && launchUrl !== '#') {
-      if (pendingWindow) pendingWindow.location.href = launchUrl;
-      else window.open(launchUrl, '_blank', 'noopener,noreferrer');
-    } else if (pendingWindow) {
-      pendingWindow.close();
+    // No placeholder tab: the legacy window.open of open_url leaked a VNC
+    // placeholder URL. The user stays on the research UI; we poll for state.
+    const sessionId = result.session_id || result.session?.session_id || '';
+    if (result.status === 'working' && sessionId) {
+      setCaptureModalState('submitting', 'Capture working — opening the page in the capture browser.');
+      await pollCaptureStatus(sessionId);
+    } else {
+      setCaptureLaunchStatus(result.message || 'Capture launch recorded.');
+      setCaptureModalState('success', result.message || 'Capture accepted and committed.');
+      await loadInbox();
     }
-    setCaptureLaunchStatus(result.message || 'Capture launch recorded.');
-    setCaptureModalState('success', result.message || 'Capture accepted and committed.');
-    await loadInbox();
   } catch (error) {
-    if (pendingWindow) pendingWindow.close();
     setCaptureLaunchStatus(error.message);
     setCaptureModalState('error', error.message || 'Capture failed.');
   }
+}
+
+async function pollCaptureStatus(sessionId) {
+  const deadline = Date.now() + 90_000; // overall budget
+  const phaseText = {
+    opening: 'Opening the page in the capture browser…',
+    capturing: 'Capturing — rendering and extracting the page content…',
+    publishing: 'Publishing the captured artifact into the pipeline…',
+  };
+  while (Date.now() < deadline) {
+    try {
+      const s = await fetchJson(`/api/rebrowser/launch-status?session_id=${encodeURIComponent(sessionId)}`);
+      if (s.status === 'committed') {
+        setCaptureLaunchStatus(s.message || 'Capture committed.');
+        setCaptureModalState('success', s.message || `Capture committed: ${s.title || s.canonical_url || ''}`);
+        await loadInbox();
+        return;
+      }
+      if (s.status === 'failed') {
+        setCaptureLaunchStatus(s.error || 'Capture failed.');
+        setCaptureModalState('error', s.error || 'Capture failed.');
+        return;
+      }
+      setCaptureModalState('submitting', phaseText[s.phase] || `Capture working (${s.phase || s.status})…`);
+    } catch (error) {
+      // Transient poll errors shouldn't kill the loop; show + keep going.
+      setCaptureModalState('submitting', `Capture working (poll retry: ${error.message})`);
+    }
+    await new Promise((resolve) => setTimeout(resolve, 2000));
+  }
+  setCaptureModalState('error', 'Capture timed out — the page may be slow or blocked. See the activity log.');
 }
 
 async function refreshCaptureActivity() {

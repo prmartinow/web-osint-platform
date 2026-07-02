@@ -5107,19 +5107,20 @@ pre {
 .capture-modal {
   position: relative;
   width: min(560px, 100%);
-  background: var(--panel-1, #ffffff);
-  border: 1px solid var(--line, #d8dee9);
+  background: var(--panel);
+  border: 1px solid var(--line);
   border-radius: 12px;
   box-shadow: 0 24px 60px rgba(0,0,0,0.35);
   padding: 22px 22px 18px;
+  color: var(--text);
 }
-.capture-modal-title { margin: 0 0 4px; font-size: 17px; }
+.capture-modal-title { margin: 0 0 4px; font-size: 17px; color: var(--text); }
 .capture-modal-hint { margin: 0 0 14px; font-size: 13px; color: var(--muted); }
 .capture-modal-form { display: flex; gap: 8px; align-items: stretch; }
 .capture-modal-form input[type="url"] {
   flex: 1; min-width: 0;
   padding: 9px 11px; font-size: 14px;
-  border: 1px solid var(--line); border-radius: 8px; background: var(--panel-2, #fff);
+  border: 1px solid var(--line); border-radius: 8px; background: var(--panel-2);
   color: var(--text);
 }
 .capture-modal-form input[type="url"]:disabled { opacity: 0.6; }

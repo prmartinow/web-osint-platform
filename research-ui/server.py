@@ -6323,7 +6323,10 @@ def launch_rebrowser_capture(payload):
             headers={"Content-Type": "application/json"},
         )
         try:
-            with urllib.request.urlopen(request, timeout=10) as response:
+            # The helper opens the URL in the capture browser, runs the rendered
+            # collector, and publishes -- real captures take 30-60s, so give it
+            # a real budget, not a quick ping timeout.
+            with urllib.request.urlopen(request, timeout=60) as response:
                 text = response.read().decode("utf-8", errors="replace")
                 try:
                     response_body = json.loads(text) if text else {}

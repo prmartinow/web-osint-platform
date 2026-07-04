@@ -39,3 +39,34 @@ new source edits, committed code, generated data, secrets, or model assets.
 After retirement, the only editable Web OSINT source tree is the canonical
 checkout. Any remaining live deployment directory is either absent, a read-only
 archive, or a deployment wrapper that points back to `WEB_OSINT_REPO_ROOT`.
+
+## Current State (2026-07-05)
+
+The canonical-stack cutover (REPO-01) is verified Done. All compose-managed
+services run against the canonical `docker-compose.yml` (bare service names),
+all persistent data survived via bind mounts, and a fresh capture flowed
+end-to-end into the Source Library.
+
+### Remaining retirement steps (the REPO-04 deletion)
+
+The running containers still carry launch-context labels pointing at the legacy
+live tree (the recreate commands were issued from there), and the complete
+deployment `.env` lives at the legacy root, not yet at the canonical root.
+Retiring the legacy tree therefore requires, in order:
+
+1. Copy the complete legacy deployment `.env` to the canonical repo root (it is
+   gitignored there) so the canonical tree is self-sufficient.
+2. Re-launch the compose stack **from the canonical repo's compose directory**
+   (`cd $WEB_OSINT_REPO_ROOT/compose && docker compose -p $WEB_OSINT_COMPOSE_PROJECT --env-file ../.env up -d --force-recreate`), so the running containers
+   get canonical-path launch labels. Durable data is unaffected (bind mounts
+   point at WEB_OSINT_DATA_ROOT, not the source tree).
+3. Verify the stack is healthy post-relaunch (research-ui, dashboard, the data
+   stores, and a fresh capture through to the Library).
+4. With operator approval, remove the legacy live tree. Per the decision above,
+   this is a replace (no archive, no symlink/worktree wrapper).
+
+### Blocker
+
+Step 4 (the actual `rm -rf` of the legacy tree) needs explicit operator
+approval at the moment of action, since the legacy tree was the live deployment
+for a long time. Steps 1-3 are reversible and can proceed first.

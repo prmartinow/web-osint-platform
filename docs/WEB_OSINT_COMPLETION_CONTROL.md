@@ -176,4 +176,17 @@ Latest verified state:
 
 ## Next Checkpoint
 
-Continue with repo consolidation while RUI-08 waits on the real launch helper URL: compare remaining legacy live-tree docs/scripts differences, migrate source-code deltas only, move local deployment values to env, and choose the live-tree retirement shape.
+All RUI-01..08 and REPO-01..05 items are Done. The canonical stack is the sole
+deployment; the legacy live tree is retired. The next phase of work is product
+depth and UX, tracked below.
+
+## Phase 2 — Product Depth and UX
+
+| ID | Area | Status | Acceptance Gate | Next Action |
+| --- | --- | --- | --- | --- |
+| ENR-01 | Enrichment pipeline health sweep | Pending | Each enrichment worker (embedding, media OCR/VL, webpage extraction, entity extraction) is actively consuming its topic with lag near zero. A fresh capture gets embeddings + entities + OCR within minutes. | Sweep all worker consumer groups + verify a fresh capture is enriched end-to-end. |
+| ENR-02 | Connect containers under compose | Pending | The 3 Redpanda Connect containers are managed by the canonical compose (or documented as intentionally separate). | Either bring them under compose or document why they stay separate. |
+| VAL-01 | Datalab Chandra 2.1 end-to-end validation | Pending | The Datalab Chandra 2.1 case flows through every stage: capture -> Inbox triage -> Source Workbench -> evidence -> entities -> claims -> review -> publication. Every stage produces real, reviewable output. | Capture the Chandra blog + X post, triage them, extract evidence, and walk the full pipeline. |
+| UX-01 | Front-end design audit + simplification | Pending | The UI is decluttered: only the left sidebar navigation remains (the unplanned header nav is removed or repurposed); buttons, scrollbars, and window elements render correctly at full-screen width with no clipping; the main workflow (capture -> triage -> evidence -> claims -> publish) is visually clear and simple. | Map the current process end-to-end, identify clutter/redundancy, redesign the navigation + layout, and implement incrementally with screenshots at each step. |
+| UX-02 | Process simplification | Pending | The end-to-end research process is mapped, documented, and as simple as possible: each stage has a clear entry point, clear next step, and clear done state. No stage requires the user to understand the internal architecture. | Collaboratively map the current process, identify simplification opportunities, and implement. |
+| ARCH-01 | Manual vs automated capture decision | Pending | The operator decides whether the collection loop uses the local inference API (Qwen on the server) or a frontier API. This gates recurring capture tasks, monitoring rules, and change detection. | Surface the trade-offs for the operator; implement the chosen path. |

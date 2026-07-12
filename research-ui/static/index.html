@@ -47,15 +47,18 @@
         <div class="mini-meter"><span id="activeProjectMeter"></span></div>
       </section>
       <button id="captureSourceButton" class="capture-button" title="Launch Rebrowser capture">+ Capture source</button>
+      <button id="themeSwitch" class="theme-switch rail-theme-switch" role="switch" aria-checked="false" title="Toggle theme">
+        <span class="sun"></span><span class="moon"></span><span class="knob"></span>
+      </button>
       <p class="rail-note">Evidence workspace · internal · env-configured capture</p>
     </aside>
 
     <section class="research-home">
       <header class="home-topbar">
-        <div class="project-picker">
+        <label class="project-picker">
           <span id="projectScopeLabel">Project</span>
-          <strong id="projectPickerLabel">Open-weight frontier models</strong>
-        </div>
+          <select id="projectSelect" aria-label="Switch active project"><option value="">All projects</option></select>
+        </label>
         <label class="global-search">
           <span class="sr-only">Search sources, claims, entities</span>
           <input id="searchInput" type="search" placeholder="Search sources, claims, entities...">
@@ -64,40 +67,9 @@
           <button id="newNoteButton" class="secondary top-action" type="button">New note</button>
           <button id="captureTopButton" class="top-action primary-action" type="button" title="Launch Rebrowser capture">Capture</button>
           <span id="captureLaunchStatus" class="capture-status" aria-live="polite"></span>
-          <button id="themeSwitch" class="theme-switch" role="switch" aria-checked="false" title="Toggle theme">
-            <span class="sun"></span><span class="moon"></span><span class="knob"></span>
-          </button>
           <span class="user-avatar" aria-label="Current user">PR</span>
         </div>
       </header>
-
-      <nav class="project-nav" aria-label="Project navigation">
-        <button class="pnav-item active" data-route="home">Home</button>
-        <button class="pnav-item" data-route="inbox">Inbox <span id="pnavInboxCount" class="count">0</span></button>
-        <button class="pnav-item" data-route="projects">Projects</button>
-        <button class="pnav-item" data-route="library">Library</button>
-        <button class="pnav-item" data-route="evidence">Evidence</button>
-        <button class="pnav-item" data-route="entities">Entities</button>
-        <button class="pnav-item" data-route="claims">Claims</button>
-        <button class="pnav-item" data-route="timeline">Timeline</button>
-        <button class="pnav-item" data-route="compare">Compare</button>
-        <button class="pnav-item" data-route="draft">Draft</button>
-        <button class="pnav-item" data-route="reviews">Reviews</button>
-        <button class="pnav-item" data-route="publishing">Publishing</button>
-        <button class="pnav-item" data-route="taxonomy">Taxonomy</button>
-        <span class="pnav-spacer"></span>
-        <div class="pnav-actions">
-          <select id="projectSelect"><option value="">All projects</option></select>
-          <select id="limitSelect">
-            <option value="40">40</option>
-            <option value="80" selected>80</option>
-            <option value="150">150</option>
-            <option value="200">200</option>
-          </select>
-          <button id="datalabCase" class="secondary">Datalab case</button>
-          <button id="refreshButton">Refresh</button>
-        </div>
-      </nav>
 
       <section class="brief-hero" data-home-section="brief">
         <div class="hero-copy">

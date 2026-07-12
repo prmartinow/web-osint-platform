@@ -660,7 +660,6 @@ function renderFacets(data) {
   const totals = data.totals || {};
   $('totals').textContent = `${totals.unique_evidence ?? 0} unique sources · ${totals.evidence_rows ?? 0} rows · last ingest ${fmtDate(totals.last_ingested_at)}`;
   $('navInboxCount').textContent = totals.unique_evidence ?? 0;
-  if ($('pnavInboxCount')) $('pnavInboxCount').textContent = totals.unique_evidence ?? 0;
 
   const queues = data.queues || [];
   $('inboxQueueCount').textContent = queues.length;
@@ -777,7 +776,6 @@ function renderHome(data) {
   const project = data.active_project || {};
   const brief = data.brief || {};
   $('activeProjectName').textContent = project.name || 'Active research project';
-  $('projectPickerLabel').textContent = project.name || 'Active research project';
   $('activeProjectMeta').textContent = project.description || 'Evidence workspace';
   $('activeProjectMeter').style.width = `${Math.max(0, Math.min(100, Number(project.completion_percent || 0)))}%`;
   $('homeUpdated').textContent = project.updated_at ? `Updated ${fmtDate(project.updated_at)}` : 'No recent ingest';
@@ -7762,24 +7760,6 @@ function wireEvents() {
   });
   setTheme(document.documentElement.dataset.theme || 'dark');
 
-  $('refreshButton').addEventListener('click', () => {
-    loadHome();
-    loadFacets();
-    loadInbox();
-    loadRoutePage();
-    if (state.selectedId) selectSource(state.selectedId);
-  });
-  $('datalabCase').addEventListener('click', () => {
-    state.queue = 'all';
-    state.kind = '';
-    state.project = '';
-    state.q = 'datalab chandra';
-    syncInboxSearchInputs(state.q);
-    $('projectSelect').value = '';
-    loadFacets();
-    loadInbox();
-    setRoute('inbox');
-  });
   $('captureSourceButton').addEventListener('click', () => {
     launchCaptureFlow();
   });
@@ -7863,11 +7843,6 @@ function wireEvents() {
       if (state.route === 'library' || state.route === 'evidence' || state.route === 'entities' || state.route === 'claims' || state.route === 'reviews' || state.route === 'publishing' || state.route === 'taxonomy' || state.route === 'timeline' || state.route === 'compare' || state.route === 'draft') replaceRouteHash();
       loadRoutePage();
     }
-  });
-  $('limitSelect').addEventListener('change', () => {
-    state.limit = $('limitSelect').value;
-    if (state.route === 'inbox') loadInbox();
-    if (state.route !== 'home' && state.route !== 'inbox') loadRoutePage();
   });
   document.querySelectorAll('.tab').forEach((tab) => {
     tab.addEventListener('click', () => activateTab(tab.dataset.tab));

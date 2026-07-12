@@ -17,6 +17,7 @@
   --warn: #c77c05;
   --danger: #d44954;
   --shadow: rgba(22, 34, 52, .08);
+  --content-max-width: 1440px;
 }
 
 :root[data-theme="dark"] {
@@ -38,6 +39,7 @@
   --warn: #f2bf5e;
   --danger: #ff7f8f;
   --shadow: rgba(0,0,0,.34);
+  --content-max-width: 1440px;
 }
 
 * { box-sizing: border-box; }
@@ -508,14 +510,45 @@ body.rail-collapsed .nav-item {
 .research-home {
   min-width: 0;
   width: 100%;
-  max-width: none;
+  max-width: var(--content-max-width);
   height: 100vh;
   height: 100dvh;
   min-height: 0;
   padding: 28px 32px 40px;
   overflow: auto;
-  margin: 0;
+  margin: 0 auto;
+  justify-self: center;
 }
+/* When the source workbench opens, the shell becomes 3-column and the
+   home pane needs to fill its grid track instead of being capped. */
+body.has-source .research-home {
+  max-width: none;
+  justify-self: stretch;
+}
+/* All horizontal tab strips hide their scrollbars consistently. The
+   strips remain scrollable (overflow-x: auto on each) but never show a
+   visible scrollbar gutter — matching .project-nav / .taxonomy-*-tabs
+   which already hide theirs. */
+.preview-tabs,
+.tabs,
+.library-preview-tabs,
+.evidence-preview-tabs,
+.entity-preview-tabs,
+.claim-preview-tabs,
+.review-preview-tabs,
+.result-tabs,
+.preview-tabs-bar {
+  scrollbar-width: none;
+}
+.preview-tabs::-webkit-scrollbar,
+.tabs::-webkit-scrollbar,
+.library-preview-tabs::-webkit-scrollbar,
+.evidence-preview-tabs::-webkit-scrollbar,
+.entity-preview-tabs::-webkit-scrollbar,
+.claim-preview-tabs::-webkit-scrollbar,
+.review-preview-tabs::-webkit-scrollbar,
+.result-tabs::-webkit-scrollbar,
+.preview-tabs-bar::-webkit-scrollbar { display: none; }
 .home-topbar {
   position: sticky;
   top: 0;
@@ -779,9 +812,7 @@ body.rail-collapsed .nav-item {
   flex: 1 1 auto;
   min-width: 0;
   margin: 0;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  overflow-wrap: anywhere;
 }
 .operation-search-meta strong {
   flex: 0 0 auto;
@@ -3853,9 +3884,7 @@ pre {
 .taxonomy-tree-node.depth-2 { padding-left: 34px; }
 .taxonomy-tree-node.depth-3 { padding-left: 50px; }
 .taxonomy-tree-node strong {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
 }
 .taxonomy-tree-node em {
   font-style: normal;
@@ -3874,9 +3903,7 @@ pre {
 .taxonomy-results-head > div strong,
 .taxonomy-results-head > div p {
   display: block;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
 }
 .taxonomy-results-head input {
   width: 16px;
@@ -4639,7 +4666,7 @@ pre {
   display: flex;
   flex-direction: column;
   gap: 14px;
-  overflow-x: auto;
+  min-width: 0;
 }
 .timeline-lanes,
 .compare-legend {
@@ -4789,10 +4816,8 @@ pre {
   min-width: 0;
 }
 .compare-evidence-item code {
-  max-width: 160px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  max-width: 100%;
+  overflow-wrap: anywhere;
 }
 .compare-evidence-item p,
 .compare-assertion p {
@@ -5117,7 +5142,7 @@ pre {
 .capture-activity-row[data-status="launched"] { border-left: 3px solid var(--accent); }
 .capture-activity-row[data-status="requested"] { border-left: 3px solid var(--warn); }
 .capture-activity-row-head { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
-.capture-activity-url { flex: 1; min-width: 0; font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.capture-activity-url { flex: 1; min-width: 0; font-size: 13px; overflow-wrap: anywhere; }
 .capture-activity-time { font-size: 11px; white-space: nowrap; }
 .capture-activity-error { margin-top: 6px; font-size: 12px; color: var(--danger); word-break: break-word; }
 .capture-activity-meta { margin-top: 4px; font-size: 11px; }

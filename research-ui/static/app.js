@@ -1251,16 +1251,6 @@ function renderProjectsPage(data) {
     ${pageHeader('Projects', 'Project Brief workspace for research scope, coverage rules, open questions, and review handoff.')}
     <section class="panel projects-toolbar" aria-label="Project filters">
       <label>
-        <span>Search</span>
-        <input id="projectRouteSearch" type="search" value="${escapeHtml(state.q)}" placeholder="Search project, source, domain, or question">
-      </label>
-      <label>
-        <span>Project</span>
-        <select id="projectWorkspaceSelect">
-          ${visibleRows.map((row) => `<option value="${escapeHtml(row.project_id || '')}" ${activeRow && (row.project_id || '') === (activeRow.project_id || '') ? 'selected' : ''}>${escapeHtml(row.name)}</option>`).join('')}
-        </select>
-      </label>
-      <label>
         <span>Phase</span>
         <select id="projectPhaseFilter">
           <option value="">All phases</option>
@@ -1391,17 +1381,6 @@ function renderProjectsPage(data) {
       </article>
     ` : `<div class="empty-state panel"><h2>No projects found</h2><p>${state.q || state.projectPhase || state.projectOwner ? 'No project matches the active filters.' : 'Capture a source to initialize a project brief.'}</p></div>`}
   `;
-  $('projectRouteSearch')?.addEventListener('input', () => {
-    state.q = $('projectRouteSearch').value.trim();
-    if ($('searchInput').value !== state.q) $('searchInput').value = state.q;
-    clearTimeout(window.__projectTimer);
-    window.__projectTimer = setTimeout(loadRoutePage, 250);
-  });
-  $('projectWorkspaceSelect')?.addEventListener('change', () => {
-    state.project = $('projectWorkspaceSelect').value;
-    if ($('projectSelect')) $('projectSelect').value = state.project;
-    renderProjectsPage(data);
-  });
   $('projectPhaseFilter')?.addEventListener('change', () => {
     state.projectPhase = $('projectPhaseFilter').value;
     renderProjectsPage(data);
@@ -1511,13 +1490,10 @@ function renderLibraryPage(data) {
         ${(data.facets || []).map(renderLibraryFacetGroup).join('')}
       </aside>
       <section class="panel library-results-panel">
-        <div class="library-search-strip">
-          <label><span>${(state.libraryScope === 'project' || state.project) ? 'Project search' : 'Corpus search'}</span><input id="librarySearchInput" type="search" value="${escapeHtml(query.text ?? state.q)}" placeholder="Search titles, URLs, handles, extracted text, OCR, claims, or ids"></label>
-          <button id="libraryClearFilters" class="secondary" type="button">Clear</button>
-        </div>
         <div class="library-explanation">
           <span class="status-badge info">${escapeHtml(titleCase(query.mode || state.libraryMode))}</span>
           <p>${escapeHtml(query.explanation || '')}</p>
+          <button id="libraryClearFilters" class="secondary" type="button">Clear filters</button>
         </div>
         <div class="library-bulk-toolbar">
           <label><input id="librarySelectAll" type="checkbox"> Select page</label>
@@ -1723,12 +1699,6 @@ function wireLibraryEvents(data) {
     replaceRouteHash();
     loadRoutePage();
   };
-  $('librarySearchInput')?.addEventListener('input', () => {
-    state.q = $('librarySearchInput').value.trim();
-    if ($('searchInput') && $('searchInput').value !== state.q) $('searchInput').value = state.q;
-    clearTimeout(window.__libraryTimer);
-    window.__libraryTimer = setTimeout(reload, 300);
-  });
   document.querySelectorAll('[data-library-mode]').forEach((button) => {
     button.addEventListener('click', () => {
       state.libraryMode = button.dataset.libraryMode || 'hybrid';
@@ -2086,13 +2056,10 @@ function renderEvidencePage(data) {
       </aside>
 
       <section class="panel evidence-ledger-panel">
-        <div class="evidence-search-strip">
-          <label><span>Evidence search</span><input id="evidenceSearchInput" value="${escapeHtml(state.q)}" placeholder="Search quotes, anchors, claims, URLs, sources"></label>
-          <button class="secondary" id="evidenceClearFilters">Clear</button>
-        </div>
         <div class="evidence-explanation">
           <span class="status-badge info">${escapeHtml(titleCase(state.evidenceMode || 'hybrid'))}</span>
           <p>${escapeHtml(data.scope?.q ? `Filtered by "${data.scope.q}".` : 'Showing reviewable evidence objects and source candidates by latest activity.')}</p>
+          <button class="secondary" id="evidenceClearFilters">Clear filters</button>
         </div>
         <div class="evidence-bulk-toolbar">
           <label><input type="checkbox" id="evidenceSelectAll"> Select visible</label>
@@ -2328,15 +2295,6 @@ function bindEvidencePage(data) {
       loadRoutePage();
     });
   });
-  $('evidenceSearchInput')?.addEventListener('input', () => {
-    state.q = $('evidenceSearchInput').value.trim();
-    clearTimeout(window.__evidenceSearchTimer);
-    window.__evidenceSearchTimer = setTimeout(() => {
-      state.evidenceSelectedId = '';
-      replaceRouteHash();
-      loadRoutePage();
-    }, 250);
-  });
   $('evidenceClearFilters')?.addEventListener('click', () => {
     state.q = '';
     state.project = '';
@@ -2348,6 +2306,7 @@ function bindEvidencePage(data) {
     state.evidenceAnchorType = '';
     state.evidenceSelectedId = '';
     state.evidenceSelectedIds.clear();
+    if ($('searchInput')) $('searchInput').value = '';
     replaceRouteHash();
     loadRoutePage();
   });
@@ -2575,13 +2534,10 @@ function renderEntitiesPage(data) {
         ${entityFacetGroup('Source kind', facets.source_kinds, state.entitySourceKind, 'source_kind')}
       </aside>
       <section class="panel entity-results-panel">
-        <div class="entity-search-strip">
-          <label><span>Entity search</span><input id="entitySearchInput" value="${escapeHtml(state.q)}" placeholder="Search names, aliases, handles, labs, models, sources"></label>
-          <button class="secondary" id="entityClearFilters">Clear</button>
-        </div>
         <div class="entity-explanation">
           <span class="status-badge info">${escapeHtml(titleCase(state.entityQueue || 'all'))}</span>
           <p>Rows represent identities, unresolved candidates, merge clusters, or entities with pending relations.</p>
+          <button class="secondary" id="entityClearFilters">Clear filters</button>
         </div>
         <div class="entity-bulk-toolbar">
           <label><input type="checkbox" id="entitySelectAll"> Select visible</label>
@@ -2806,15 +2762,6 @@ function bindEntityPage(data) {
       loadRoutePage();
     });
   });
-  $('entitySearchInput')?.addEventListener('input', () => {
-    state.q = $('entitySearchInput').value.trim();
-    clearTimeout(window.__entitySearchTimer);
-    window.__entitySearchTimer = setTimeout(() => {
-      state.entitySelectedId = '';
-      replaceRouteHash();
-      loadRoutePage();
-    }, 250);
-  });
   $('entityClearFilters')?.addEventListener('click', () => {
     state.q = '';
     state.project = '';
@@ -2824,6 +2771,7 @@ function bindEntityPage(data) {
     state.entitySourceKind = '';
     state.entitySelectedId = '';
     state.entitySelectedIds.clear();
+    if ($('searchInput')) $('searchInput').value = '';
     replaceRouteHash();
     loadRoutePage();
   });
@@ -3085,13 +3033,10 @@ function renderClaimsPage(data) {
         ${claimFacetGroup('Source kind', facets.source_kinds, state.claimSourceKind, 'source_kind')}
       </aside>
       <section class="panel claim-ledger-panel">
-        <div class="claim-search-strip">
-          <label><span>Claim search</span><input id="claimSearchInput" value="${escapeHtml(state.q)}" placeholder="Search claim language, subject, value, source, account, or URL"></label>
-          <button class="secondary" id="claimClearFilters">Clear</button>
-        </div>
         <div class="claim-explanation">
           <span class="status-badge info">${escapeHtml(titleCase(state.claimQueue || 'all'))}</span>
           <p>Rows represent reviewed claims, proposed assertions, conflict clusters, duplicates, and superseded claims.</p>
+          <button class="secondary" id="claimClearFilters">Clear filters</button>
         </div>
         <div class="claim-bulk-toolbar">
           <label><input type="checkbox" id="claimSelectAll"> Select visible</label>
@@ -3333,15 +3278,6 @@ function bindClaimPage(data) {
       loadRoutePage();
     });
   });
-  $('claimSearchInput')?.addEventListener('input', () => {
-    state.q = $('claimSearchInput').value.trim();
-    clearTimeout(window.__claimSearchTimer);
-    window.__claimSearchTimer = setTimeout(() => {
-      state.claimSelectedId = '';
-      replaceRouteHash();
-      loadRoutePage();
-    }, 250);
-  });
   $('claimClearFilters')?.addEventListener('click', () => {
     state.q = '';
     state.project = '';
@@ -3352,6 +3288,7 @@ function bindClaimPage(data) {
     state.claimSourceKind = '';
     state.claimSelectedId = '';
     state.claimSelectedIds.clear();
+    if ($('searchInput')) $('searchInput').value = '';
     replaceRouteHash();
     loadRoutePage();
   });
@@ -3591,30 +3528,6 @@ function renderReviewsPage(data) {
         <button data-review-bulk-action="approve">Review assigned</button>
       </div>
     </header>
-    <section class="operation-search-card">
-      <label class="operation-search">
-        <span class="sr-only">Review search</span>
-        <input id="reviewSearchInput" value="${escapeHtml(state.q)}" placeholder="Search review tasks, source anchors, proposed changes, claims, facts, blockers">
-      </label>
-      <div class="operation-search-controls">
-        <div class="segmented-control" aria-label="Review search mode">
-          <button class="secondary" type="button">Exact</button>
-          <button class="secondary" type="button">Semantic</button>
-          <button class="active" type="button">Hybrid</button>
-        </div>
-        <select id="reviewScopeSelect" aria-label="Review scope">
-          <option value="">Scope: All projects</option>
-          ${state.project ? `<option value="${escapeHtml(state.project)}" selected>Project: ${escapeHtml(state.project)}</option>` : ''}
-        </select>
-        <button id="reviewSearchButton" type="button">Search</button>
-        <button class="secondary compact-clear" id="reviewClearFilters" type="button">Clear</button>
-      </div>
-      <div class="operation-search-meta">
-        <span class="status-badge info">Human review only</span>
-        <p>Hybrid match: task fields plus exact source anchors, proposed changes, linked claims, entities, reviewer comments, and prior decisions.</p>
-        <strong>${escapeHtml(summary.open ?? 0)} waiting · ${escapeHtml(summary.blockers ?? 0)} blocking · ${escapeHtml(summary.visible ?? rows.length)} visible</strong>
-      </div>
-    </section>
     <section class="review-shell trace-workbench">
       <aside class="panel review-filter-panel">
         ${reviewQueueGroup(data.queues)}
@@ -3627,6 +3540,8 @@ function renderReviewsPage(data) {
         <div class="review-explanation">
           <span class="status-badge info">${escapeHtml(queueLabel)}</span>
           <p>Tasks are formal decisions. Inbox triage stays separate; save-and-next advances only after the durable event succeeds.</p>
+          <strong>${escapeHtml(summary.open ?? 0)} waiting · ${escapeHtml(summary.blockers ?? 0)} blocking · ${escapeHtml(summary.visible ?? rows.length)} visible</strong>
+          <button class="secondary" id="reviewClearFilters" type="button">Clear filters</button>
         </div>
         <div class="review-bulk-toolbar">
           <label><input type="checkbox" id="reviewSelectAll"> Select visible</label>
@@ -3877,27 +3792,6 @@ function bindReviewPage(data) {
       loadRoutePage();
     });
   });
-  $('reviewSearchInput')?.addEventListener('input', () => {
-    state.q = $('reviewSearchInput').value.trim();
-    clearTimeout(window.__reviewSearchTimer);
-    window.__reviewSearchTimer = setTimeout(() => {
-      state.reviewSelectedId = '';
-      replaceRouteHash();
-      loadRoutePage();
-    }, 250);
-  });
-  $('reviewSearchButton')?.addEventListener('click', () => {
-    state.q = $('reviewSearchInput')?.value.trim() || '';
-    state.reviewSelectedId = '';
-    replaceRouteHash();
-    loadRoutePage();
-  });
-  $('reviewScopeSelect')?.addEventListener('change', () => {
-    state.project = $('reviewScopeSelect').value || '';
-    state.reviewSelectedId = '';
-    replaceRouteHash();
-    loadRoutePage();
-  });
   $('reviewClearFilters')?.addEventListener('click', () => {
     state.q = '';
     state.project = '';
@@ -3908,6 +3802,8 @@ function bindReviewPage(data) {
     state.reviewLayer = '';
     state.reviewSelectedId = '';
     state.reviewSelectedIds.clear();
+    if ($('searchInput')) $('searchInput').value = '';
+    if ($('projectSelect')) $('projectSelect').value = '';
     replaceRouteHash();
     loadRoutePage();
   });
@@ -4289,32 +4185,13 @@ function bindPublishingKeyboard() {
 }
 
 function bindPublishingPage(data) {
-  $('publishingSearchInput')?.addEventListener('input', () => {
-    state.q = $('publishingSearchInput').value.trim();
-    clearTimeout(window.__publishingSearchTimer);
-    window.__publishingSearchTimer = setTimeout(() => {
-      state.publishingSelectedId = '';
-      replaceRouteHash();
-      loadRoutePage();
-    }, 250);
-  });
-  $('publishingSearchButton')?.addEventListener('click', () => {
-    state.q = $('publishingSearchInput')?.value.trim() || '';
-    state.publishingSelectedId = '';
-    replaceRouteHash();
-    loadRoutePage();
-  });
-  $('publishingScopeSelect')?.addEventListener('change', () => {
-    state.project = $('publishingScopeSelect').value || '';
-    state.publishingSelectedId = '';
-    replaceRouteHash();
-    loadRoutePage();
-  });
   $('publishingClearFilters')?.addEventListener('click', () => {
     state.q = '';
     state.project = '';
     state.publishingSelectedId = '';
     state.publishingPreviewTab = 'readiness';
+    if ($('searchInput')) $('searchInput').value = '';
+    if ($('projectSelect')) $('projectSelect').value = '';
     replaceRouteHash();
     loadRoutePage();
   });
@@ -4382,30 +4259,6 @@ function renderPublishingPage(data) {
         <button data-publishing-action="new_package">New package</button>
       </div>
     </header>
-    <section class="operation-search-card">
-      <label class="operation-search">
-        <span class="sr-only">Publishing search</span>
-        <input id="publishingSearchInput" value="${escapeHtml(state.q)}" placeholder="Search publication packages, claims, citations, handoff targets">
-      </label>
-      <div class="operation-search-controls">
-        <div class="segmented-control" aria-label="Publishing search mode">
-          <button class="secondary" type="button">Exact</button>
-          <button class="secondary" type="button">Semantic</button>
-          <button class="active" type="button">Hybrid</button>
-        </div>
-        <select id="publishingScopeSelect" aria-label="Publishing scope">
-          <option value="">Project: All projects</option>
-          ${state.project ? `<option value="${escapeHtml(state.project)}" selected>Project: ${escapeHtml(state.project)}</option>` : ''}
-        </select>
-        <button id="publishingSearchButton" type="button">Search</button>
-        <button class="secondary compact-clear" id="publishingClearFilters" type="button">Clear</button>
-      </div>
-      <div class="operation-search-meta">
-        <span class="status-badge info">Frozen snapshot workflow</span>
-        <p>Approvals and releases reference immutable snapshot IDs and manifest hashes, never mutable live bundle queries.</p>
-        <strong>${escapeHtml(summary.bundles ?? rows.length)} active · ${escapeHtml(summary.blocked ?? 0)} blocked · ${escapeHtml(summary.ready ?? 0)} ready</strong>
-      </div>
-    </section>
     <section class="publishing-shell trace-workbench">
       <aside class="panel review-filter-panel publishing-filter-panel">
         <section class="review-facet-group">
@@ -4426,6 +4279,8 @@ function renderPublishingPage(data) {
         <div class="review-explanation">
           <span class="status-badge info">${escapeHtml(summary.bundles || 0)} publication packages</span>
           <p>Mutable package manifests become publishable only after checks pass, a frozen snapshot is created, and snapshot review is complete.</p>
+          <strong>${escapeHtml(summary.bundles ?? rows.length)} active · ${escapeHtml(summary.blocked ?? 0)} blocked · ${escapeHtml(summary.ready ?? 0)} ready</strong>
+          <button class="secondary" id="publishingClearFilters" type="button">Clear filters</button>
         </div>
         <div class="review-bulk-toolbar">
           <label><input type="checkbox" id="publishingSelectAll"> Select visible</label>
@@ -4728,18 +4583,15 @@ function renderTaxonomyPage(data) {
       `<button class="secondary" data-taxonomy-action="version_history">Version history</button><button class="secondary" data-taxonomy-action="import_mappings">Import mappings</button><button data-taxonomy-action="create_term">New term</button>`
     )}
     <section class="taxonomy-search-card panel">
-      <label class="taxonomy-search-main">
-        <span class="sr-only">Search taxonomy</span>
-        <input id="taxonomySearchInput" type="search" value="${escapeHtml(state.q)}" placeholder="Search terms, aliases, stable IDs, definitions, hierarchy paths...">
-      </label>
-      <div class="mode-toggle taxonomy-mode-toggle">
-        ${['exact', 'semantic', 'hybrid'].map((mode) => `<button class="mode-btn ${state.taxonomySearchMode === mode ? 'active' : ''}" type="button" data-taxonomy-mode="${mode}">${escapeHtml(titleCase(mode))}</button>`).join('')}
+      <div class="taxonomy-filter-strip">
+        <div class="mode-toggle taxonomy-mode-toggle" aria-label="Search mode">
+          ${['exact', 'semantic', 'hybrid'].map((mode) => `<button class="mode-btn ${state.taxonomySearchMode === mode ? 'active' : ''}" type="button" data-taxonomy-mode="${mode}">${escapeHtml(titleCase(mode))}</button>`).join('')}
+        </div>
+        <select id="taxonomyVocabularySelect" aria-label="Filter by vocabulary">
+          <option value="">Vocabulary: All controlled sets</option>
+          ${(data.vocabularies || []).map((item) => `<option value="${escapeHtml(item.id)}" ${state.taxonomyVocabulary === item.id ? 'selected' : ''}>${escapeHtml(item.label)} (${escapeHtml(item.count || 0)})</option>`).join('')}
+        </select>
       </div>
-      <select id="taxonomyVocabularySelect">
-        <option value="">Vocabulary: All controlled sets</option>
-        ${(data.vocabularies || []).map((item) => `<option value="${escapeHtml(item.id)}" ${state.taxonomyVocabulary === item.id ? 'selected' : ''}>${escapeHtml(item.label)} (${escapeHtml(item.count || 0)})</option>`).join('')}
-      </select>
-      <button id="taxonomySearchButton">Search</button>
       <div class="taxonomy-search-meta">
         <span class="scope-pill">${escapeHtml((query.mode || state.taxonomySearchMode || 'hybrid').toUpperCase())} match</span>
         <span>${escapeHtml(summary.visible ?? rows.length)} visible of ${escapeHtml(summary.terms ?? rows.length)} terms</span>
@@ -4916,12 +4768,6 @@ function bindTaxonomyPage(data) {
     replaceRouteHash();
     loadRoutePage();
   };
-  $('taxonomySearchInput')?.addEventListener('input', () => {
-    state.q = $('taxonomySearchInput').value.trim();
-    clearTimeout(window.__taxonomySearchTimer);
-    window.__taxonomySearchTimer = setTimeout(commit, 260);
-  });
-  $('taxonomySearchButton')?.addEventListener('click', commit);
   $('taxonomyVocabularySelect')?.addEventListener('change', () => {
     state.taxonomyVocabulary = $('taxonomyVocabularySelect').value;
     commit();
@@ -4934,6 +4780,7 @@ function bindTaxonomyPage(data) {
     state.taxonomySearchMode = 'hybrid';
     state.taxonomySelectedId = '';
     state.taxonomySelectedIds.clear();
+    if ($('searchInput')) $('searchInput').value = '';
     replaceRouteHash();
     loadRoutePage();
   });
@@ -6629,7 +6476,6 @@ async function openPreviewSource(sourceId, taskType) {
 
 function syncInboxSearchInputs(value) {
   if ($('searchInput')) $('searchInput').value = value;
-  if ($('inboxLocalSearch')) $('inboxLocalSearch').value = value;
 }
 
 async function loadFacets() {
@@ -7790,20 +7636,17 @@ function wireEvents() {
   });
   $('searchInput').addEventListener('input', () => {
     state.q = $('searchInput').value.trim();
-    if ($('inboxLocalSearch') && $('inboxLocalSearch').value !== state.q) $('inboxLocalSearch').value = state.q;
     clearTimeout(window.__inboxTimer);
     window.__inboxTimer = setTimeout(() => {
+      // Clear route-local row selection so stale highlights from a prior
+      // query do not persist into the new result set.
+      const selectionKeys = { evidence: 'evidenceSelectedId', entities: 'entitySelectedId', claims: 'claimSelectedId', reviews: 'reviewSelectedId', publishing: 'publishingSelectedId', taxonomy: 'taxonomySelectedId', library: 'librarySelectedId' };
+      if (selectionKeys[state.route]) state[selectionKeys[state.route]] = '';
       if (state.route === 'library' || state.route === 'evidence' || state.route === 'entities' || state.route === 'claims' || state.route === 'reviews' || state.route === 'publishing' || state.route === 'taxonomy' || state.route === 'timeline' || state.route === 'compare' || state.route === 'draft') replaceRouteHash();
       if (state.route === 'home') openLibraryView({ q: state.q, mode: 'hybrid', scope: 'corpus' });
       else if (state.route === 'inbox') loadInbox();
       else loadRoutePage();
     }, 250);
-  });
-  $('inboxLocalSearch').addEventListener('input', () => {
-    state.q = $('inboxLocalSearch').value.trim();
-    if ($('searchInput').value !== state.q) $('searchInput').value = state.q;
-    clearTimeout(window.__inboxTimer);
-    window.__inboxTimer = setTimeout(() => loadInbox(), 250);
   });
   $('inboxClearFilters').addEventListener('click', () => {
     state.queue = 'all';

@@ -3669,16 +3669,22 @@ pre {
   background: var(--panel);
 }
 .taxonomy-search-card {
-  display: grid;
-  grid-template-columns: minmax(320px, 1fr) auto minmax(220px, 300px) auto;
-  gap: 10px;
+  display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  padding: 14px 16px;
+  gap: 10px 16px;
+  padding: 12px 16px;
   margin-bottom: 14px;
 }
-.taxonomy-search-main input {
-  width: 100%;
-  min-height: 42px;
+.taxonomy-filter-strip {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+.taxonomy-filter-strip select {
+  min-height: 36px;
+  min-width: 0;
 }
 .mode-toggle {
   display: inline-flex;
@@ -4303,9 +4309,6 @@ pre {
   .review-preview-panel,
   .publishing-preview-panel,
   .taxonomy-preview-panel { grid-column: 1 / -1; height: auto; min-height: 420px; }
-  .taxonomy-search-card { grid-template-columns: 1fr auto; }
-  .taxonomy-search-card select,
-  .taxonomy-search-card #taxonomySearchButton { grid-column: auto; }
   .brief-grid,
   .home-grid,
   .brief-question,

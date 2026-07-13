@@ -193,13 +193,14 @@
                 <p id="inboxActiveFilter">All queues</p>
               </div>
               <div class="task-panel-actions">
+                <label class="select-visible"><input id="inboxSelectAll" type="checkbox"> Select visible</label>
+                <span id="inboxVisibleCount" class="muted">0 tasks</span>
                 <button id="inboxClearFilters" class="secondary">Clear filters</button>
                 <button id="inboxRefreshInline">Refresh</button>
               </div>
             </div>
-            <div class="bulk-toolbar">
-              <label><input id="inboxSelectAll" type="checkbox"> Select visible</label>
-              <span id="inboxVisibleCount" class="muted">0 tasks</span>
+            <div class="bulk-toolbar" id="inboxBulkToolbar" hidden>
+              <span class="bulk-count" id="inboxBulkCount">0 selected</span>
               <button class="secondary" data-bulk-action="accept">Accept</button>
               <button class="secondary" data-bulk-action="reject">Reject</button>
               <button class="secondary" data-bulk-action="defer">Defer</button>

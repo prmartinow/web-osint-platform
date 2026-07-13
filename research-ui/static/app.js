@@ -1491,12 +1491,13 @@ function renderLibraryPage(data) {
       </aside>
       <section class="panel library-results-panel">
         <div class="library-explanation">
+          <label class="select-visible"><input id="librarySelectAll" type="checkbox"> Select page</label>
           <span class="status-badge info">${escapeHtml(titleCase(query.mode || state.libraryMode))}</span>
           <p>${escapeHtml(query.explanation || '')}</p>
           <button id="libraryClearFilters" class="secondary" type="button">Clear filters</button>
         </div>
-        <div class="library-bulk-toolbar">
-          <label><input id="librarySelectAll" type="checkbox"> Select page</label>
+        <div class="library-bulk-toolbar"${state.librarySelectedIds.size === 0 ? ' hidden' : ''}>
+          <span class="bulk-count" id="libraryBulkCount">${escapeHtml(state.librarySelectedIds.size)} selected</span>
           <button class="secondary" data-library-action="add_to_project" type="button">Add to project</button>
           <button class="secondary" data-library-action="assign_review" type="button">Assign review</button>
           <button class="secondary" data-library-action="merge_cluster" type="button">Merge cluster</button>
@@ -1756,6 +1757,7 @@ function wireLibraryEvents(data) {
       if (!id) return;
       if (event.currentTarget.checked) state.librarySelectedIds.add(id);
       else state.librarySelectedIds.delete(id);
+      syncBulkBar('.library-bulk-toolbar', 'libraryBulkCount', state.librarySelectedIds.size);
     });
   });
   $('librarySelectAll')?.addEventListener('change', () => {
@@ -1766,6 +1768,7 @@ function wireLibraryEvents(data) {
       else state.librarySelectedIds.delete(row.evidence_id);
     });
     document.querySelectorAll('.library-check').forEach((box) => { box.checked = checked; });
+    syncBulkBar('.library-bulk-toolbar', 'libraryBulkCount', state.librarySelectedIds.size);
   });
   document.querySelectorAll('[data-library-action], [data-library-preview-action]').forEach((button) => {
     button.addEventListener('click', async () => applyLibraryAction(button.dataset.libraryAction || button.dataset.libraryPreviewAction));
@@ -2057,13 +2060,20 @@ function renderEvidencePage(data) {
 
       <section class="panel evidence-ledger-panel">
         <div class="evidence-explanation">
+          <label class="select-visible"><input type="checkbox" id="evidenceSelectAll"> Select visible</label>
           <span class="status-badge info">${escapeHtml(titleCase(state.evidenceMode || 'hybrid'))}</span>
           <p>${escapeHtml(data.scope?.q ? `Filtered by "${data.scope.q}".` : 'Showing reviewable evidence objects and source candidates by latest activity.')}</p>
           <button class="secondary" id="evidenceClearFilters">Clear filters</button>
         </div>
-        <div class="evidence-bulk-toolbar">
-          <label><input type="checkbox" id="evidenceSelectAll"> Select visible</label>
-          ${['accept', 'reject', 'defer', 'assign_review', 'link_claim', 'create_claim', 'classify', 'change_type', 'taxonomy', 'export_publication'].map((action) => `<button class="secondary" data-evidence-bulk-action="${action}">${escapeHtml(titleCase(action))}</button>`).join('')}
+        <div class="evidence-bulk-toolbar"${state.evidenceSelectedIds.size === 0 ? ' hidden' : ''}>
+          <span class="bulk-count" id="evidenceBulkCount">${escapeHtml(state.evidenceSelectedIds.size)} selected</span>
+          ${['accept', 'reject', 'defer'].map((action) => `<button class="secondary" data-evidence-bulk-action="${action}">${escapeHtml(titleCase(action))}</button>`).join('')}
+          <details class="bulk-overflow">
+            <summary class="secondary">More</summary>
+            <div class="bulk-overflow-menu">
+              ${['assign_review', 'link_claim', 'create_claim', 'classify', 'change_type', 'taxonomy', 'export_publication'].map((action) => `<button class="secondary" data-evidence-bulk-action="${action}">${escapeHtml(titleCase(action))}</button>`).join('')}
+            </div>
+          </details>
           <span id="evidenceBulkStatus" class="muted"></span>
         </div>
         <div class="evidence-results-list">
@@ -2319,6 +2329,7 @@ function bindEvidencePage(data) {
       if (checkbox) checkbox.checked = checked;
       if (checked && id) state.evidenceSelectedIds.add(id);
     });
+    syncBulkBar('.evidence-bulk-toolbar', 'evidenceBulkCount', state.evidenceSelectedIds.size);
   });
   document.querySelectorAll('.evidence-row').forEach((row) => {
     row.addEventListener('click', () => {
@@ -2335,6 +2346,7 @@ function bindEvidencePage(data) {
       if (!id) return;
       if (event.currentTarget.checked) state.evidenceSelectedIds.add(id);
       else state.evidenceSelectedIds.delete(id);
+      syncBulkBar('.evidence-bulk-toolbar', 'evidenceBulkCount', state.evidenceSelectedIds.size);
     });
   });
   document.querySelectorAll('[data-evidence-preview-tab]').forEach((button) => {
@@ -2535,12 +2547,13 @@ function renderEntitiesPage(data) {
       </aside>
       <section class="panel entity-results-panel">
         <div class="entity-explanation">
+          <label class="select-visible"><input type="checkbox" id="entitySelectAll"> Select visible</label>
           <span class="status-badge info">${escapeHtml(titleCase(state.entityQueue || 'all'))}</span>
           <p>Rows represent identities, unresolved candidates, merge clusters, or entities with pending relations.</p>
           <button class="secondary" id="entityClearFilters">Clear filters</button>
         </div>
-        <div class="entity-bulk-toolbar">
-          <label><input type="checkbox" id="entitySelectAll"> Select visible</label>
+        <div class="entity-bulk-toolbar"${state.entitySelectedIds.size === 0 ? ' hidden' : ''}>
+          <span class="bulk-count" id="entityBulkCount">${escapeHtml(state.entitySelectedIds.size)} selected</span>
           ${['match', 'create', 'reject', 'defer', 'merge', 'split'].map((action) => `<button class="secondary" data-entity-bulk-action="${action}">${escapeHtml(titleCase(action))}</button>`).join('')}
           <span id="entityBulkStatus" class="muted"></span>
         </div>
@@ -2784,6 +2797,7 @@ function bindEntityPage(data) {
       if (checkbox) checkbox.checked = checked;
       if (checked && id) state.entitySelectedIds.add(id);
     });
+    syncBulkBar('.entity-bulk-toolbar', 'entityBulkCount', state.entitySelectedIds.size);
   });
   document.querySelectorAll('.entity-row').forEach((row) => {
     row.addEventListener('click', () => {
@@ -2800,6 +2814,7 @@ function bindEntityPage(data) {
       if (!id) return;
       if (event.currentTarget.checked) state.entitySelectedIds.add(id);
       else state.entitySelectedIds.delete(id);
+      syncBulkBar('.entity-bulk-toolbar', 'entityBulkCount', state.entitySelectedIds.size);
     });
   });
   document.querySelectorAll('[data-entity-preview-tab]').forEach((button) => {
@@ -3034,13 +3049,20 @@ function renderClaimsPage(data) {
       </aside>
       <section class="panel claim-ledger-panel">
         <div class="claim-explanation">
+          <label class="select-visible"><input type="checkbox" id="claimSelectAll"> Select visible</label>
           <span class="status-badge info">${escapeHtml(titleCase(state.claimQueue || 'all'))}</span>
           <p>Rows represent reviewed claims, proposed assertions, conflict clusters, duplicates, and superseded claims.</p>
           <button class="secondary" id="claimClearFilters">Clear filters</button>
         </div>
-        <div class="claim-bulk-toolbar">
-          <label><input type="checkbox" id="claimSelectAll"> Select visible</label>
-          ${['accept', 'dispute', 'reject', 'defer', 'revise', 'select_preferred_assertion', 'merge', 'split', 'add_to_draft'].map((action) => `<button class="secondary" data-claim-bulk-action="${action}">${escapeHtml(titleCase(action))}</button>`).join('')}
+        <div class="claim-bulk-toolbar"${state.claimSelectedIds.size === 0 ? ' hidden' : ''}>
+          <span class="bulk-count" id="claimBulkCount">${escapeHtml(state.claimSelectedIds.size)} selected</span>
+          ${['accept', 'dispute', 'reject', 'defer'].map((action) => `<button class="secondary" data-claim-bulk-action="${action}">${escapeHtml(titleCase(action))}</button>`).join('')}
+          <details class="bulk-overflow">
+            <summary class="secondary">More</summary>
+            <div class="bulk-overflow-menu">
+              ${['revise', 'select_preferred_assertion', 'merge', 'split', 'add_to_draft'].map((action) => `<button class="secondary" data-claim-bulk-action="${action}">${escapeHtml(titleCase(action))}</button>`).join('')}
+            </div>
+          </details>
           <span id="claimBulkStatus" class="muted"></span>
         </div>
         <div class="claim-results-list">
@@ -3301,6 +3323,7 @@ function bindClaimPage(data) {
       if (checkbox) checkbox.checked = checked;
       if (checked && id) state.claimSelectedIds.add(id);
     });
+    syncBulkBar('.claim-bulk-toolbar', 'claimBulkCount', state.claimSelectedIds.size);
   });
   document.querySelectorAll('.claim-row').forEach((row) => {
     row.addEventListener('click', () => {
@@ -3317,6 +3340,7 @@ function bindClaimPage(data) {
       if (!id) return;
       if (event.currentTarget.checked) state.claimSelectedIds.add(id);
       else state.claimSelectedIds.delete(id);
+      syncBulkBar('.claim-bulk-toolbar', 'claimBulkCount', state.claimSelectedIds.size);
     });
   });
   document.querySelectorAll('[data-claim-preview-tab]').forEach((button) => {
@@ -3525,7 +3549,6 @@ function renderReviewsPage(data) {
       <div class="page-actions">
         <button class="secondary" data-review-action-shortcut="history">Decision history</button>
         <button class="secondary" data-review-action-shortcut="create_queue">Create queue</button>
-        <button data-review-bulk-action="approve">Review assigned</button>
       </div>
     </header>
     <section class="review-shell trace-workbench">
@@ -3538,13 +3561,14 @@ function renderReviewsPage(data) {
       </aside>
       <section class="panel review-ledger-panel">
         <div class="review-explanation">
+          <label class="select-visible"><input type="checkbox" id="reviewSelectAll"> Select visible</label>
           <span class="status-badge info">${escapeHtml(queueLabel)}</span>
           <p>Tasks are formal decisions. Inbox triage stays separate; save-and-next advances only after the durable event succeeds.</p>
           <strong>${escapeHtml(summary.open ?? 0)} waiting · ${escapeHtml(summary.blockers ?? 0)} blocking · ${escapeHtml(summary.visible ?? rows.length)} visible</strong>
           <button class="secondary" id="reviewClearFilters" type="button">Clear filters</button>
         </div>
-        <div class="review-bulk-toolbar">
-          <label><input type="checkbox" id="reviewSelectAll"> Select visible</label>
+        <div class="review-bulk-toolbar"${state.reviewSelectedIds.size === 0 ? ' hidden' : ''}>
+          <span class="bulk-count" id="reviewBulkCount">${escapeHtml(state.reviewSelectedIds.size)} selected</span>
           ${['approve', 'reject', 'request_changes', 'defer', 'assign'].map((action) => `<button class="secondary" data-review-bulk-action="${action}">${escapeHtml(titleCase(action))}</button>`).join('')}
           <span id="reviewBulkStatus" class="muted"></span>
         </div>
@@ -3833,6 +3857,7 @@ function bindReviewPage(data) {
       if (checkbox) checkbox.checked = checked;
       if (checked && id) state.reviewSelectedIds.add(id);
     });
+    syncBulkBar('.review-bulk-toolbar', 'reviewBulkCount', state.reviewSelectedIds.size);
   });
   document.querySelectorAll('.review-row').forEach((row) => {
     row.addEventListener('click', () => {
@@ -3849,6 +3874,7 @@ function bindReviewPage(data) {
       if (!id) return;
       if (event.currentTarget.checked) state.reviewSelectedIds.add(id);
       else state.reviewSelectedIds.delete(id);
+      syncBulkBar('.review-bulk-toolbar', 'reviewBulkCount', state.reviewSelectedIds.size);
     });
   });
   document.querySelectorAll('[data-review-preview-tab]').forEach((button) => {
@@ -4282,8 +4308,8 @@ function renderPublishingPage(data) {
           <strong>${escapeHtml(summary.bundles ?? rows.length)} active · ${escapeHtml(summary.blocked ?? 0)} blocked · ${escapeHtml(summary.ready ?? 0)} ready</strong>
           <button class="secondary" id="publishingClearFilters" type="button">Clear filters</button>
         </div>
-        <div class="review-bulk-toolbar">
-          <label><input type="checkbox" id="publishingSelectAll"> Select visible</label>
+        <div class="review-bulk-toolbar"${state.publishingSelectedId ? '' : ' hidden'}>
+          <span class="bulk-count">1 package selected</span>
           ${['run_checks', 'create_snapshot', 'request_review', 'create_handoff'].map((action) => `<button class="secondary" data-publishing-action="${action}">${escapeHtml(titleCase(action))}</button>`).join('')}
           <span id="publishingBulkStatus" class="muted"></span>
         </div>
@@ -4623,7 +4649,8 @@ function renderTaxonomyPage(data) {
             <button class="${state.taxonomyQueue === item.id ? 'active' : ''}" type="button" data-taxonomy-queue="${escapeHtml(item.id)}">${escapeHtml(item.label)} <span>${escapeHtml(item.count || 0)}</span></button>
           `).join('')}
         </div>
-        <div class="review-bulk-toolbar">
+        <div class="review-bulk-toolbar"${state.taxonomySelectedIds.size === 0 ? ' hidden' : ''}>
+          <span class="bulk-count" id="taxonomyBulkCount">${escapeHtml(state.taxonomySelectedIds.size)} selected</span>
           ${['assign_review', 'promote', 'map', 'merge', 'add_alias', 'deprecate', 'export'].map((action) => `<button class="secondary" data-taxonomy-bulk-action="${action}">${escapeHtml(titleCase(action))}</button>`).join('')}
           <span id="taxonomyBulkStatus" class="muted"></span>
         </div>
@@ -4831,6 +4858,7 @@ function bindTaxonomyPage(data) {
       if (checkbox) checkbox.checked = checked;
       if (checked && id) state.taxonomySelectedIds.add(id);
     });
+    syncBulkBar('.taxonomy-ledger-panel .review-bulk-toolbar', 'taxonomyBulkCount', state.taxonomySelectedIds.size);
   });
   document.querySelectorAll('.taxonomy-row').forEach((row) => {
     row.addEventListener('click', () => {
@@ -4850,6 +4878,7 @@ function bindTaxonomyPage(data) {
       if (!id) return;
       if (event.currentTarget.checked) state.taxonomySelectedIds.add(id);
       else state.taxonomySelectedIds.delete(id);
+      syncBulkBar('.taxonomy-ledger-panel .review-bulk-toolbar', 'taxonomyBulkCount', state.taxonomySelectedIds.size);
     });
   });
   document.querySelectorAll('[data-topic-open]').forEach((button) => {
@@ -6131,6 +6160,9 @@ function renderInbox(rows) {
   state.rows = rows;
   // Refresh the capture-activity log alongside the inbox (captures land here).
   refreshCaptureActivity();
+  // Re-rendering clears all checkboxes, so reset the bulk bar.
+  syncBulkBar('#inboxBulkToolbar', 'inboxBulkCount', 0);
+  if ($('inboxSelectAll')) $('inboxSelectAll').checked = false;
   const highPriority = rows.filter((row) => row.task_priority === 'high' || row.task_priority === 'blocking').length;
   $('inboxOpenTasks').textContent = `${rows.length} open task${rows.length === 1 ? '' : 's'}`;
   $('inboxHighPriority').textContent = `${highPriority} high priority`;
@@ -6195,6 +6227,8 @@ function renderInbox(rows) {
     });
     row.querySelector('.task-check')?.addEventListener('click', (event) => {
       event.stopPropagation();
+      const count = document.querySelectorAll('#inboxRows .task-check:checked').length;
+      syncBulkBar('#inboxBulkToolbar', 'inboxBulkCount', count);
     });
   });
   renderInboxPreview(selectedPreviewRow());
@@ -6476,6 +6510,17 @@ async function openPreviewSource(sourceId, taskType) {
 
 function syncInboxSearchInputs(value) {
   if ($('searchInput')) $('searchInput').value = value;
+}
+
+// Toggle a ledger bulk toolbar's visibility + "N selected" count without a
+// full route re-render. Called from per-row checkbox handlers.
+// toolbarId: the .X-bulk-toolbar element id or selector; countId: the span id.
+function syncBulkBar(toolbarSel, countId, size) {
+  const toolbar = document.querySelector(toolbarSel);
+  if (!toolbar) return;
+  toolbar.hidden = size === 0;
+  const count = $(countId);
+  if (count) count.textContent = `${size} selected`;
 }
 
 async function loadFacets() {
@@ -7667,6 +7712,8 @@ function wireEvents() {
     document.querySelectorAll('#inboxRows .task-check').forEach((checkbox) => {
       checkbox.checked = $('inboxSelectAll').checked;
     });
+    const count = document.querySelectorAll('#inboxRows .task-check:checked').length;
+    syncBulkBar('#inboxBulkToolbar', 'inboxBulkCount', count);
   });
   document.querySelectorAll('[data-bulk-action]').forEach((button) => {
     button.addEventListener('click', async () => {

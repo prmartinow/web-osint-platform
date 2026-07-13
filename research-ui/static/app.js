@@ -1552,13 +1552,10 @@ function renderLibraryResultRow(row, selectedIds) {
         <p>${escapeHtml(row.snippet || row.canonical_url || id)}</p>
         <div class="row-meta">
           <span class="pill">${escapeHtml(row.source_label || row.source_kind)}</span>
-          ${row.author_handle ? `<span class="pill">@${escapeHtml(row.author_handle)}</span>` : ''}
           ${row.domain ? `<span class="pill">${escapeHtml(row.domain)}</span>` : ''}
           ${row.source_project ? `<span class="pill">${escapeHtml(row.source_project)}</span>` : ''}
           <span class="pill">${escapeHtml(row.observations || 0)} capture${Number(row.observations || 0) === 1 ? '' : 's'}</span>
-          ${row.artifact_available ? '<span class="pill ok">artifacts</span>' : ''}
-          ${row.has_ocr || row.ocr_count ? '<span class="pill ok">OCR</span>' : ''}
-          ${row.vl_count ? '<span class="pill ok">VL</span>' : ''}
+          ${(row.artifact_available || row.has_ocr || row.ocr_count || row.vl_count) ? `<span class="pill ok">${[row.artifact_available && 'artifacts', (row.has_ocr || row.ocr_count) && 'OCR', row.vl_count && 'VL'].filter(Boolean).join(' · ')}</span>` : ''}
         </div>
         <div class="match-line">${escapeHtml(row.match_explanation || 'Matched captured source metadata.')}</div>
       </div>
@@ -2091,12 +2088,9 @@ function renderEvidencePage(data) {
                   </div>
                   <p>${escapeHtml(row.match_explanation || row.immutable_note || '')}</p>
                   <div class="row-meta">
-                    <span class="pill">${escapeHtml(titleCase(row.object_type || 'evidence'))}</span>
                     <span class="pill">${escapeHtml(row.evidence_type || 'evidence')}</span>
                     <span class="pill">${escapeHtml(row.review_state || 'open')}</span>
-                    <span class="pill">${escapeHtml(row.anchor_type || 'source_record')}</span>
                     ${row.source_label ? `<span class="pill">${escapeHtml(row.source_label)}</span>` : ''}
-                    ${row.author_handle ? `<span class="pill">@${escapeHtml(row.author_handle)}</span>` : ''}
                     ${row.domain ? `<span class="pill">${escapeHtml(row.domain)}</span>` : ''}
                   </div>
                 </div>
@@ -3081,12 +3075,10 @@ function renderClaimsPage(data) {
                   </div>
                   <p>${escapeHtml(`${row.subject || 'Subject'} -> ${row.property || 'property'} -> ${row.value || ''}`)}</p>
                   <div class="row-meta">
-                    <span class="pill">${escapeHtml(titleCase(row.row_kind || 'claim'))}</span>
                     <span class="pill">${escapeHtml(row.claim_type || 'general')}</span>
                     <span class="pill">${escapeHtml(row.review_state || 'draft')}</span>
-                    <span class="pill">${escapeHtml(row.contradiction_state || 'contextual')}</span>
+                    ${row.contradiction_state && row.contradiction_state !== 'contextual' ? `<span class="pill warn">${escapeHtml(row.contradiction_state)}</span>` : ''}
                     ${row.source_label ? `<span class="pill">${escapeHtml(row.source_label)}</span>` : ''}
-                    ${row.author_handle ? `<span class="pill">@${escapeHtml(row.author_handle)}</span>` : ''}
                     ${row.domain ? `<span class="pill">${escapeHtml(row.domain)}</span>` : ''}
                   </div>
                 </div>
@@ -3588,10 +3580,7 @@ function renderReviewsPage(data) {
                   <p>${escapeHtml(row.source_anchor_summary || row.review_reason || '')}</p>
                   <div class="row-meta">
                     <span class="pill">${escapeHtml(row.object_type || 'object')}</span>
-                    <span class="pill">${escapeHtml(row.decision_state || 'open')}</span>
-                    <span class="pill">${escapeHtml(row.priority || 'normal')}</span>
                     <span class="pill">${escapeHtml(row.epistemic_layer || 'layer')}</span>
-                    ${row.assignee ? `<span class="pill">${escapeHtml(row.assignee)}</span>` : ''}
                     ${row.source_label ? `<span class="pill">${escapeHtml(row.source_label)}</span>` : ''}
                     ${row.domain ? `<span class="pill">${escapeHtml(row.domain)}</span>` : ''}
                   </div>
@@ -4287,16 +4276,6 @@ function renderPublishingPage(data) {
     </header>
     <section class="publishing-shell trace-workbench">
       <aside class="panel review-filter-panel publishing-filter-panel">
-        <section class="review-facet-group">
-          <h3>Publishing queues</h3>
-          <div class="facet-list compact">
-            ${(data.queues || []).map((item) => `
-              <button class="facet" type="button">
-                <span>${escapeHtml(item.label || item.id)}</span><strong>${escapeHtml(item.count || 0)}</strong>
-              </button>
-            `).join('')}
-          </div>
-        </section>
         ${reviewFacetGroup('Package type', data.facets?.package_types, '', 'publishing_type')}
         ${reviewFacetGroup('Displayed state', data.facets?.displayed_states, '', 'publishing_state')}
         ${reviewFacetGroup('Target and handoff', data.facets?.targets, '', 'publishing_target')}
@@ -4344,6 +4323,7 @@ function renderPublishingPage(data) {
               </article>
             `;
           }).join('') : '<div class="empty-state"><h2>No publication packages</h2><p>Create a package from reviewed claims, evidence, or a draft.</p></div>'}
+          <div class="results-footer">${escapeHtml(rows.length)} of ${escapeHtml(summary.bundles ?? rows.length)} packages</div>
         </div>
       </section>
       <aside class="panel review-preview-panel publishing-preview-panel">
@@ -6199,13 +6179,8 @@ function renderInbox(rows) {
         ${row.object_text ? `<div class="task-object">${escapeHtml(row.object_text)}</div>` : ''}
         <div class="row-meta">
           <span class="pill">${escapeHtml(taskTypeLabel(row))}</span>
-          ${row.object_type && row.object_type !== 'source' ? `<span class="pill">${escapeHtml(titleCase(row.object_type))}</span>` : ''}
-          ${row.task_state ? `<span class="pill">${escapeHtml(titleCase(row.task_state))}</span>` : ''}
           <span class="pill">${escapeHtml(sourceLabelFor(row))}</span>
-          ${row.author_handle ? `<span class="pill">@${escapeHtml(row.author_handle)}</span>` : ''}
           ${row.domain ? `<span class="pill">${escapeHtml(row.domain)}</span>` : ''}
-          ${row.has_media ? `<span class="pill ok">media</span>` : ''}
-          ${row.has_ocr ? `<span class="pill ok">OCR</span>` : ''}
           ${row.review_hint ? `<span class="pill warn">${escapeHtml(row.review_hint)}</span>` : ''}
         </div>
       </div>

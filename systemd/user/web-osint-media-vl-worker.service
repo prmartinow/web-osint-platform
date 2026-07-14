@@ -1,5 +1,5 @@
 [Unit]
-Description=Web OSINT Qwen3-VL media embedding worker
+Description=Web OSINT local-inference media embedding worker
 Documentation=https://github.com/prmartinow/web-osint-platform/blob/main/docs/LOCAL_INFERENCE.md
 After=network-online.target local-inference.service web-osint-media-router.service
 Wants=network-online.target local-inference.service

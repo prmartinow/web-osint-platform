@@ -446,13 +446,13 @@ async function loadModelsStage() {
   const hostCapacityAfterReserve = Math.max(0, Number(host.logical_threads || 0) - Number(cpu.reserved_threads || 0));
   $('#modelCards').innerHTML = [
     card('Models usable', `${fmtNum(usable)}/${fmtNum(cards.models)}`, `${fmtNum(loaded)} loaded, ${fmtNum(available)} available, ${fmtNum(ready)} ready`),
-    card('Loaded now', fmtNum(loaded), 'Qwen models in memory'),
+    card('Loaded now', fmtNum(loaded), 'models in memory'),
     card('Active', fmtNum(cards.active_requests), 'in-flight model requests', Number(cards.active_requests || 0) ? 'warn-card' : 'good-card'),
     card('Waiting', fmtNum(cards.waiting_requests), 'queued model requests', Number(cards.waiting_requests || 0) ? 'warn-card' : 'good-card'),
-    card('Requests', fmtNum(cards.requests_total), 'Qwen API total'),
+    card('Requests', fmtNum(cards.requests_total), 'model API total'),
     card('Worker health', `${fmtNum(healthyWorkers)}/${fmtNum(workerRows.length)}`, `${fmtNum(cards.historical_worker_failures)} historical failures`, Number(cards.current_worker_alerts || 0) ? 'bad-card' : 'good-card'),
     card('Host CPU', `${fmtNum(host.physical_cores)}c / ${fmtNum(host.logical_threads)}t`, `${fmtNum(host.sockets)} socket, SMT ${host.threads_per_core || ''}x`),
-    card('Qwen threads', fmtNum(qwenThreads), `${fmtNum(hostCapacityAfterReserve)} host capacity after reserve; process pool ${fmtNum(cpu.effective_threads)}`),
+    card('Inference threads', fmtNum(qwenThreads), `${fmtNum(hostCapacityAfterReserve)} host capacity after reserve; process pool ${fmtNum(cpu.effective_threads)}`),
   ].join('');
   renderTable($('#modelGuardrails'), [
     { key: 'operation', label: 'Operation', width: 140 },

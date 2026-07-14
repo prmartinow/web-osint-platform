@@ -312,7 +312,7 @@ def task_from_message(topic: str, key: str, event: dict[str, Any]) -> EvidenceTa
     return None
 
 
-def embed_texts(texts: list[str]) -> list[list[float]]:
+def embed_texts(texts: list[str]) -> tuple[list[list[float]], str]:
     # Slow model API call: do not set an HTTP timeout. Progress/state comes from
     # local-inference /healthz guardrails and /metrics, not from client retries.
     response = requests.post(
@@ -322,10 +322,11 @@ def embed_texts(texts: list[str]) -> list[list[float]]:
     )
     response.raise_for_status()
     payload = response.json()
-    return [item["embedding"] for item in payload["data"]]
+    model_name = payload.get("model", "Qwen3-Embedding-8B")
+    return [item["embedding"] for item in payload["data"]], model_name
 
 
-def upsert_qdrant(task: EvidenceTask, vectors: dict[str, list[float]]) -> None:
+def upsert_qdrant(task: EvidenceTask, vectors: dict[str, list[float]], model_name: str) -> None:
     body = {
         "points": [
             {
@@ -334,7 +335,7 @@ def upsert_qdrant(task: EvidenceTask, vectors: dict[str, list[float]]) -> None:
                 "payload": {
                     **task.payload,
                     "embedded_at": now_iso(),
-                    "embedding_model": "Qwen3-Embedding-8B",
+                    "embedding_model": model_name,
                     "embedding_vector_names": sorted(vectors.keys()),
                 },
             }
@@ -361,9 +362,9 @@ def handle_message(producer: Producer, topic: str, key: str, value: bytes) -> bo
         stats.incr("skipped")
         return True
 
-    vectors = embed_texts([item.text for item in task.vector_inputs])
+    vectors, model_name = embed_texts([item.text for item in task.vector_inputs])
     vector_map = {item.vector_name: vectors[idx] for idx, item in enumerate(task.vector_inputs)}
-    upsert_qdrant(task, vector_map)
+    upsert_qdrant(task, vector_map, model_name)
     audit = {
         "schema_version": "v1",
         "evidence_id": task.evidence_id,
@@ -372,7 +373,7 @@ def handle_message(producer: Producer, topic: str, key: str, value: bytes) -> bo
         "collector_run_id": task.payload.get("collector_run_id", ""),
         "source_project": task.payload.get("source_project", ""),
         "vector_names": sorted(vector_map.keys()),
-        "embedding_model": "Qwen3-Embedding-8B",
+        "embedding_model": model_name,
         "embedding_dimension": len(next(iter(vector_map.values()))) if vector_map else 0,
         "embedded_at": now_iso(),
     }

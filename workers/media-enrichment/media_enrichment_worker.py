@@ -725,6 +725,7 @@ def prepare_vl_image(path: Path, sha: str) -> Path:
 
 
 def insert_vl_row(event: dict[str, Any], status: str, **values: Any) -> None:
+    model_name = values.get("model") or values.get("model_version") or "Qwen3-VL-Embedding-8B"
     ch_insert(
         "media_vl_embeddings",
         [
@@ -733,8 +734,8 @@ def insert_vl_row(event: dict[str, Any], status: str, **values: Any) -> None:
                 "evidence_id": event.get("evidence_id", ""),
                 "source_artifact_id": event.get("artifact_id", ""),
                 "source_sha256": event.get("artifact_sha256", ""),
-                "model": "Qwen3-VL-Embedding-8B",
-                "model_version": values.get("model_version", "Qwen3-VL-Embedding-8B"),
+                "model": model_name,
+                "model_version": model_name,
                 "params_hash": event.get("params_hash", ""),
                 "qdrant_collection": QDRANT_COLLECTION,
                 "qdrant_point_id": values.get("qdrant_point_id", ""),
@@ -762,15 +763,15 @@ def embed_vl_image(path: Path) -> dict[str, Any]:
     data = response.json()
     rows = data.get("data") or []
     if not rows:
-        raise RuntimeError("Qwen VL response contained no vectors")
+        raise RuntimeError("local-inference VL response contained no vectors")
     return {"vector": rows[0]["embedding"], "model": data.get("model", "Qwen3-VL-Embedding-8B"), "dimension": data.get("dimension", 0)}
 
 
-def upsert_vl_qdrant(event: dict[str, Any], vector: list[float], vl_embedding_id: str) -> str:
+def upsert_vl_qdrant(event: dict[str, Any], vector: list[float], vl_embedding_id: str, model_name: str) -> str:
     point_id = uuid_from("vl:" + vl_embedding_id)
     payload = {
         "point_kind": "media_vl_embedding",
-        "embedding_model": "Qwen3-VL-Embedding-8B",
+        "embedding_model": model_name,
         "embedding_vector_names": [VECTOR_NAME],
         "evidence_id": event.get("evidence_id"),
         "artifact_id": event.get("artifact_id"),
@@ -820,7 +821,7 @@ def handle_vl_event(producer: Producer, event: dict[str, Any]) -> None:
     vl_embedding_id = "vl_" + stable_hash(sha, "qwen3-vl", params_hash)[:24]
     prepared = prepare_vl_image(path, sha)
     embedding = embed_vl_image(prepared)
-    point_id = upsert_vl_qdrant(event, embedding["vector"], vl_embedding_id)
+    point_id = upsert_vl_qdrant(event, embedding["vector"], vl_embedding_id, embedding["model"])
     manifest_path = ensure_dir(VL_ROOT / sha[:2]) / f"{vl_embedding_id}.json"
     manifest = {
         "vl_embedding_id": vl_embedding_id,
@@ -839,6 +840,7 @@ def handle_vl_event(producer: Producer, event: dict[str, Any]) -> None:
         "completed",
         vl_embedding_id=vl_embedding_id,
         qdrant_point_id=point_id,
+        model=embedding["model"],
         model_version=embedding["model"],
     )
     completed = {

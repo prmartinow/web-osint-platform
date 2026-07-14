@@ -136,7 +136,7 @@ def vector_name(row: dict[str, Any]) -> str:
     return "text_dense"
 
 
-def embed(texts: list[str]) -> list[list[float]]:
+def embed(texts: list[str]) -> tuple[list[list[float]], str]:
     body = json.dumps({"model": "text", "inputs": texts, "normalize": True}).encode("utf-8")
     req = urllib.request.Request(
         LOCAL_INFERENCE_URL + "/embed",
@@ -150,10 +150,11 @@ def embed(texts: list[str]) -> list[list[float]]:
     )
     with urllib.request.urlopen(req) as response:
         payload = json.loads(response.read().decode("utf-8"))
-    return [item["embedding"] for item in payload["data"]]
+    model_name = payload.get("model", "Qwen3-Embedding-8B")
+    return [item["embedding"] for item in payload["data"]], model_name
 
 
-def upsert(rows: list[dict[str, Any]], vectors: list[list[float]]) -> None:
+def upsert(rows: list[dict[str, Any]], vectors: list[list[float]], model_name: str) -> None:
     points = []
     embedded_at = now_iso()
     for row, vector in zip(rows, vectors, strict=True):
@@ -174,7 +175,7 @@ def upsert(rows: list[dict[str, Any]], vectors: list[list[float]]) -> None:
                     "has_media": bool(row.get("has_media")),
                     "posted_at_day": day_string(row.get("posted_at")),
                     "captured_at_day": day_string(row.get("captured_at")),
-                    "embedding_model": "Qwen3-Embedding-8B",
+                    "embedding_model": model_name,
                     "embedding_vector_names": [name],
                     "embedded_at": embedded_at,
                 },
@@ -209,8 +210,8 @@ def main() -> int:
     started = time.time()
     for batch in chunks(rows, max(1, BATCH_SIZE)):
         texts = [clean_text(row.get("text")) for row in batch]
-        vectors = embed(texts)
-        upsert(batch, vectors)
+        vectors, model_name = embed(texts)
+        upsert(batch, vectors, model_name)
         completed += len(batch)
         elapsed = max(time.time() - started, 0.001)
         rate = completed / elapsed

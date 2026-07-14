@@ -455,6 +455,7 @@ def live_dashboard(params):
             "normalizer": service_json("normalizer", lambda: http_json(f"{NORMALIZER_URL}/stats")),
             "research_planner": service_json("research_planner", lambda: http_json(f"{RESEARCH_PLANNER_URL}/stats")),
             "qwen": service_json("qwen", lambda: http_json(f"{LOCAL_INFERENCE_URL}/healthz")),
+            "local_inference": service_json("local_inference", lambda: http_json(f"{LOCAL_INFERENCE_URL}/healthz")),
             "typesense": service_json("typesense", lambda: http_json(
                 f"{TYPESENSE_URL}/collections/evidence_posts",
                 headers={"X-TYPESENSE-API-KEY": TYPESENSE_KEY},
@@ -1297,11 +1298,8 @@ def model_inventory(qwen_health):
     paths = (qwen_health or {}).get("model_paths") or {}
     exists = (qwen_health or {}).get("model_path_exists") or {}
     loaded = (qwen_health or {}).get("loaded") or {}
-    model_specs = [
-        {
-            "id": "text",
-            "name": "Qwen3-Embedding-8B",
-            "repo": "Qwen/Qwen3-Embedding-8B",
+    meta = {
+        "text": {
             "role": "default text embedding",
             "modality": "text",
             "precision": "bf16 safetensors",
@@ -1311,10 +1309,7 @@ def model_inventory(qwen_health):
             "worker": "web-osint-embedding-worker",
             "output": "Qdrant text_dense + osint.semantic.embedded.v1",
         },
-        {
-            "id": "reranker",
-            "name": "Qwen3-Reranker-8B",
-            "repo": "Qwen/Qwen3-Reranker-8B",
+        "reranker": {
             "role": "precision reranking",
             "modality": "text pairs",
             "precision": "bf16 safetensors",
@@ -1324,10 +1319,7 @@ def model_inventory(qwen_health):
             "worker": "research search coordinator",
             "output": "reranked research-search results",
         },
-        {
-            "id": "vl",
-            "name": "Qwen3-VL-Embedding-8B",
-            "repo": "Qwen/Qwen3-VL-Embedding-8B",
+        "vl": {
             "role": "image/screenshot embedding",
             "modality": "image + text",
             "precision": "bf16 safetensors",
@@ -1337,24 +1329,67 @@ def model_inventory(qwen_health):
             "worker": "web-osint-media-vl-worker",
             "output": "Qdrant vl_image_dense + media_vl_embeddings",
         },
-    ]
+        "vl_generative": {
+            "role": "visual language generative chat",
+            "modality": "image + text chat",
+            "precision": "bf16 safetensors",
+            "dimension": "",
+            "vector_name": "",
+            "endpoint": "POST /v1/chat/completions",
+            "worker": "research chat coordinator",
+            "output": "interactive VL responses",
+        },
+        "recaptcha_classifier": {
+            "role": "CAPTCHA solving classification",
+            "modality": "image classification",
+            "precision": "onnx runtime",
+            "dimension": "",
+            "vector_name": "",
+            "endpoint": "POST /classify_recaptcha",
+            "worker": "recaptcha-worker",
+            "output": "solving coordination",
+        }
+    }
     inventory = []
-    for spec in model_specs:
-        path = paths.get(spec["id"], "")
-        if spec["id"] in loaded:
+    for model_id, path in paths.items():
+        if model_id in ("paddleocr_home", "paddle_pdx_cache_home"):
+            continue
+        name = os.path.basename(str(path).rstrip("/")) if path else model_id
+        repo = "local-inference/" + name
+        spec = meta.get(model_id, {
+            "role": "local inference model",
+            "modality": "unknown",
+            "precision": "unknown",
+            "dimension": "",
+            "vector_name": "",
+            "endpoint": f"POST /{model_id}",
+            "worker": "local-inference",
+            "output": "outputs",
+        })
+        if model_id in loaded:
             status = "loaded"
-        elif exists.get(spec["id"]):
+        elif exists.get(model_id):
             status = "available"
         else:
             status = "missing"
         inventory.append({
-            **spec,
+            "id": model_id,
+            "name": name,
+            "repo": repo,
+            "role": spec["role"],
+            "modality": spec["modality"],
+            "precision": spec["precision"],
+            "dimension": spec.get("dimension", ""),
+            "vector_name": spec.get("vector_name", ""),
+            "endpoint": spec["endpoint"],
+            "worker": spec["worker"],
+            "output": spec["output"],
             "status": status,
             "path": path,
-            "path_exists": bool(exists.get(spec["id"])),
+            "path_exists": bool(exists.get(model_id)),
             "size_bytes": None,
             "files": None,
-            "loaded_for_seconds": (loaded.get(spec["id"]) or {}).get("loaded_for_seconds"),
+            "loaded_for_seconds": (loaded.get(model_id) or {}).get("loaded_for_seconds"),
         })
     paddle_loaded = next((value for key, value in loaded.items() if str(key).startswith("paddleocr")), None)
     inventory.append({
@@ -1480,12 +1515,17 @@ def model_stage(params):
     output_totals, output_latest = output_count_maps(output_counts)
 
     qdrant_collection = service_json("qdrant", lambda: http_json(f"{QDRANT_URL}/collections/{QDRANT_COLLECTION}", timeout=8))
+    
+    text_model_name = next((m["name"] for m in inventory if m["id"] == "text"), "Qwen3-Embedding-8B")
+    reranker_model_name = next((m["name"] for m in inventory if m["id"] == "reranker"), "Qwen3-Reranker-8B")
+    vl_model_name = next((m["name"] for m in inventory if m["id"] == "vl"), "Qwen3-VL-Embedding-8B")
+
     lineage = [
-        {"source": "evidence.*.observed.v1", "model": "Qwen3-Embedding-8B", "worker": "embedding-worker", "output": "Qdrant text_dense", "audit": "osint.semantic.embedded.v1"},
-        {"source": "research query", "model": "Qwen3-Embedding-8B", "worker": "dashboard coordinator", "output": "Qdrant candidate search", "audit": "request metrics"},
-        {"source": "research candidates", "model": "Qwen3-Reranker-8B", "worker": "dashboard coordinator", "output": "precision reranked results", "audit": "request metrics"},
+        {"source": "evidence.*.observed.v1", "model": text_model_name, "worker": "embedding-worker", "output": "Qdrant text_dense", "audit": "osint.semantic.embedded.v1"},
+        {"source": "research query", "model": text_model_name, "worker": "dashboard coordinator", "output": "Qdrant candidate search", "audit": "request metrics"},
+        {"source": "research candidates", "model": reranker_model_name, "worker": "dashboard coordinator", "output": "precision reranked results", "audit": "request metrics"},
         {"source": "media artifacts", "model": "PaddleOCR", "worker": "media-ocr-worker", "output": "media_ocr_results + OCR files", "audit": "ClickHouse"},
-        {"source": "media artifacts", "model": "Qwen3-VL-Embedding-8B", "worker": "media-vl-worker", "output": "Qdrant vl_image_dense", "audit": "media_vl_embeddings"},
+        {"source": "media artifacts", "model": vl_model_name, "worker": "media-vl-worker", "output": "Qdrant vl_image_dense", "audit": "media_vl_embeddings"},
     ]
 
     status_counts = model_status_counts(inventory)
@@ -1514,11 +1554,11 @@ def model_stage(params):
     vl_worker = next((row for row in workers if row["name"] == "media-vl-worker"), {})
     ocr_worker = next((row for row in workers if row["name"] == "media-ocr-worker"), {})
     model_activity = [
-        qwen_activity("Qwen3-Embedding-8B", "embed", "background text vectors"),
-        qwen_activity("Qwen3-Embedding-8B", "query_embed", "research query vectors"),
-        qwen_activity("Qwen3-Reranker-8B", "rerank", "precision rerank"),
+        qwen_activity(text_model_name, "embed", "background text vectors"),
+        qwen_activity(text_model_name, "query_embed", "research query vectors"),
+        qwen_activity(reranker_model_name, "rerank", "precision rerank"),
         qwen_activity(
-            "Qwen3-VL-Embedding-8B",
+            vl_model_name,
             "vl",
             "image/screenshot vectors",
             completed=vl_worker.get("completed", ""),
@@ -1562,6 +1602,7 @@ def model_stage(params):
         "output_counts": output_counts,
         "recent_outputs": recent_outputs[:80],
         "qwen": qwen_status,
+        "local_inference": qwen_status,
         "embedding_worker": embedding_status,
         "media_router": router_status,
         "media_ocr": ocr_status,

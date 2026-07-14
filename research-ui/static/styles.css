@@ -1566,7 +1566,6 @@ button.stat-chip {
 
 .inbox, .inbox-page, .workbench {
   min-width: 0;
-  overflow: hidden;
 }
 .inbox { margin-top: 16px; }
 .inbox-page {
@@ -1600,14 +1599,12 @@ button.stat-chip {
 .inbox-queue-panel,
 .inbox-task-panel,
 .inbox-preview-panel {
-  min-height: 480px;
-  height: calc(100dvh - 240px);
+  min-height: 0;
   display: flex;
   flex-direction: column;
 }
 .inbox-queue-panel {
   padding: 16px;
-  overflow: hidden;
 }
 .inbox-filter-group {
   margin-top: 16px;
@@ -1617,10 +1614,8 @@ button.stat-chip {
 }
 .queue-list {
   min-height: 0;
-  overflow: auto;
 }
 .inbox-queue-panel > .queue-list {
-  flex: 1 1 320px;
   padding-right: 3px;
 }
 .queue-group {
@@ -1679,7 +1674,6 @@ button.stat-chip {
 }
 .inbox-task-panel {
   padding: 0;
-  overflow: hidden;
 }
 .task-panel-head {
   display: flex;
@@ -1807,8 +1801,6 @@ button.stat-chip {
   border-top: 1px solid var(--soft-line);
 }
 .inbox-rows {
-  max-height: 460px;
-  overflow: auto;
 }
 .task-stream {
   max-height: none;
@@ -1950,12 +1942,9 @@ button.stat-chip {
   font-weight: 800;
 }
 .inbox-preview-panel {
-  overflow: hidden;
 }
 .task-preview {
   min-height: 0;
-  height: 100%;
-  overflow: auto;
   padding: 16px;
 }
 .preview-topline {
@@ -2079,18 +2068,10 @@ button.stat-chip {
   display: none;
   margin: 14px 14px 14px 0;
   align-self: start;
-  position: sticky;
-  top: 14px;
-  max-height: calc(100vh - 28px);
-  max-height: calc(100dvh - 28px);
   min-width: 0;
 }
 body.has-source .workbench { display: block; }
 .source-view {
-  /* Workbench is sticky at top:14px with max-height calc(100dvh - 28px).
-     The source-view fills it minus the workbench's own 14px top margin. */
-  height: calc(100vh - 42px);
-  height: calc(100dvh - 42px);
   min-height: 0;
   display: flex;
   flex-direction: column;
@@ -2122,10 +2103,8 @@ body.has-source .workbench { display: block; }
 }
 .tab-pane {
   display: none;
-  overflow: auto;
   padding: 14px;
   min-height: 0;
-  flex: 1;
 }
 .tab-pane.active { display: block; }
 .source-text {
@@ -2413,9 +2392,7 @@ pre {
 .library-facet-panel,
 .library-results-panel,
 .library-preview-panel {
-  min-height: 640px;
-  height: min(780px, calc(100vh - 190px));
-  overflow: hidden;
+  min-height: 0;
 }
 .library-facet-panel,
 .library-preview-panel {
@@ -2533,7 +2510,6 @@ pre {
 }
 .library-results-list {
   min-height: 0;
-  overflow: auto;
   flex: 1;
 }
 .library-source-row {
@@ -2596,7 +2572,6 @@ pre {
   font-style: normal;
 }
 .library-preview-panel {
-  overflow: auto;
 }
 .library-preview-head {
   display: grid;
@@ -2713,9 +2688,7 @@ pre {
 .evidence-filter-panel,
 .evidence-ledger-panel,
 .evidence-detail-panel {
-  min-height: 640px;
-  height: min(780px, calc(100vh - 190px));
-  overflow: hidden;
+  min-height: 0;
 }
 .evidence-filter-panel,
 .evidence-detail-panel {
@@ -2778,7 +2751,6 @@ pre {
 }
 .evidence-results-list {
   min-height: 0;
-  overflow: auto;
   flex: 1;
 }
 .evidence-row {
@@ -2836,7 +2808,6 @@ pre {
   font-style: normal;
 }
 .evidence-detail-panel {
-  overflow: auto;
 }
 .evidence-preview-head {
   display: grid;
@@ -2951,9 +2922,7 @@ pre {
 .entity-filter-panel,
 .entity-results-panel,
 .entity-preview-panel {
-  min-height: 640px;
-  height: min(780px, calc(100vh - 190px));
-  overflow: hidden;
+  min-height: 0;
 }
 .entity-filter-panel,
 .entity-preview-panel {
@@ -3020,7 +2989,6 @@ pre {
 }
 .entity-results-list {
   min-height: 0;
-  overflow: auto;
   flex: 1;
 }
 .entity-row {
@@ -3078,7 +3046,6 @@ pre {
   font-style: normal;
 }
 .entity-preview-panel {
-  overflow: auto;
 }
 .entity-preview-head {
   display: grid;
@@ -3193,9 +3160,7 @@ pre {
 .claim-filter-panel,
 .claim-ledger-panel,
 .claim-preview-panel {
-  min-height: 640px;
-  height: min(780px, calc(100vh - 190px));
-  overflow: hidden;
+  min-height: 0;
 }
 .claim-filter-panel,
 .claim-preview-panel {
@@ -3262,7 +3227,6 @@ pre {
 }
 .claim-results-list {
   min-height: 0;
-  overflow: auto;
   flex: 1;
 }
 .claim-row {
@@ -3320,7 +3284,6 @@ pre {
   font-style: normal;
 }
 .claim-preview-panel {
-  overflow: auto;
 }
 .claim-preview-head {
   display: grid;
@@ -3438,8 +3401,7 @@ pre {
   box-shadow: 0 4px 16px var(--shadow);
 }
 .trace-workbench {
-  min-height: 720px;
-  height: min(880px, calc(100vh - 220px));
+  min-height: 0;
 }
 .route-page > .metric-grid {
   display: none;
@@ -3448,8 +3410,6 @@ pre {
 .review-ledger-panel,
 .review-preview-panel {
   min-height: 0;
-  height: 100%;
-  overflow: hidden;
   border: 0;
   border-radius: 0;
   box-shadow: none;
@@ -3520,7 +3480,6 @@ pre {
 }
 .review-results-list {
   min-height: 0;
-  overflow: auto;
   flex: 1;
 }
 .review-row {
@@ -3575,7 +3534,6 @@ pre {
   overflow-wrap: anywhere;
 }
 .review-preview-panel {
-  overflow: auto;
   border-left: 1px solid var(--line);
 }
 .review-preview-head {
@@ -3757,9 +3715,7 @@ pre {
 .taxonomy-filter-panel,
 .taxonomy-ledger-panel,
 .taxonomy-preview-panel {
-  height: 100%;
   min-height: 0;
-  overflow: hidden;
   border: 0;
   border-radius: 0;
   box-shadow: none;
@@ -3782,7 +3738,6 @@ pre {
   grid-template-rows: auto 39px minmax(0, 1fr) auto auto;
   gap: 12px;
   padding: 16px;
-  overflow: auto;
   border-left: 1px solid var(--line);
 }
 .pane-head,
@@ -3806,7 +3761,6 @@ pre {
 }
 .taxonomy-facets-scroll {
   min-height: 0;
-  overflow: auto;
   padding: 14px;
 }
 .taxonomy-facet-section {
@@ -3971,7 +3925,6 @@ pre {
 }
 .taxonomy-term-list {
   min-height: 0;
-  overflow: auto;
 }
 .taxonomy-row {
   display: grid;
@@ -4219,7 +4172,6 @@ pre {
 }
 .publish-results-list {
   min-height: 0;
-  overflow: auto;
   flex: 1;
 }
 .publish-row {
@@ -4795,8 +4747,6 @@ pre {
   display: grid;
   gap: 14px;
   min-width: 0;
-  max-height: calc(100vh - 180px);
-  overflow: auto;
   padding: 14px;
   border: 1px solid var(--soft-line);
   border-radius: 8px;

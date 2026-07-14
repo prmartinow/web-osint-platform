@@ -190,3 +190,31 @@ depth and UX, tracked below.
 | UX-01 | Front-end design audit + simplification | Done | The UI is decluttered: only the left sidebar navigation remains (the unplanned header nav is removed or repurposed); buttons, scrollbars, and window elements render correctly at full-screen width with no clipping; the main workflow (capture -> triage -> evidence -> claims -> publish) is visually clear and simple. | Done in 5 stages (commits b87a395, d28299a, aaf7787, daa2f1b, 9afa446). Stage 1 removed the duplicate horizontal nav + dead controls + restored the live project selector in the top bar. Stage 2 capped content width at 1440px, standardized tab-strip scrollbar hiding, unclipped load-bearing URLs/IDs. Stage 3 removed 8 redundant per-route search boxes + 3 duplicate project pickers + the verbose operation-search-cards. Stage 4 hid bulk toolbars until selection + trimmed evidence/claims button walls. Stage 5 pruned pill spam (9->4 per row), fixed viewport-height calcs, normalized sticky-bottom bars, cleaned up publishing route. |
 | UX-02 | Process simplification | Pending | The end-to-end research process is mapped, documented, and as simple as possible: each stage has a clear entry point, clear next step, and clear done state. No stage requires the user to understand the internal architecture. | Collaboratively map the current process, identify simplification opportunities, and implement. |
 | ARCH-01 | Manual vs automated capture decision | Pending | The operator decides whether the collection loop uses the local inference API (Qwen on the server) or a frontier API. This gates recurring capture tasks, monitoring rules, and change detection. | Surface the trade-offs for the operator; implement the chosen path. |
+
+---
+
+## UX-01 Phase 2: Flowing-page layout conversion (2026-07-13)
+
+After the initial 5-stage UX-01 work (commits b87a395..9afa446), the
+operator reported 6 remaining layout problems, all stemming from one
+root cause: the page was a "desktop app" pane layout locked to the
+viewport, not a flowing web page. The conversion is tracked as 5
+flow-stages:
+
+| Stage | Commit | Status | Summary |
+|-------|--------|--------|---------|
+| Flow-1 | 919f4ac | Done | Freed the page scroll (body overflow:hidden removed, .research-shell/.research-home viewport locks dropped). Browser scrollbar now at window edge. Topbar spans full width, flush to top. No centered column. |
+| Flow-2 | 30627f7 | Done | Converted all pinned panes to flowing content. Dropped every viewport-derived height and the overflow:hidden that clipped panels into little scrolling windows. 14 inner content containers neutralized. Single browser scrollbar moves the whole page. |
+| Flow-3 | (in progress) | In progress | Convert 3-column routes (Evidence/Entities/Claims/Reviews/Publishing/Taxonomy/Inbox) to 2-column (facets + results) + overlay preview drawer on row click. |
+| Flow-4 | (pending) | Pending | Capture-button popover in the sidebar (replaces the capture-activity dropdown in the middle of the inbox page). |
+| Flow-5 | (pending) | Pending | Sidebar reorganized into 4 collapsible process groups: Overview / Intake / Analysis / Output. |
+
+### Root cause chain (for reference)
+1. body overflow:hidden killed the browser scroll
+2. .research-shell height:100vh locked the app to the viewport
+3. .research-home was the ONLY scroll container AND a centered 1440px column
+4. every route panels pinned to viewport heights + overflow:hidden, each scrolled independently
+
+The existing @media(max-width:900px) block was a working reference
+implementation of the flowing state; Flow-Stages 1-2 promoted that
+pattern to the default.

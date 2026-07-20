@@ -332,8 +332,9 @@ body.rail-collapsed.has-source .research-shell {
 }
 .primary-nav {
   display: grid;
-  gap: 6px;
+  gap: 2px;
   overflow-y: auto;
+  scrollbar-gutter: stable;
   flex: 1 1 auto;
   min-height: 0;
   scrollbar-width: thin;
@@ -5300,15 +5301,18 @@ body.rail-collapsed .capture-popover {
 }
 .nav-row {
   display: flex;
-  align-items: stretch;
+  align-items: center;
   gap: 2px;
+  min-height: 42px;
 }
 .nav-row .nav-item {
   flex: 1 1 auto;
   min-width: 0;
+  min-height: 42px;
 }
 .nav-chevron {
   flex: 0 0 28px;
+  height: 32px;
   border: 0;
   background: transparent;
   color: #7e8da1;
@@ -5317,6 +5321,7 @@ body.rail-collapsed .capture-popover {
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  align-self: center;
   transition: color .15s ease, background .15s ease;
 }
 .nav-chevron:hover {

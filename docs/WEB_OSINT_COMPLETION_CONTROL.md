@@ -218,3 +218,14 @@ flow-stages:
 The existing @media(max-width:900px) block was a working reference
 implementation of the flowing state; Flow-Stages 1-2 promoted that
 pattern to the default.
+
+### Post-conversion polish (2026-07-20/21)
+
+After the 5 flow-stages, the operator reported additional UI issues that
+were addressed in follow-up commits:
+
+| Commit | Fix |
+|--------|-----|
+| 3b0d49d | Topbar layout: dropped the "Project" label above the select, moved select to the right side; theme toggle moved back to the topbar from the sidebar; sidebar set to height:100dvh (full viewport); smoother collapse animation (.3s cubic-bezier); removed Active Project tile; Today's Queue badge became a proper pill |
+| 9553406 | Sidebar redesigned per operator: removed Overview/Home group (brand logo is Home); restructured 4 section-title groups into 3 parent-route groups (Inbox->Projects/Library, Evidence->Entities/Claims/Timeline/Compare, Draft->Reviews/Publishing/Taxonomy); each parent is a clickable route + chevron; children animate via grid-template-rows: 0fr->1fr; removed redundant Capture source button; topbar action order: project-select, status, New note, Capture, theme, avatar; collapsed toggle centered |
+| ac847c5 | Fixed sidebar spacing (gap 6px->2px between groups) and parent-movement bug on chevron toggle (Inbox was fine but Evidence/Draft parents shifted — caused by align-items:stretch + no explicit height + scrollbar appearing/disappearing; fixed with min-height on nav-row/items + scrollbar-gutter:stable) |

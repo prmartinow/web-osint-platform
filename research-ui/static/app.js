@@ -776,9 +776,9 @@ function renderHome(data) {
   state.home = data;
   const project = data.active_project || {};
   const brief = data.brief || {};
-  $('activeProjectName').textContent = project.name || 'Active research project';
-  $('activeProjectMeta').textContent = project.description || 'Evidence workspace';
-  $('activeProjectMeter').style.width = `${Math.max(0, Math.min(100, Number(project.completion_percent || 0)))}%`;
+  if ($('activeProjectName')) $('activeProjectName').textContent = project.name || 'Active research project';
+  if ($('activeProjectMeta')) $('activeProjectMeta').textContent = project.description || 'Evidence workspace';
+  if ($('activeProjectMeter')) $('activeProjectMeter').style.width = `${Math.max(0, Math.min(100, Number(project.completion_percent || 0)))}%`;
   $('homeUpdated').textContent = project.updated_at ? `Updated ${fmtDate(project.updated_at)}` : 'No recent ingest';
   $('activeQuestion').textContent = brief.question || 'What evidence needs review?';
   $('activeQuestionScope').textContent = brief.scope || '';

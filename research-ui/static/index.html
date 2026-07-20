@@ -60,12 +60,6 @@
           </div>
         </div>
       </nav>
-      <section class="active-project">
-        <h2>Active Project</h2>
-        <strong id="activeProjectName">Open-weight frontier models</strong>
-        <span id="activeProjectMeta">Loading evidence signals</span>
-        <div class="mini-meter"><span id="activeProjectMeter"></span></div>
-      </section>
       <div class="capture-control">
         <button id="captureSourceButton" class="capture-button" title="Launch Rebrowser capture">+ Capture source</button>
         <button id="captureHistoryButton" class="capture-history-button" type="button" title="Recent capture activity" aria-expanded="false">History</button>
@@ -77,18 +71,11 @@
           <div id="captureActivityPanel" class="capture-popover-body"><p class="muted">Loading…</p></div>
         </div>
       </div>
-      <button id="themeSwitch" class="theme-switch rail-theme-switch" role="switch" aria-checked="false" title="Toggle theme">
-        <span class="sun"></span><span class="moon"></span><span class="knob"></span>
-      </button>
       <p class="rail-note">Evidence workspace · internal · env-configured capture</p>
     </aside>
 
     <section class="research-home">
       <header class="home-topbar">
-        <label class="project-picker">
-          <span id="projectScopeLabel">Project</span>
-          <select id="projectSelect" aria-label="Switch active project"><option value="">All projects</option></select>
-        </label>
         <label class="global-search">
           <span class="sr-only">Search sources, claims, entities</span>
           <input id="searchInput" type="search" placeholder="Search sources, claims, entities...">
@@ -97,6 +84,10 @@
           <button id="newNoteButton" class="secondary top-action" type="button">New note</button>
           <button id="captureTopButton" class="top-action primary-action" type="button" title="Launch Rebrowser capture">Capture</button>
           <span id="captureLaunchStatus" class="capture-status" aria-live="polite"></span>
+          <select id="projectSelect" aria-label="Switch active project" class="topbar-project-select"><option value="">All projects</option></select>
+          <button id="themeSwitch" class="theme-switch" role="switch" aria-checked="false" title="Toggle theme">
+            <span class="sun"></span><span class="moon"></span><span class="knob"></span>
+          </button>
           <span class="user-avatar" aria-label="Current user">PR</span>
         </div>
       </header>

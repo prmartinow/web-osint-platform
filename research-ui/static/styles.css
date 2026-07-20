@@ -472,10 +472,10 @@ body.rail-collapsed .brand-lockup {
   min-height: 44px;
   justify-content: center;
 }
+/* When collapsed, hide the Home/brand button — only the sidebar toggle
+   remains. The Home link is only clickable when the sidebar is expanded. */
 body.rail-collapsed .rail-home {
-  width: 36px;
-  height: 36px;
-  justify-content: center;
+  display: none;
 }
 body.rail-collapsed .brand-text,
 body.rail-collapsed .nav-count {
@@ -5367,9 +5367,7 @@ body.rail-collapsed .capture-popover {
   display: flex;
   flex-direction: column;
   gap: 1px;
-  margin: 0 0 0 22px;
-  padding: 0 0 0 12px;
-  border-left: 1px solid #2a3a52;
+  margin: 0 0 0 28px;
 }
 .nav-item.child {
   padding: 7px 10px;

@@ -1,5 +1,6 @@
 const state = {
   route: 'home',
+  drawerUserOpened: false,
   queue: 'all',
   kind: '',
   project: '',
@@ -1746,6 +1747,7 @@ function wireLibraryEvents(data) {
   document.querySelectorAll('.library-source-row[data-library-id]').forEach((row) => {
     row.addEventListener('click', () => {
       state.librarySelectedId = row.dataset.libraryId || '';
+      state.drawerUserOpened = true;
       reload();
     });
     row.querySelector('.library-check')?.addEventListener('click', (event) => {
@@ -2328,6 +2330,7 @@ function bindEvidencePage(data) {
   document.querySelectorAll('.evidence-row').forEach((row) => {
     row.addEventListener('click', () => {
       state.evidenceSelectedId = row.dataset.ledgerId || '';
+      state.drawerUserOpened = true;
       replaceRouteHash();
       loadRoutePage();
     });
@@ -2796,6 +2799,7 @@ function bindEntityPage(data) {
   document.querySelectorAll('.entity-row').forEach((row) => {
     row.addEventListener('click', () => {
       state.entitySelectedId = row.dataset.entityRowId || '';
+      state.drawerUserOpened = true;
       replaceRouteHash();
       loadRoutePage();
     });
@@ -3320,6 +3324,7 @@ function bindClaimPage(data) {
   document.querySelectorAll('.claim-row').forEach((row) => {
     row.addEventListener('click', () => {
       state.claimSelectedId = row.dataset.claimRowId || '';
+      state.drawerUserOpened = true;
       replaceRouteHash();
       loadRoutePage();
     });
@@ -3851,6 +3856,7 @@ function bindReviewPage(data) {
   document.querySelectorAll('.review-row').forEach((row) => {
     row.addEventListener('click', () => {
       state.reviewSelectedId = row.dataset.reviewTaskId || '';
+      state.drawerUserOpened = true;
       replaceRouteHash();
       loadRoutePage();
     });
@@ -4210,12 +4216,13 @@ function bindPublishingPage(data) {
     replaceRouteHash();
     loadRoutePage();
   });
-	  document.querySelectorAll('.publish-row').forEach((rowEl) => {
-	    rowEl.addEventListener('click', () => {
-	      state.publishingSelectedId = rowEl.dataset.bundleId || '';
-	      replaceRouteHash();
-	      loadRoutePage();
-	    });
+		  document.querySelectorAll('.publish-row').forEach((rowEl) => {
+		    rowEl.addEventListener('click', () => {
+		      state.publishingSelectedId = rowEl.dataset.bundleId || '';
+		      state.drawerUserOpened = true;
+		      replaceRouteHash();
+		      loadRoutePage();
+		    });
 	    rowEl.addEventListener('dblclick', () => {
 	      const row = (data.bundles || []).find((item) => publishingBundleKey(item) === (rowEl.dataset.bundleId || ''));
 	      openPublicationDetail(row);
@@ -4824,6 +4831,7 @@ function bindTaxonomyPage(data) {
       const match = state.taxonomyRows.find((row) => taxonomyRecordKey(row) === id);
       if (match) {
         state.taxonomySelectedId = id;
+        state.drawerUserOpened = true;
         replaceRouteHash();
         loadRoutePage();
       }
@@ -4849,6 +4857,7 @@ function bindTaxonomyPage(data) {
         return;
       }
       state.taxonomySelectedId = id;
+      state.drawerUserOpened = true;
       replaceRouteHash();
       loadRoutePage();
     });
@@ -6068,6 +6077,22 @@ function updateRouteVisibility() {
   $('inbox')?.classList.toggle('hidden', !showInbox);
   $('routePage')?.classList.toggle('hidden', showHome || route === 'inbox');
   document.querySelectorAll('[data-route]').forEach((button) => button.classList.toggle('active', button.dataset.route === route));
+  // Drawer-routes: show the preview drawer only when a row is selected.
+  // Each drawer-route has a per-route "selectedId" field on state; the
+  // drawer pane (the 3rd grid column) is repurposed as a fixed overlay.
+  const drawerSelectionKeys = {
+    inbox: 'previewTaskKey',
+    library: 'librarySelectedId',
+    evidence: 'evidenceSelectedId',
+    entities: 'entitySelectedId',
+    claims: 'claimSelectedId',
+    reviews: 'reviewSelectedId',
+    publishing: 'publishingSelectedId',
+    taxonomy: 'taxonomySelectedId',
+  };
+  const selKey = drawerSelectionKeys[route];
+  const hasSelection = selKey ? Boolean(state[selKey]) : false;
+  document.body.classList.toggle('has-preview-drawer', hasSelection && state.drawerUserOpened);
 }
 
 async function loadRoutePage() {
@@ -6129,7 +6154,9 @@ async function loadRoutePage() {
 }
 
 function setRoute(route, push = true) {
-  state.route = routeConfig[route] ? route : 'home';
+  const newRoute = routeConfig[route] ? route : 'home';
+  if (newRoute !== state.route) state.drawerUserOpened = false;
+  state.route = newRoute;
   // push=true (user-initiated nav) -> new history entry so Back returns here.
   // push=false (hashchange replay) -> replace, no extra entry.
   if (push) pushRouteHash(); else replaceRouteHash();
@@ -6195,6 +6222,8 @@ function renderInbox(rows) {
   document.querySelectorAll('.row[data-id]').forEach((row) => {
     row.addEventListener('click', () => {
       state.previewTaskKey = row.dataset.taskKey || '';
+      state.drawerUserOpened = true;
+      document.body.classList.add('has-preview-drawer');
       renderInbox(state.rows);
     });
     row.addEventListener('dblclick', async () => {
@@ -6496,6 +6525,41 @@ function syncBulkBar(toolbarSel, countId, size) {
   toolbar.hidden = size === 0;
   const count = $(countId);
   if (count) count.textContent = `${size} selected`;
+}
+
+// ---- Preview drawer (overlay replacing the in-column 3rd pane) ----
+// The drawer state is driven by body.has-preview-drawer, toggled in
+// updateRouteVisibility() based on whether the current route has a row
+// selected. CSS repurposes each route's existing *-preview-panel as a
+// fixed-position overlay when that class is present.
+function closePreviewDrawer() {
+  // Clear the current route's selection so updateRouteVisibility re-hides
+  // the drawer on the next render.
+  const selKeys = {
+    inbox: 'previewTaskKey',
+    library: 'librarySelectedId',
+    evidence: 'evidenceSelectedId',
+    entities: 'entitySelectedId',
+    claims: 'claimSelectedId',
+    reviews: 'reviewSelectedId',
+    publishing: 'publishingSelectedId',
+    taxonomy: 'taxonomySelectedId',
+  };
+  const key = selKeys[state.route];
+  if (key) state[key] = '';
+  state.drawerUserOpened = false;
+  document.body.classList.remove('has-preview-drawer');
+  replaceRouteHash();
+  loadRoutePage();
+}
+
+function wirePreviewDrawerGlobals() {
+  $('previewDrawerBackdrop')?.addEventListener('click', closePreviewDrawer);
+  document.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape' && document.body.classList.contains('has-preview-drawer')) {
+      closePreviewDrawer();
+    }
+  });
 }
 
 async function loadFacets() {
@@ -7618,6 +7682,7 @@ function renderCaptureActivity(panel, items) {
 
 function wireEvents() {
   setSidebarCollapsed(state.sidebarCollapsed);
+  wirePreviewDrawerGlobals();
   $('sidebarToggle')?.addEventListener('click', () => {
     setSidebarCollapsed(!state.sidebarCollapsed);
   });

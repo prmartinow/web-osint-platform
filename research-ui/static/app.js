@@ -6097,6 +6097,8 @@ function updateRouteVisibility() {
 
 async function loadRoutePage() {
   updateRouteVisibility();
+  // Keep the capture-history popover current regardless of route.
+  refreshCaptureActivity();
   if (state.route === 'home') {
     await loadHome();
     return;
@@ -6165,8 +6167,6 @@ function setRoute(route, push = true) {
 
 function renderInbox(rows) {
   state.rows = rows;
-  // Refresh the capture-activity log alongside the inbox (captures land here).
-  refreshCaptureActivity();
   // Re-rendering clears all checkboxes, so reset the bulk bar.
   syncBulkBar('#inboxBulkToolbar', 'inboxBulkCount', 0);
   if ($('inboxSelectAll')) $('inboxSelectAll').checked = false;
@@ -7696,6 +7696,22 @@ function wireEvents() {
   });
   $('captureTopButton')?.addEventListener('click', () => {
     launchCaptureFlow();
+  });
+  const capturePopover = $('capturePopover');
+  const captureHistoryBtn = $('captureHistoryButton');
+  const toggleCapturePopover = (open) => {
+    if (!capturePopover || !captureHistoryBtn) return;
+    const shouldOpen = typeof open === 'boolean' ? open : capturePopover.hidden;
+    capturePopover.hidden = !shouldOpen;
+    captureHistoryBtn.setAttribute('aria-expanded', String(shouldOpen));
+    if (shouldOpen) refreshCaptureActivity();
+  };
+  captureHistoryBtn?.addEventListener('click', () => toggleCapturePopover());
+  $('capturePopoverClose')?.addEventListener('click', () => toggleCapturePopover(false));
+  document.addEventListener('click', (event) => {
+    if (!capturePopover || capturePopover.hidden) return;
+    if (event.target.closest('.capture-control')) return;
+    toggleCapturePopover(false);
   });
   $('newNoteButton')?.addEventListener('click', () => {
     openInboxQueue('manual_docs');

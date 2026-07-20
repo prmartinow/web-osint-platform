@@ -46,7 +46,17 @@
         <span id="activeProjectMeta">Loading evidence signals</span>
         <div class="mini-meter"><span id="activeProjectMeter"></span></div>
       </section>
-      <button id="captureSourceButton" class="capture-button" title="Launch Rebrowser capture">+ Capture source</button>
+      <div class="capture-control">
+        <button id="captureSourceButton" class="capture-button" title="Launch Rebrowser capture">+ Capture source</button>
+        <button id="captureHistoryButton" class="capture-history-button" type="button" title="Recent capture activity" aria-expanded="false">History</button>
+        <div id="capturePopover" class="capture-popover" role="dialog" aria-label="Recent capture activity" hidden>
+          <div class="capture-popover-head">
+            <strong>Recent captures</strong>
+            <button id="capturePopoverClose" type="button" aria-label="Close">&times;</button>
+          </div>
+          <div id="captureActivityPanel" class="capture-popover-body"><p class="muted">Loading…</p></div>
+        </div>
+      </div>
       <button id="themeSwitch" class="theme-switch rail-theme-switch" role="switch" aria-checked="false" title="Toggle theme">
         <span class="sun"></span><span class="moon"></span><span class="knob"></span>
       </button>
@@ -157,11 +167,6 @@
             <span id="inboxLiveState" class="status-badge ok">live updates</span>
           </div>
         </header>
-
-        <details class="capture-activity-details panel" open>
-          <summary>Capture activity <span id="captureActivitySummary" class="muted"></span></summary>
-          <div id="captureActivityPanel"><p class="muted">Loading capture activity…</p></div>
-        </details>
 
         <div class="inbox-workbench">
           <aside class="inbox-queue-panel panel">

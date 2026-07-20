@@ -205,9 +205,9 @@ flow-stages:
 |-------|--------|--------|---------|
 | Flow-1 | 919f4ac | Done | Freed the page scroll (body overflow:hidden removed, .research-shell/.research-home viewport locks dropped). Browser scrollbar now at window edge. Topbar spans full width, flush to top. No centered column. |
 | Flow-2 | 30627f7 | Done | Converted all pinned panes to flowing content. Dropped every viewport-derived height and the overflow:hidden that clipped panels into little scrolling windows. 14 inner content containers neutralized. Single browser scrollbar moves the whole page. |
-| Flow-3 | (in progress) | In progress | Convert 3-column routes (Evidence/Entities/Claims/Reviews/Publishing/Taxonomy/Inbox) to 2-column (facets + results) + overlay preview drawer on row click. |
-| Flow-4 | (pending) | Pending | Capture-button popover in the sidebar (replaces the capture-activity dropdown in the middle of the inbox page). |
-| Flow-5 | (pending) | Pending | Sidebar reorganized into 4 collapsible process groups: Overview / Intake / Analysis / Output. |
+| Flow-3 | af6979b | Done | 3-column routes converted to 2-column (facets + results); preview pane is now a slide-in overlay drawer opened on row click. CSS-only repurposing of the existing preview panels (no render-function refactor). Drawer state driven by body.has-preview-drawer + state.drawerUserOpened so it only opens on explicit click, not auto-select. |
+| Flow-4 | 16f06b9 | Done | Capture-activity dropdown removed from the inbox. Capture history is now a popover anchored to a new History button next to the Capture button in the sidebar, available on every route. |
+| Flow-5 | 8f2b9e6 | Done | Sidebar nav reorganized into 4 collapsible process groups (Overview / Intake / Analysis / Output) with chevron toggles, localStorage persistence, and auto-expand of the active route group. |
 
 ### Root cause chain (for reference)
 1. body overflow:hidden killed the browser scroll

@@ -7691,7 +7691,7 @@ function wireEvents() {
   });
   setTheme(document.documentElement.dataset.theme || 'dark');
 
-  $('captureSourceButton').addEventListener('click', () => {
+  $('captureSourceButton')?.addEventListener('click', () => {
     launchCaptureFlow();
   });
   $('captureTopButton')?.addEventListener('click', () => {
@@ -7735,31 +7735,37 @@ function wireEvents() {
       setRoute(button.dataset.route || 'home');
     });
   });
-  // Collapsible sidebar nav groups (Overview / Intake / Analysis / Output).
-  // Group toggles carry data-nav-group (NOT data-route) so the active-state
-  // sync and route-click binder above ignore them.
+  // Collapsible nav groups. Each parent (Inbox/Evidence/Draft) is itself a
+  // clickable route; a separate chevron button toggles the children open/
+  // closed. The chevron carries data-nav-group (NOT data-route) so the
+  // route-click binder and active-state sync above ignore it.
   const navGroupRoutes = {
-    overview: ['home'],
-    intake: ['inbox', 'projects', 'library'],
-    analysis: ['evidence', 'entities', 'claims', 'timeline', 'compare'],
-    output: ['draft', 'reviews', 'publishing', 'taxonomy'],
+    inbox: ['inbox', 'projects', 'library'],
+    evidence: ['evidence', 'entities', 'claims', 'timeline', 'compare'],
+    draft: ['draft', 'reviews', 'publishing', 'taxonomy'],
   };
   const savedGroups = (() => {
     try { return JSON.parse(localStorage.getItem('web-osint-nav-groups') || '{}'); } catch { return {}; }
   })();
-  document.querySelectorAll('.nav-group').forEach((group) => {
-    const id = group.dataset.navGroup || '';
-    const toggle = group.querySelector('.nav-group-toggle');
-    if (!toggle) return;
-    const apply = (expanded) => {
-      group.classList.toggle('collapsed', !expanded);
-      toggle.setAttribute('aria-expanded', String(expanded));
-    };
+  const applyGroupState = (id, expanded) => {
+    const group = document.querySelector(`.nav-group[data-nav-group="${id}"]`);
+    if (!group) return;
+    const children = group.querySelector('.nav-children');
+    const chevron = group.querySelector('.nav-chevron');
+    if (children) children.classList.toggle('collapsed', !expanded);
+    if (chevron) {
+      chevron.classList.toggle('collapsed', !expanded);
+      chevron.setAttribute('aria-expanded', String(expanded));
+    }
+  };
+  Object.keys(navGroupRoutes).forEach((id) => {
     // Default: expanded. Saved collapsed state wins.
-    apply(savedGroups[id] !== false);
-    toggle.addEventListener('click', () => {
-      const expanded = group.classList.contains('collapsed');
-      apply(expanded);
+    applyGroupState(id, savedGroups[id] !== false);
+    const chevron = document.querySelector(`.nav-chevron[data-nav-group="${id}"]`);
+    chevron?.addEventListener('click', (event) => {
+      event.stopPropagation();
+      const expanded = chevron.classList.contains('collapsed');
+      applyGroupState(id, expanded);
       try {
         const next = JSON.parse(localStorage.getItem('web-osint-nav-groups') || '{}');
         next[id] = expanded;
@@ -7768,16 +7774,9 @@ function wireEvents() {
     });
   });
   // Auto-expand the group containing the active route on navigation.
-  // updateRouteVisibility is the single source of truth for active state.
   const expandActiveNavGroup = () => {
     Object.entries(navGroupRoutes).forEach(([groupId, routes]) => {
-      if (routes.includes(state.route)) {
-        const group = document.querySelector(`.nav-group[data-nav-group="${groupId}"]`);
-        if (group && group.classList.contains('collapsed')) {
-          group.classList.remove('collapsed');
-          group.querySelector('.nav-group-toggle')?.setAttribute('aria-expanded', 'true');
-        }
-      }
+      if (routes.includes(state.route)) applyGroupState(groupId, true);
     });
   };
   // Patch updateRouteVisibility to also expand the active group.

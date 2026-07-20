@@ -26,43 +26,51 @@
         </button>
       </div>
       <nav class="primary-nav" aria-label="Primary research navigation">
-        <div class="nav-group" data-nav-group="overview">
-          <button class="nav-group-toggle" type="button" aria-expanded="true">Overview</button>
-          <div class="nav-group-items">
-            <button class="nav-item active" data-route="home"><span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="m3 11 9-8 9 8"></path><path d="M5 10v10h14V10"></path><path d="M9 20v-6h6v6"></path></svg></span><span class="nav-label">Home</span></button>
-          </div>
-        </div>
-        <div class="nav-group" data-nav-group="intake">
-          <button class="nav-group-toggle" type="button" aria-expanded="true">Intake</button>
-          <div class="nav-group-items">
+        <div class="nav-group" data-nav-group="inbox">
+          <div class="nav-row">
             <button class="nav-item" data-route="inbox"><span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M22 12h-6l-2 3h-4l-2-3H2"></path><path d="m5.45 5.11-3.31 6.58A2 2 0 0 0 2 12.58V19a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6.42a2 2 0 0 0-.14-.89l-3.31-6.58A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11Z"></path></svg></span><span class="nav-label">Inbox</span><span class="nav-count" id="navInboxCount">0</span></button>
-            <button class="nav-item" data-route="projects"><span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M3 7h5l2 3h11v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z"></path><path d="M3 7V5a2 2 0 0 1 2-2h4l2 4"></path></svg></span><span class="nav-label">Projects</span></button>
-            <button class="nav-item" data-route="library"><span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"></path><path d="M4 4.5A2.5 2.5 0 0 1 6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5Z"></path><path d="M8 7h8"></path><path d="M8 11h6"></path></svg></span><span class="nav-label">Library</span></button>
+            <button class="nav-chevron" type="button" aria-expanded="true" aria-label="Expand Inbox group" data-nav-group="inbox"></button>
+          </div>
+          <div class="nav-children" data-nav-children="inbox">
+            <div class="nav-children-inner">
+              <button class="nav-item child" data-route="projects"><span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M3 7h5l2 3h11v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z"></path><path d="M3 7V5a2 2 0 0 1 2-2h4l2 4"></path></svg></span><span class="nav-label">Projects</span></button>
+              <button class="nav-item child" data-route="library"><span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"></path><path d="M4 4.5A2.5 2.5 0 0 1 6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5Z"></path><path d="M8 7h8"></path><path d="M8 11h6"></path></svg></span><span class="nav-label">Library</span></button>
+            </div>
           </div>
         </div>
-        <div class="nav-group" data-nav-group="analysis">
-          <button class="nav-group-toggle" type="button" aria-expanded="true">Analysis</button>
-          <div class="nav-group-items">
+        <div class="nav-group" data-nav-group="evidence">
+          <div class="nav-row">
             <button class="nav-item" data-route="evidence"><span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M3 3v18h18"></path><path d="m7 14 4-4 3 3 5-7"></path></svg></span><span class="nav-label">Evidence</span></button>
-            <button class="nav-item" data-route="entities"><span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="6" cy="12" r="3"></circle><circle cx="18" cy="6" r="3"></circle><circle cx="18" cy="18" r="3"></circle><path d="m8.6 10.6 6.8-3.2"></path><path d="m8.6 13.4 6.8 3.2"></path></svg></span><span class="nav-label">Entities</span></button>
-            <button class="nav-item" data-route="claims"><span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M5 4h14v16H5z"></path><path d="M8 8h8"></path><path d="M8 12h8"></path><path d="M8 16h5"></path></svg></span><span class="nav-label">Claims</span></button>
-            <button class="nav-item" data-route="timeline"><span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M5 4v16"></path><path d="M5 8h12"></path><path d="M5 14h8"></path><circle cx="19" cy="8" r="2"></circle><circle cx="15" cy="14" r="2"></circle></svg></span><span class="nav-label">Timeline</span></button>
-            <button class="nav-item" data-route="compare"><span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M4 4h7v16H4z"></path><path d="M13 4h7v16h-7z"></path><path d="M7 8h1"></path><path d="M16 8h1"></path><path d="M7 13h1"></path><path d="M16 13h1"></path></svg></span><span class="nav-label">Compare</span></button>
+            <button class="nav-chevron" type="button" aria-expanded="true" aria-label="Expand Evidence group" data-nav-group="evidence"></button>
+          </div>
+          <div class="nav-children" data-nav-children="evidence">
+            <div class="nav-children-inner">
+              <button class="nav-item child" data-route="entities"><span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="6" cy="12" r="3"></circle><circle cx="18" cy="6" r="3"></circle><circle cx="18" cy="18" r="3"></circle><path d="m8.6 10.6 6.8-3.2"></path><path d="m8.6 13.4 6.8 3.2"></path></svg></span><span class="nav-label">Entities</span></button>
+              <button class="nav-item child" data-route="claims"><span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M5 4h14v16H5z"></path><path d="M8 8h8"></path><path d="M8 12h8"></path><path d="M8 16h5"></path></svg></span><span class="nav-label">Claims</span></button>
+              <button class="nav-item child" data-route="timeline"><span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M5 4v16"></path><path d="M5 8h12"></path><path d="M5 14h8"></path><circle cx="19" cy="8" r="2"></circle><circle cx="15" cy="14" r="2"></circle></svg></span><span class="nav-label">Timeline</span></button>
+              <button class="nav-item child" data-route="compare"><span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M4 4h7v16H4z"></path><path d="M13 4h7v16h-7z"></path><path d="M7 8h1"></path><path d="M16 8h1"></path><path d="M7 13h1"></path><path d="M16 13h1"></path></svg></span><span class="nav-label">Compare</span></button>
+            </div>
           </div>
         </div>
-        <div class="nav-group" data-nav-group="output">
-          <button class="nav-group-toggle" type="button" aria-expanded="true">Output</button>
-          <div class="nav-group-items">
+        <div class="nav-group" data-nav-group="draft">
+          <div class="nav-row">
             <button class="nav-item" data-route="draft"><span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M5 4h10l4 4v12H5z"></path><path d="M15 4v5h5"></path><path d="M8 13h8"></path><path d="M8 17h6"></path></svg></span><span class="nav-label">Draft</span></button>
-            <button class="nav-item" data-route="reviews"><span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5"></path><path d="M4 4h16v16H4z"></path></svg></span><span class="nav-label">Reviews</span></button>
-            <button class="nav-item" data-route="publishing"><span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 3v12"></path><path d="m7 8 5-5 5 5"></path><path d="M5 15v4a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-4"></path></svg></span><span class="nav-label">Publishing</span></button>
-            <button class="nav-item" data-route="taxonomy"><span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 3 3 8l9 5 9-5-9-5Z"></path><path d="m3 16 9 5 9-5"></path><path d="m3 12 9 5 9-5"></path></svg></span><span class="nav-label">Taxonomy</span></button>
+            <button class="nav-chevron" type="button" aria-expanded="true" aria-label="Expand Draft group" data-nav-group="draft"></button>
+          </div>
+          <div class="nav-children" data-nav-children="draft">
+            <div class="nav-children-inner">
+              <button class="nav-item child" data-route="reviews"><span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5"></path><path d="M4 4h16v16H4z"></path></svg></span><span class="nav-label">Reviews</span></button>
+              <button class="nav-item child" data-route="publishing"><span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 3v12"></path><path d="m7 8 5-5 5 5"></path><path d="M5 15v4a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-4"></path></svg></span><span class="nav-label">Publishing</span></button>
+              <button class="nav-item child" data-route="taxonomy"><span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 3 3 8l9 5 9-5-9-5Z"></path><path d="m3 16 9 5 9-5"></path><path d="m3 12 9 5 9-5"></path></svg></span><span class="nav-label">Taxonomy</span></button>
+            </div>
           </div>
         </div>
       </nav>
       <div class="capture-control">
-        <button id="captureSourceButton" class="capture-button" title="Launch Rebrowser capture">+ Capture source</button>
-        <button id="captureHistoryButton" class="capture-history-button" type="button" title="Recent capture activity" aria-expanded="false">History</button>
+        <button id="captureHistoryButton" class="capture-history-button" type="button" title="Recent capture activity" aria-expanded="false">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"></circle><path d="M12 7v5l3 2"></path></svg>
+          <span class="capture-history-label">Capture history</span>
+        </button>
         <div id="capturePopover" class="capture-popover" role="dialog" aria-label="Recent capture activity" hidden>
           <div class="capture-popover-head">
             <strong>Recent captures</strong>
@@ -71,7 +79,6 @@
           <div id="captureActivityPanel" class="capture-popover-body"><p class="muted">Loading…</p></div>
         </div>
       </div>
-      <p class="rail-note">Evidence workspace · internal · env-configured capture</p>
     </aside>
 
     <section class="research-home">
@@ -81,10 +88,10 @@
           <input id="searchInput" type="search" placeholder="Search sources, claims, entities...">
         </label>
         <div class="top-actions">
+          <select id="projectSelect" aria-label="Switch active project" class="topbar-project-select"><option value="">All projects</option></select>
+          <span id="captureLaunchStatus" class="capture-status" aria-live="polite"></span>
           <button id="newNoteButton" class="secondary top-action" type="button">New note</button>
           <button id="captureTopButton" class="top-action primary-action" type="button" title="Launch Rebrowser capture">Capture</button>
-          <span id="captureLaunchStatus" class="capture-status" aria-live="polite"></span>
-          <select id="projectSelect" aria-label="Switch active project" class="topbar-project-select"><option value="">All projects</option></select>
           <button id="themeSwitch" class="theme-switch" role="switch" aria-checked="false" title="Toggle theme">
             <span class="sun"></span><span class="moon"></span><span class="knob"></span>
           </button>

@@ -7735,6 +7735,57 @@ function wireEvents() {
       setRoute(button.dataset.route || 'home');
     });
   });
+  // Collapsible sidebar nav groups (Overview / Intake / Analysis / Output).
+  // Group toggles carry data-nav-group (NOT data-route) so the active-state
+  // sync and route-click binder above ignore them.
+  const navGroupRoutes = {
+    overview: ['home'],
+    intake: ['inbox', 'projects', 'library'],
+    analysis: ['evidence', 'entities', 'claims', 'timeline', 'compare'],
+    output: ['draft', 'reviews', 'publishing', 'taxonomy'],
+  };
+  const savedGroups = (() => {
+    try { return JSON.parse(localStorage.getItem('web-osint-nav-groups') || '{}'); } catch { return {}; }
+  })();
+  document.querySelectorAll('.nav-group').forEach((group) => {
+    const id = group.dataset.navGroup || '';
+    const toggle = group.querySelector('.nav-group-toggle');
+    if (!toggle) return;
+    const apply = (expanded) => {
+      group.classList.toggle('collapsed', !expanded);
+      toggle.setAttribute('aria-expanded', String(expanded));
+    };
+    // Default: expanded. Saved collapsed state wins.
+    apply(savedGroups[id] !== false);
+    toggle.addEventListener('click', () => {
+      const expanded = group.classList.contains('collapsed');
+      apply(expanded);
+      try {
+        const next = JSON.parse(localStorage.getItem('web-osint-nav-groups') || '{}');
+        next[id] = expanded;
+        localStorage.setItem('web-osint-nav-groups', JSON.stringify(next));
+      } catch {}
+    });
+  });
+  // Auto-expand the group containing the active route on navigation.
+  // updateRouteVisibility is the single source of truth for active state.
+  const expandActiveNavGroup = () => {
+    Object.entries(navGroupRoutes).forEach(([groupId, routes]) => {
+      if (routes.includes(state.route)) {
+        const group = document.querySelector(`.nav-group[data-nav-group="${groupId}"]`);
+        if (group && group.classList.contains('collapsed')) {
+          group.classList.remove('collapsed');
+          group.querySelector('.nav-group-toggle')?.setAttribute('aria-expanded', 'true');
+        }
+      }
+    });
+  };
+  // Patch updateRouteVisibility to also expand the active group.
+  const origUpdateRouteVisibility = updateRouteVisibility;
+  updateRouteVisibility = function () {
+    origUpdateRouteVisibility.apply(this, arguments);
+    expandActiveNavGroup();
+  };
   $('searchInput').addEventListener('input', () => {
     state.q = $('searchInput').value.trim();
     clearTimeout(window.__inboxTimer);

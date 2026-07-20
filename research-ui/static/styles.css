@@ -330,14 +330,6 @@ body.rail-collapsed.has-source .research-shell {
   display: grid;
   gap: 6px;
 }
-.primary-nav::before {
-  content: "Workspace";
-  color: #7e8da1;
-  font-size: 11px;
-  text-transform: uppercase;
-  letter-spacing: .12em;
-  padding: 0 8px 8px;
-}
 .nav-item {
   display: flex;
   justify-content: flex-start;
@@ -5258,4 +5250,63 @@ body.rail-collapsed .capture-popover {
   left: auto;
   right: 0;
   width: 340px;
+}
+
+/* ---- Collapsible sidebar nav groups (Overview/Intake/Analysis/Output) ---- */
+.nav-group {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.nav-group-toggle {
+  border: 0;
+  background: transparent;
+  color: #7e8da1;
+  text-align: left;
+  font-size: 10px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: .12em;
+  padding: 8px 12px 4px;
+  cursor: pointer;
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border-radius: 6px;
+  transition: color .15s ease, background .15s ease;
+}
+.nav-group-toggle:hover {
+  color: #dbe7f7;
+  background: rgba(255, 255, 255, .04);
+}
+.nav-group-toggle::after {
+  content: "";
+  width: 8px;
+  height: 8px;
+  border-right: 2px solid currentColor;
+  border-bottom: 2px solid currentColor;
+  transform: rotate(-135deg);
+  transition: transform .18s ease;
+  flex-shrink: 0;
+  margin-left: 8px;
+}
+.nav-group.collapsed .nav-group-toggle::after {
+  transform: rotate(45deg);
+}
+.nav-group-items {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.nav-group.collapsed .nav-group-items {
+  display: none;
+}
+body.rail-collapsed .nav-group-toggle {
+  text-align: center;
+  padding: 4px;
+  font-size: 0;
+}
+body.rail-collapsed .nav-group-toggle::after {
+  margin: 0 auto;
 }

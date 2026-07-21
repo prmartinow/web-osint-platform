@@ -652,7 +652,8 @@ function setSidebarCollapsed(collapsed) {
   const label = state.sidebarCollapsed ? 'Open sidebar' : 'Close sidebar';
   toggle.setAttribute('aria-expanded', state.sidebarCollapsed ? 'false' : 'true');
   toggle.setAttribute('aria-label', label);
-  toggle.title = label;
+  toggle.setAttribute('title', label);
+  toggle.dataset.tooltip = label;
 }
 
 function renderFacets(data) {

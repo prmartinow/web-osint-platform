@@ -511,10 +511,6 @@ body.rail-collapsed .rail-toggle:focus-visible::after {
 body.rail-collapsed .primary-nav {
   width: 100%;
 }
-body.rail-collapsed .nav-item {
-  justify-content: center;
-  padding: 11px 0;
-}
 .research-home {
   min-width: 0;
   width: 100%;
@@ -5391,8 +5387,18 @@ body.rail-collapsed .nav-count {
 }
 body.rail-collapsed .nav-row {
   justify-content: center;
+  width: 100%;
 }
-body.rail-collapsed .nav-item {
+/* Override .nav-row .nav-item padding so the icon truly centers in the
+   full rail width. Match the specificity (two classes) to win. */
+body.rail-collapsed .nav-row .nav-item {
   justify-content: center;
   padding: 10px 0;
+  width: 40px;
+  margin: 0 auto;
+  gap: 0;
+}
+/* Center the icon itself within the fixed-width collapsed nav-item. */
+body.rail-collapsed .nav-row .nav-item .nav-icon {
+  margin: 0 auto;
 }

@@ -276,59 +276,44 @@ body.rail-collapsed.has-source .research-shell {
 .rail-home:hover .brand-mark {
   background: #101a29;
 }
-.rail-toggle {
-  margin-left: auto;
-  position: relative;
-  width: 36px;
-  min-width: 36px;
-  height: 36px;
+/* Floating sidebar toggle — shadcn pattern: a circular button straddling
+   the sidebar's right edge, always visible (outside the collapsing content).
+   Icon rotates 180deg when collapsed. Reliable repeated toggle by design. */
+.sidebar-toggle {
+  position: absolute;
+  top: 20px;
+  right: -12px;
+  z-index: 80;
+  width: 24px;
+  height: 24px;
   padding: 0;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  border: 0;
-  border-radius: 10px;
-  color: #d6e5f7;
-  background: transparent;
-  transition: opacity .16s ease, transform .16s ease, background .16s ease, color .16s ease;
+  border: 1px solid var(--line);
+  border-radius: 50%;
+  background: var(--panel);
+  color: var(--muted);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, .12);
+  cursor: pointer;
+  transition: transform .2s cubic-bezier(.4, 0, .2, 1), color .15s ease, background .15s ease;
 }
-.rail-toggle svg {
-  width: 20px;
-  height: 20px;
+.sidebar-toggle:hover {
+  color: var(--accent);
+  background: var(--panel-2);
+}
+.sidebar-toggle svg {
+  width: 14px;
+  height: 14px;
   stroke: currentColor;
-  stroke-width: 1.8;
+  stroke-width: 2;
   fill: none;
   stroke-linecap: round;
   stroke-linejoin: round;
 }
-.rail-toggle:hover {
-  color: #fff;
-  background: #101a29;
-}
-.rail-toggle::after {
-  content: attr(data-tooltip);
-  position: absolute;
-  top: calc(100% + 8px);
-  left: 50%;
-  z-index: 90;
-  padding: 5px 9px;
-  border-radius: 7px;
-  color: #fff;
-  background: rgba(31, 31, 31, .96);
-  box-shadow: 0 8px 20px rgba(0, 0, 0, .28);
-  font-size: 12px;
-  font-weight: 700;
-  line-height: 1.1;
-  white-space: nowrap;
-  pointer-events: none;
-  opacity: 0;
-  transform: translate(-50%, -3px);
-  transition: opacity .12s ease, transform .12s ease;
-}
-.rail-toggle:hover::after,
-.rail-toggle:focus-visible::after {
-  opacity: 1;
-  transform: translate(-50%, 0);
+/* Rotate the chevron 180deg when the sidebar is collapsed. */
+body.rail-collapsed .sidebar-toggle {
+  transform: rotate(180deg);
 }
 .primary-nav {
   display: flex;
@@ -480,33 +465,6 @@ body.rail-collapsed .rail-home {
 body.rail-collapsed .brand-text,
 body.rail-collapsed .nav-count {
   display: none;
-}
-body.rail-collapsed .rail-toggle {
-  position: relative;
-  left: 0;
-  top: 0;
-  width: 40px;
-  height: 40px;
-  min-width: 40px;
-  margin: 0 auto;
-  padding: 0;
-  opacity: 1;
-  transform: none;
-  background: transparent;
-}
-body.rail-collapsed .brand-lockup:hover .rail-toggle,
-body.rail-collapsed .rail-toggle:hover,
-body.rail-collapsed .rail-toggle:focus-visible {
-  background: #101a29;
-}
-body.rail-collapsed .rail-toggle::after {
-  top: 50%;
-  left: calc(100% + 8px);
-  transform: translate(-3px, -50%);
-}
-body.rail-collapsed .rail-toggle:hover::after,
-body.rail-collapsed .rail-toggle:focus-visible::after {
-  transform: translate(0, -50%);
 }
 body.rail-collapsed .primary-nav {
   width: 100%;

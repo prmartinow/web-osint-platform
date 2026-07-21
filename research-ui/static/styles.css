@@ -510,6 +510,9 @@ body.rail-collapsed .rail-toggle:focus-visible::after {
 }
 body.rail-collapsed .primary-nav {
   width: 100%;
+  align-self: stretch;
+  overflow: visible;
+  scrollbar-gutter: auto;
 }
 .research-home {
   min-width: 0;
@@ -5390,10 +5393,13 @@ body.rail-collapsed .nav-row {
   width: 100%;
 }
 /* Override .nav-row .nav-item padding so the icon truly centers in the
-   full rail width. Match the specificity (two classes) to win. */
+   full rail width. Match the specificity (two classes) to win.
+   flex:0 0 40px is critical — the base .nav-row .nav-item has flex:1 1
+   auto which makes it grow to fill the row, overriding width + margin. */
 body.rail-collapsed .nav-row .nav-item {
   justify-content: center;
   padding: 10px 0;
+  flex: 0 0 40px;
   width: 40px;
   margin: 0 auto;
   gap: 0;
@@ -5401,4 +5407,13 @@ body.rail-collapsed .nav-row .nav-item {
 /* Center the icon itself within the fixed-width collapsed nav-item. */
 body.rail-collapsed .nav-row .nav-item .nav-icon {
   margin: 0 auto;
+}
+/* Force the primary-nav to stretch full rail width so the nav-item
+   margin:auto can actually center (otherwise align-items:center on the
+   rail shrinks the nav to content width). */
+body.rail-collapsed .primary-nav,
+body.rail-collapsed .nav-group,
+body.rail-collapsed .nav-row {
+  width: 100%;
+  align-self: stretch;
 }

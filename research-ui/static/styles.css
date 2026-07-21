@@ -5316,37 +5316,6 @@ body.rail-collapsed .capture-popover {
   min-height: 38px;
   padding: 8px 12px;
 }
-.nav-chevron {
-  flex: 0 0 28px;
-  height: 32px;
-  border: 0;
-  background: transparent;
-  color: #7e8da1;
-  cursor: pointer;
-  border-radius: 6px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  align-self: center;
-  transition: color .15s ease, background .15s ease;
-}
-.nav-chevron:hover {
-  color: #dbe7f7;
-  background: rgba(255, 255, 255, .06);
-}
-.nav-chevron::after {
-  content: "";
-  width: 7px;
-  height: 7px;
-  border-right: 2px solid currentColor;
-  border-bottom: 2px solid currentColor;
-  transform: rotate(45deg);
-  transition: transform .2s cubic-bezier(.4, 0, .2, 1);
-  display: block;
-}
-.nav-chevron.collapsed::after {
-  transform: rotate(-45deg);
-}
 /* Children expand/collapse via grid-template-rows. The outer wrapper
    animates 0fr <-> 1fr; the inner wrapper clips overflow at 0fr. */
 .nav-children {
@@ -5380,9 +5349,8 @@ body.rail-collapsed .capture-popover {
 .nav-item.child.active {
   color: #fff;
 }
-/* Collapsed sidebar: parent labels + children + chevrons all hide.
+/* Collapsed sidebar: parent labels + children all hide.
    Parent icons stay visible, centered in the 72px rail. */
-body.rail-collapsed .nav-chevron,
 body.rail-collapsed .nav-children,
 body.rail-collapsed .nav-label,
 body.rail-collapsed .nav-count {

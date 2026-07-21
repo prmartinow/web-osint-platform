@@ -7744,6 +7744,11 @@ function wireEvents() {
     evidence: ['evidence', 'entities', 'claims', 'timeline', 'compare'],
     draft: ['draft', 'reviews', 'publishing', 'taxonomy'],
   };
+  // Reverse lookup: which group does a route belong to?
+  const routeToGroup = {};
+  Object.entries(navGroupRoutes).forEach(([group, routes]) => {
+    routes.forEach((r) => { routeToGroup[r] = group; });
+  });
   const savedGroups = (() => {
     try { return JSON.parse(localStorage.getItem('web-osint-nav-groups') || '{}'); } catch { return {}; }
   })();
@@ -7751,26 +7756,33 @@ function wireEvents() {
     const group = document.querySelector(`.nav-group[data-nav-group="${id}"]`);
     if (!group) return;
     const children = group.querySelector('.nav-children');
-    const chevron = group.querySelector('.nav-chevron');
     if (children) children.classList.toggle('collapsed', !expanded);
-    if (chevron) {
-      chevron.classList.toggle('collapsed', !expanded);
-      chevron.setAttribute('aria-expanded', String(expanded));
-    }
   };
+  const persistGroupState = (id, expanded) => {
+    try {
+      const next = JSON.parse(localStorage.getItem('web-osint-nav-groups') || '{}');
+      next[id] = expanded;
+      localStorage.setItem('web-osint-nav-groups', JSON.stringify(next));
+    } catch {}
+  };
+  // Wire parent nav-items: clicking navigates AND expands children. If
+  // already on the parent route, the click toggles children collapsed.
   Object.keys(navGroupRoutes).forEach((id) => {
-    // Default: expanded. Saved collapsed state wins.
     applyGroupState(id, savedGroups[id] !== false);
-    const chevron = document.querySelector(`.nav-chevron[data-nav-group="${id}"]`);
-    chevron?.addEventListener('click', (event) => {
-      event.stopPropagation();
-      const expanded = chevron.classList.contains('collapsed');
-      applyGroupState(id, expanded);
-      try {
-        const next = JSON.parse(localStorage.getItem('web-osint-nav-groups') || '{}');
-        next[id] = expanded;
-        localStorage.setItem('web-osint-nav-groups', JSON.stringify(next));
-      } catch {}
+    const group = document.querySelector(`.nav-group[data-nav-group="${id}"]`);
+    const parentItem = group?.querySelector('.nav-row > .nav-item[data-route]');
+    parentItem?.addEventListener('click', (event) => {
+      const route = parentItem.dataset.route;
+      if (state.route === route) {
+        // Already on this route — toggle children.
+        const children = group.querySelector('.nav-children');
+        const isCollapsed = children?.classList.contains('collapsed');
+        applyGroupState(id, isCollapsed);
+        persistGroupState(id, isCollapsed);
+      }
+      // If navigating to a different route, setRoute + expandActiveNavGroup
+      // (called from updateRouteVisibility) handles the expand. The default
+      // [data-route] click binder will fire setRoute. Don't stopPropagation.
     });
   });
   // Auto-expand the group containing the active route on navigation.

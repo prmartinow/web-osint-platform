@@ -84,6 +84,10 @@ textarea { width: 100%; min-height: 180px; resize: vertical; }
   gap: 8px;
   flex-wrap: wrap;
 }
+/* Push the topbar actions cluster to the right edge of the grid column. */
+.home-topbar > .top-actions {
+  justify-self: end;
+}
 .sr-only {
   position: absolute;
   width: 1px;

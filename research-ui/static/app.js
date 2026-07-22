@@ -652,8 +652,7 @@ function setSidebarCollapsed(collapsed) {
   const label = state.sidebarCollapsed ? 'Open sidebar' : 'Close sidebar';
   toggle.setAttribute('aria-expanded', state.sidebarCollapsed ? 'false' : 'true');
   toggle.setAttribute('aria-label', label);
-  toggle.setAttribute('title', label);
-  toggle.dataset.tooltip = label;
+  toggle.title = label;
 }
 
 function renderFacets(data) {
@@ -7767,36 +7766,41 @@ function wireEvents() {
   };
   // Wire parent nav-items: clicking navigates AND expands children. If
   // already on the parent route, the click toggles children collapsed.
+  // stopPropagation prevents the default [data-route] click binder from
+  // also firing (which would call setRoute -> loadRoutePage ->
+  // expandActiveNavGroup -> force-open, fighting this toggle).
   Object.keys(navGroupRoutes).forEach((id) => {
     applyGroupState(id, savedGroups[id] !== false);
     const group = document.querySelector(`.nav-group[data-nav-group="${id}"]`);
     const parentItem = group?.querySelector('.nav-row > .nav-item[data-route]');
     parentItem?.addEventListener('click', (event) => {
+      event.stopPropagation();
       const route = parentItem.dataset.route;
+      const children = group.querySelector('.nav-children');
+      const isCollapsed = children?.classList.contains('collapsed');
       if (state.route === route) {
-        // Already on this route — toggle children.
-        const children = group.querySelector('.nav-children');
-        const isCollapsed = children?.classList.contains('collapsed');
+        // Already on this route — just toggle children, no navigation.
         applyGroupState(id, isCollapsed);
         persistGroupState(id, isCollapsed);
+      } else {
+        // Navigating to a new route — expand children + navigate.
+        applyGroupState(id, true);
+        persistGroupState(id, true);
+        setRoute(route);
       }
-      // If navigating to a different route, setRoute + expandActiveNavGroup
-      // (called from updateRouteVisibility) handles the expand. The default
-      // [data-route] click binder will fire setRoute. Don't stopPropagation.
     });
   });
-  // Auto-expand the group containing the active route on navigation.
+  // Auto-expand the group containing the active route ONLY on initial load
+  // (restoreState). During navigation, the parent-item click handler manages
+  // expand/collapse — we don't want updateRouteVisibility to override a
+  // manual collapse on re-render.
   const expandActiveNavGroup = () => {
     Object.entries(navGroupRoutes).forEach(([groupId, routes]) => {
       if (routes.includes(state.route)) applyGroupState(groupId, true);
     });
   };
-  // Patch updateRouteVisibility to also expand the active group.
-  const origUpdateRouteVisibility = updateRouteVisibility;
-  updateRouteVisibility = function () {
-    origUpdateRouteVisibility.apply(this, arguments);
-    expandActiveNavGroup();
-  };
+  // Only run once on init, not on every updateRouteVisibility call.
+  expandActiveNavGroup();
   $('searchInput').addEventListener('input', () => {
     state.q = $('searchInput').value.trim();
     clearTimeout(window.__inboxTimer);

@@ -6100,6 +6100,7 @@ async function loadRoutePage() {
   refreshCaptureActivity();
   if (state.route === 'home') {
     await loadHome();
+    enhanceAllSelects(document);
     return;
   }
   if (state.route === 'inbox') {
@@ -6112,10 +6113,12 @@ async function loadRoutePage() {
   }
   if (state.route === 'conflict-detail') {
     await loadConflictDetail();
+    enhanceAllSelects(document);
     return;
   }
   if (state.route === 'timeline') {
     await loadTimelinePage();
+    enhanceAllSelects(document);
     return;
   }
   if (state.route === 'compare') {
@@ -6148,6 +6151,7 @@ async function loadRoutePage() {
     // Ignore stale responses (e.g. the user typed again or switched routes).
     if (!isCurrentFetchToken(token) || state.route !== routeKey) return;
     renderRoutePage(state.route, data);
+    enhanceAllSelects(document);
   } catch (error) {
     if (!isCurrentFetchToken(token) || state.route !== routeKey) return;
     $('routePage').innerHTML = `${pageHeader(config.title, 'Could not load this read model.')}<div class="empty-state panel"><h2>${escapeHtml(config.title)} error</h2><p>${escapeHtml(error.message)}</p></div>`;
@@ -6562,23 +6566,64 @@ function wirePreviewDrawerGlobals() {
 }
 
 // ---- Custom dropdown component ----
-// Replaces a native <select> inside a sticky/transformed ancestor where
-// the browser would flip the dropdown upward. Provides a select-like API
-// (.value, .innerHTML accepting <option> markup, 'change' event) so
-// existing code works unchanged. The option list always opens BELOW the
-// trigger button via top:100% positioning.
+// Converts a native <select> into a custom dropdown that always opens its
+// option list BELOW the trigger (native selects inside sticky/transformed
+// ancestors open upward due to a browser coordinate-system bug).
+// The native <select> is kept in the DOM (hidden) so existing listeners
+// + .value + .innerHTML keep working; the custom UI overlays it.
 function enhanceCustomSelect(el) {
-  if (!el || el.__enhanced) return;
+  if (!el || el.__enhanced) return el.__enhanced;
+  // Already a custom-select container (pre-built in HTML)?
+  if (el.classList.contains('custom-select')) {
+    el.__enhanced = true;
+    wireCustomSelect(el);
+    return true;
+  }
+  // Native <select>: build a custom wrapper around it.
   el.__enhanced = true;
-  const btn = el.querySelector('.custom-select-btn');
-  const list = el.querySelector('.custom-select-list');
-  if (!btn || !list) return;
+  const select = el;
+  // Create the visual wrapper that sits ON TOP of the native select.
+  const wrapper = document.createElement('div');
+  wrapper.className = 'custom-select ' + (select.className || '');
+  wrapper.setAttribute('aria-label', select.getAttribute('aria-label') || '');
+  // Copy data-* attributes (e.g. data-timeline-filter).
+  for (const attr of select.attributes) {
+    if (attr.name.startsWith('data-')) wrapper.setAttribute(attr.name, attr.value);
+  }
+  const btn = document.createElement('button');
+  btn.className = 'custom-select-btn';
+  btn.type = 'button';
+  btn.setAttribute('aria-haspopup', 'listbox');
+  btn.setAttribute('aria-expanded', 'false');
+  const list = document.createElement('ul');
+  list.className = 'custom-select-list';
+  list.setAttribute('role', 'listbox');
+  list.hidden = true;
+  wrapper.appendChild(btn);
+  wrapper.appendChild(list);
+  // Hide the native select (kept in DOM for API compatibility).
+  select.style.display = 'none';
+  select.parentNode.insertBefore(wrapper, select.nextSibling);
+  // Store references.
+  select.__customWrapper = wrapper;
+  wrapper.__nativeSelect = select;
+  wireCustomSelect(wrapper);
+  return true;
+}
 
+// Wire the open/close/select behavior on a custom-select wrapper.
+function wireCustomSelect(wrapper) {
+  const btn = wrapper.querySelector('.custom-select-btn');
+  const list = wrapper.querySelector('.custom-select-list');
+  const native = wrapper.__nativeSelect || null;
+
+  // For wrappers without a native backing select, maintain an internal
+  // option list + value (the project-select in the topbar uses this path
+  // because the JS writes .innerHTML + .value directly).
+  let _options = [];
   let _value = '';
-  let _options = []; // [{value, label, selected}]
 
-  // Parse option HTML markup (same format a native select accepts).
-  const parseOptions = (html) => {
+  const parseOptionHtml = (html) => {
     const tmp = document.createElement('div');
     tmp.innerHTML = html;
     return Array.from(tmp.querySelectorAll('option')).map((opt) => ({
@@ -6587,21 +6632,53 @@ function enhanceCustomSelect(el) {
     }));
   };
 
-  const renderList = () => {
+  const syncFromNative = () => {
+    if (!native) return;
+    const opts = Array.from(native.options);
+    list.innerHTML = opts.map((opt) => {
+      const v = opt.value || '';
+      const sel = opt.selected ? ' selected' : '';
+      return `<li class="custom-select-opt${sel}" role="option" data-value="${escapeHtml(v)}" ${opt.selected ? 'aria-selected="true"' : ''}>${escapeHtml(opt.textContent)}</li>`;
+    }).join('');
+    const chosen = native.options[native.selectedIndex] || opts[0];
+    btn.textContent = chosen ? chosen.textContent : '';
+  };
+
+  const renderStandalone = () => {
     list.innerHTML = _options.map((opt) => `
       <li class="custom-select-opt ${opt.value === _value ? 'selected' : ''}" role="option" data-value="${escapeHtml(opt.value)}" ${opt.value === _value ? 'aria-selected="true"' : ''}>${escapeHtml(opt.label)}</li>
     `).join('');
     btn.textContent = (_options.find((o) => o.value === _value) || _options[0] || { label: '' }).label;
   };
 
-  const open = () => {
-    list.hidden = false;
-    btn.setAttribute('aria-expanded', 'true');
+  const setValue = (value) => {
+    if (native) { native.value = value; syncFromNative(); }
+    else { _value = String(value); renderStandalone(); }
   };
-  const close = () => {
-    list.hidden = true;
-    btn.setAttribute('aria-expanded', 'false');
-  };
+
+  // Initialize.
+  if (native) {
+    syncFromNative();
+    const observer = new MutationObserver(syncFromNative);
+    observer.observe(native, { childList: true, subtree: true, attributes: true, attributeFilter: ['selected'] });
+  } else {
+    renderStandalone();
+  }
+
+  // For standalone wrappers, provide the select-compatible .value + .innerHTML API.
+  if (!native) {
+    Object.defineProperty(wrapper, 'value', {
+      get() { return _value; },
+      set(v) { setValue(v); },
+    });
+    Object.defineProperty(wrapper, 'innerHTML', {
+      get() { return _options.map((o) => `<option value="${o.value}">${o.label}</option>`).join(''); },
+      set(html) { _options = parseOptionHtml(html); renderStandalone(); },
+    });
+  }
+
+  const open = () => { list.hidden = false; btn.setAttribute('aria-expanded', 'true'); };
+  const close = () => { list.hidden = true; btn.setAttribute('aria-expanded', 'false'); };
 
   btn.addEventListener('click', (e) => {
     e.stopPropagation();
@@ -6610,31 +6687,25 @@ function enhanceCustomSelect(el) {
   list.addEventListener('click', (e) => {
     const item = e.target.closest('.custom-select-opt');
     if (!item) return;
-    _value = item.dataset.value || '';
-    renderList();
+    const value = item.dataset.value || '';
+    setValue(value);
     close();
-    el.dispatchEvent(new Event('change', { bubbles: true }));
+    if (native) native.dispatchEvent(new Event('change', { bubbles: true }));
+    wrapper.dispatchEvent(new Event('change', { bubbles: true }));
   });
   document.addEventListener('click', (e) => {
-    if (!el.contains(e.target)) close();
+    if (!wrapper.contains(e.target)) close();
   });
   document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape' && !list.hidden) { close(); btn.focus(); }
   });
+}
 
-  // Select-compatible API.
-  Object.defineProperty(el, 'value', {
-    get() { return _value; },
-    set(v) { _value = String(v); renderList(); },
-  });
-  Object.defineProperty(el, 'innerHTML', {
-    get() {
-      return _options.map((o) => `<option value="${o.value}">${o.label}</option>`).join('');
-    },
-    set(html) {
-      _options = parseOptions(html);
-      renderList();
-    },
+// Enhance every native <select> inside a container (or the whole document).
+function enhanceAllSelects(container) {
+  const root = container || document;
+  root.querySelectorAll('select:not(.__enhanced)').forEach((sel) => {
+    enhanceCustomSelect(sel);
   });
 }
 

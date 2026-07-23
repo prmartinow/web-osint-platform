@@ -243,6 +243,7 @@ const routeConfig = {
   taxonomy: { title: 'Taxonomy', endpoint: '/api/taxonomy' },
   timeline: { title: 'Timeline', endpoint: '' },
   compare: { title: 'Compare', endpoint: '' },
+  capture: { title: 'Capture source', endpoint: '' },
   'topic-detail': { title: 'Topic Detail', endpoint: '' },
   benchmark: { title: 'Benchmark Detail', endpoint: '' },
   draft: { title: 'Draft Editor', endpoint: '' },
@@ -5160,6 +5161,274 @@ function clearTimelineFilterState() {
   state.timelineSavedView = '';
 }
 
+// ---- Capture page ----
+let __capturePollTimer = null;
+let __captureRefreshTimer = null;
+
+async function loadCapturePage() {
+  try {
+    const data = await fetchJson('/api/capture/activity?limit=20');
+    renderCapturePage(data);
+  } catch (error) {
+    $('routePage').innerHTML = `${pageHeader('Capture source', 'Could not load capture activity.')}<div class="empty-state panel"><h2>Capture page error</h2><p>${escapeHtml(error.message)}</p></div>`;
+  }
+}
+
+function captureStatusBadge(status) {
+  const map = {
+    committed: { cls: 'ok', icon: '✓', label: 'Committed' },
+    failed: { cls: 'danger', icon: '✗', label: 'Failed' },
+    working: { cls: 'info', icon: '◐', label: 'Working' },
+    launched: { cls: 'info', icon: '◐', label: 'Launched' },
+    requested: { cls: 'warn', icon: '◷', label: 'Requested' },
+  };
+  const s = map[status] || map.requested;
+  return `<span class="capture-status-badge ${s.cls}">${s.icon} ${s.label}</span>`;
+}
+
+function capturePhaseSteps(phase) {
+  const steps = [
+    { key: 'opening', label: 'Opening' },
+    { key: 'capturing', label: 'Capturing' },
+    { key: 'publishing', label: 'Publishing' },
+    { key: 'done', label: 'Done' },
+  ];
+  const phaseIdx = phase === 'failed' ? -1 : steps.findIndex((s) => s.key === phase);
+  return `<div class="capture-phase-steps">${steps.map((s, i) => {
+    const done = phaseIdx >= 0 && i <= phaseIdx;
+    const active = phaseIdx === i;
+    return `<div class="capture-phase-step ${done ? 'done' : ''} ${active ? 'active' : ''} ${phase === 'failed' && i === Math.max(0, phaseIdx) ? 'failed' : ''}">
+      <span class="capture-phase-dot">${done ? '✓' : i + 1}</span>
+      <span class="capture-phase-label">${s.label}</span>
+    </div>`;
+  }).join('<span class="capture-phase-arrow">→</span>')}</div>`;
+}
+
+function renderCaptureMonitor(session) {
+  if (!session) return '';
+  const url = session.seed_url || session.canonical_url || session.title || '(unknown)';
+  const elapsed = session.started_at ? Math.round((Date.now() - new Date(session.started_at).getTime()) / 1000) : 0;
+  return `
+    <div class="capture-monitor">
+      <div class="capture-monitor-url">${escapeHtml(url)}</div>
+      ${capturePhaseSteps(session.phase || 'opening')}
+      <div class="capture-monitor-meta">
+        ${captureStatusBadge(session.status)}
+        <span class="muted">Session: <code>${escapeHtml(session.session_id || '')}</code></span>
+        ${session.started_at ? `<span class="muted">Elapsed: ${elapsed}s</span>` : ''}
+        ${session.error ? `<span class="capture-monitor-error">${escapeHtml(session.error)}</span>` : ''}
+      </div>
+    </div>
+  `;
+}
+
+function renderCapturePage(data) {
+  const items = data.items || data || [];
+  const summary = data.summary || {};
+  const projects = (state.home?.projects || []).map((p) => `<option value="${escapeHtml(p.project_id || '')}" ${p.project_id === (state.project || state.home?.active_project?.project_id) ? 'selected' : ''}>${escapeHtml(p.name || p.project_id || '')}</option>`).join('');
+  const defaultProject = state.project || state.home?.active_project?.project_id || '';
+
+  $('routePage').innerHTML = `
+    ${pageHeader('Capture source', 'Configure a capture run. The dedicated browser opens the URL, renders the page, and commits a frozen copy into the project.')}
+    ${metricCards([
+      { label: 'Committed', value: summary.committed ?? items.filter((i) => i.status === 'committed').length },
+      { label: 'Working', value: summary.working ?? items.filter((i) => i.status === 'working' || i.status === 'launched').length },
+      { label: 'Failed', value: summary.failed ?? items.filter((i) => i.status === 'failed').length },
+    ])}
+    <section class="panel capture-form-panel">
+      <h2>New capture</h2>
+      <form id="captureForm" class="capture-form">
+        <label class="capture-field">
+          <span>Source URL</span>
+          <input id="captureUrl" type="url" required placeholder="https://example.org/page">
+        </label>
+        <label class="capture-field">
+          <span>Project</span>
+          <select id="captureProjectSelect"><option value="">All projects</option>${projects}</select>
+        </label>
+        <label class="capture-field">
+          <span>Capture mode</span>
+          <select id="captureMode">
+            <option value="rendered-web" selected>Rendered web (full capture)</option>
+            <option value="capture">Capture only (no extraction)</option>
+            <option value="publish">Publish only (skip capture)</option>
+          </select>
+        </label>
+        <div class="capture-form-row">
+          <label class="capture-checkbox"><input type="checkbox" id="captureAllowX"> Allow X.com captures</label>
+          <label class="capture-field compact"><span>Settle delay (ms)</span><input type="number" id="captureSettleMs" value="2500" min="0" max="30000" step="500"></label>
+        </div>
+        <div class="capture-form-actions">
+          <button type="submit" id="captureSubmit" class="primary-action">Start capture</button>
+          <span id="captureFormStatus" class="capture-form-status" aria-live="polite"></span>
+        </div>
+      </form>
+    </section>
+    <section class="panel capture-monitor-panel" id="captureMonitorPanel" hidden>
+      <div class="panel-title-row"><h2>Live capture</h2><span class="muted" id="captureMonitorTimer"></span></div>
+      <div id="captureMonitorBody"></div>
+    </section>
+    <section class="panel capture-history-panel">
+      <div class="panel-title-row"><h2>Recent captures</h2><span class="muted">${items.length} sessions</span></div>
+      <div id="captureHistoryList">
+        ${items.length ? items.map((item) => `
+          <div class="capture-history-row" data-status="${escapeHtml(item.status || '')}">
+            ${captureStatusBadge(item.status)}
+            <div class="capture-history-main">
+              <a class="capture-history-url" href="${escapeHtml(item.seed_url || '')}" target="_blank" rel="noreferrer">${escapeHtml(item.seed_url || item.source_id || '(no url)')}</a>
+              <div class="capture-history-meta">
+                <span class="muted">${escapeHtml(fmtDate(item.requested_at) || '')}</span>
+                ${item.session_id ? `<span class="muted">session: <code>${escapeHtml(item.session_id)}</code></span>` : ''}
+                ${item.capture_event_id ? `<span class="muted">capture: <code>${escapeHtml(item.capture_event_id)}</code></span>` : ''}
+                ${item.project ? `<span class="muted">${escapeHtml(item.project)}</span>` : ''}
+              </div>
+              ${item.error ? `<div class="capture-history-error">${escapeHtml(item.error)}</div>` : ''}
+            </div>
+            ${item.status === 'committed' ? `<button class="text-button capture-history-open" data-capture-open="inbox">Open in Inbox</button>` : ''}
+          </div>
+        `).join('') : '<p class="muted">No capture attempts yet. Start one above.</p>'}
+      </div>
+    </section>
+  `;
+  wireCapturePage();
+}
+
+function wireCapturePage() {
+  // Set default project from state.
+  const projectSel = $('captureProjectSelect');
+  if (projectSel && state.project) projectSel.value = state.project;
+
+  // Form submission.
+  $('captureForm')?.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const url = $('captureUrl')?.value.trim();
+    if (!url) return;
+    const submitBtn = $('captureSubmit');
+    const statusEl = $('captureFormStatus');
+    submitBtn.disabled = true;
+    submitBtn.textContent = 'Capturing…';
+    statusEl.textContent = 'Launching capture…';
+    statusEl.className = 'capture-form-status info';
+    try {
+      const result = await postJson('/api/rebrowser/launch-capture', {
+        project_id: $('captureProjectSelect')?.value || state.project || state.home?.active_project?.project_id || '',
+        seed_url: url,
+        source_id: '',
+        return_route: routeHash(),
+        actor: REVIEW_UI_ACTOR,
+        capture_mode: $('captureMode')?.value || 'rendered-web',
+        allow_x: $('captureAllowX')?.checked || false,
+        settle_ms: Number($('captureSettleMs')?.value || 2500),
+      });
+      const sessionId = result.session_id || result.session?.session_id || '';
+      if (result.status === 'working' && sessionId) {
+        statusEl.textContent = 'Capture working — monitoring progress below.';
+        statusEl.className = 'capture-form-status info';
+        await pollCaptureOnPage(sessionId, url);
+      } else {
+        statusEl.textContent = result.message || 'Capture accepted.';
+        statusEl.className = 'capture-form-status ok';
+        await loadCapturePage();
+        await loadInbox();
+      }
+    } catch (error) {
+      statusEl.textContent = error.message || 'Capture failed.';
+      statusEl.className = 'capture-form-status error';
+    } finally {
+      submitBtn.disabled = false;
+      submitBtn.textContent = 'Start capture';
+    }
+  });
+
+  // Open-in-inbox buttons.
+  document.querySelectorAll('[data-capture-open="inbox"]').forEach((btn) => {
+    btn.addEventListener('click', () => setRoute('inbox'));
+  });
+
+  // Auto-refresh history every 10s while on the page.
+  if (__captureRefreshTimer) clearInterval(__captureRefreshTimer);
+  __captureRefreshTimer = setInterval(async () => {
+    if (state.route !== 'capture') { clearInterval(__captureRefreshTimer); return; }
+    try {
+      const data = await fetchJson('/api/capture/activity?limit=20');
+      // Only re-render the history list, not the whole page.
+      const listEl = $('captureHistoryList');
+      if (listEl && data.items) {
+        const items = data.items;
+        listEl.innerHTML = items.length ? items.map((item) => `
+          <div class="capture-history-row" data-status="${escapeHtml(item.status || '')}">
+            ${captureStatusBadge(item.status)}
+            <div class="capture-history-main">
+              <a class="capture-history-url" href="${escapeHtml(item.seed_url || '')}" target="_blank" rel="noreferrer">${escapeHtml(item.seed_url || item.source_id || '(no url)')}</a>
+              <div class="capture-history-meta">
+                <span class="muted">${escapeHtml(fmtDate(item.requested_at) || '')}</span>
+                ${item.session_id ? `<span class="muted">session: <code>${escapeHtml(item.session_id)}</code></span>` : ''}
+              </div>
+              ${item.error ? `<div class="capture-history-error">${escapeHtml(item.error)}</div>` : ''}
+            </div>
+            ${item.status === 'committed' ? `<button class="text-button capture-history-open" data-capture-open="inbox">Open in Inbox</button>` : ''}
+          </div>
+        `).join('') : '<p class="muted">No capture attempts yet.</p>';
+        document.querySelectorAll('[data-capture-open="inbox"]').forEach((btn) => {
+          btn.addEventListener('click', () => setRoute('inbox'));
+        });
+      }
+    } catch {}
+  }, 10000);
+}
+
+// Poll a capture session and render into the monitor panel (page version
+// of pollCaptureStatus, adapted for the dedicated capture page).
+async function pollCaptureOnPage(sessionId, seedUrl) {
+  const monitorPanel = $('captureMonitorPanel');
+  const monitorBody = $('captureMonitorBody');
+  const timerEl = $('captureMonitorTimer');
+  if (!monitorPanel || !monitorBody) return;
+  monitorPanel.hidden = false;
+  const startedAt = new Date().toISOString();
+  const renderMonitor = (session) => {
+    monitorBody.innerHTML = renderCaptureMonitor({
+      ...session,
+      seed_url: seedUrl,
+      started_at: startedAt,
+    });
+    if (timerEl && startedAt) {
+      const elapsed = Math.round((Date.now() - new Date(startedAt).getTime()) / 1000);
+      timerEl.textContent = `${elapsed}s elapsed`;
+    }
+  };
+  renderMonitor({ session_id: sessionId, status: 'working', phase: 'opening' });
+
+  if (__capturePollTimer) clearTimeout(__capturePollTimer);
+  const deadline = Date.now() + 90000;
+  const poll = async () => {
+    if (state.route !== 'capture') return; // user navigated away
+    try {
+      const s = await fetchJson(`/api/rebrowser/launch-status?session_id=${encodeURIComponent(sessionId)}`);
+      renderMonitor(s);
+      if (s.status === 'committed' || s.phase === 'done') {
+        const statusEl = $('captureFormStatus');
+        if (statusEl) { statusEl.textContent = `Captured: ${s.title || s.canonical_url || seedUrl}`; statusEl.className = 'capture-form-status ok'; }
+        await loadCapturePage();
+        await loadInbox();
+        return;
+      }
+      if (s.status === 'failed') {
+        const statusEl = $('captureFormStatus');
+        if (statusEl) { statusEl.textContent = s.error || 'Capture failed.'; statusEl.className = 'capture-form-status error'; }
+        return;
+      }
+    } catch {}
+    if (Date.now() < deadline) {
+      __capturePollTimer = setTimeout(poll, 2000);
+    } else {
+      const statusEl = $('captureFormStatus');
+      if (statusEl) { statusEl.textContent = 'Capture timed out — the page may be slow or blocked.'; statusEl.className = 'capture-form-status error'; }
+    }
+  };
+  __capturePollTimer = setTimeout(poll, 2000);
+}
+
 async function loadTimelinePage() {
   const projectId = routeProjectId();
   const params = new URLSearchParams({ limit: state.limit });
@@ -6123,6 +6392,11 @@ async function loadRoutePage() {
   }
   if (state.route === 'compare') {
     await loadComparePage();
+    return;
+  }
+  if (state.route === 'capture') {
+    await loadCapturePage();
+    enhanceAllSelects(document);
     return;
   }
   if (state.route === 'topic-detail') {
@@ -7839,10 +8113,10 @@ function wireEvents() {
   setTheme(document.documentElement.dataset.theme || 'dark');
 
   $('captureSourceButton')?.addEventListener('click', () => {
-    launchCaptureFlow();
+    setRoute('capture');
   });
   $('captureTopButton')?.addEventListener('click', () => {
-    launchCaptureFlow();
+    setRoute('capture');
   });
   const capturePopover = $('capturePopover');
   const captureHistoryBtn = $('captureHistoryButton');

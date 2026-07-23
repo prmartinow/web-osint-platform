@@ -229,3 +229,17 @@ were addressed in follow-up commits:
 | 3b0d49d | Topbar layout: dropped the "Project" label above the select, moved select to the right side; theme toggle moved back to the topbar from the sidebar; sidebar set to height:100dvh (full viewport); smoother collapse animation (.3s cubic-bezier); removed Active Project tile; Today's Queue badge became a proper pill |
 | 9553406 | Sidebar redesigned per operator: removed Overview/Home group (brand logo is Home); restructured 4 section-title groups into 3 parent-route groups (Inbox->Projects/Library, Evidence->Entities/Claims/Timeline/Compare, Draft->Reviews/Publishing/Taxonomy); each parent is a clickable route + chevron; children animate via grid-template-rows: 0fr->1fr; removed redundant Capture source button; topbar action order: project-select, status, New note, Capture, theme, avatar; collapsed toggle centered |
 | ac847c5 | Fixed sidebar spacing (gap 6px->2px between groups) and parent-movement bug on chevron toggle (Inbox was fine but Evidence/Draft parents shifted — caused by align-items:stretch + no explicit height + scrollbar appearing/disappearing; fixed with min-height on nav-row/items + scrollbar-gutter:stable) |
+
+### Custom dropdowns + Capture page (2026-07-20/21)
+
+| Commit | Fix |
+|--------|-----|
+| e12a543 | Converted ALL native `<select>` to a custom dropdown component (`enhanceAllSelects`). Native selects opened upward inside the sticky/backdrop-filtered topbar (browser-controlled, no CSS fix inside a containing-block ancestor). The custom dropdown always opens downward via explicit `top:100%`, keeps the native select hidden in the DOM for listener compatibility, and a MutationObserver syncs the UI when options change. Applied to: topbar project-select, all facet filters, all route-page selectors. |
+| 3da00d8 | Dedicated Capture route page replacing the modal flow. Sidebar/topbar Capture buttons now navigate to `#capture`. Layout: page header + metric cards (Committed/Working/Failed) + New capture form (Source URL, Project, Capture mode = rendered-web\|capture\|publish, Allow X.com checkbox, Settle delay ms, Start capture) + live session monitor (hidden until a capture runs; shows phase indicator opening->capturing->publishing->done, status badge with text+icon, elapsed timer, session id; polls `/api/rebrowser/launch-status` every 2s up to 90s) + Recent captures history (last 20 sessions from `/api/capture/activity` with status badges, clickable URL, timestamp, session/capture ids, Open-in-Inbox link for committed; auto-refreshes every 10s). |
+| 1a7413a | Removed the dead capture modal code (launchCaptureFlow, openCaptureModal, closeCaptureModal, setCaptureModalState, runCaptureFromModal, captureModalEscHandler, pollCaptureStatus + .capture-modal-* CSS). `refreshCaptureActivity`/`renderCaptureActivity` retained (shared by sidebar popover + page history). Added per-capture option passthrough end-to-end: server.py `launch_rebrowser_capture` forwards optional `capture_mode`/`allow_x`/`settle_ms` (validated) in launch_payload; `rebrowser_launch_helper.py` honors payload overrides above env defaults (settle_ms -> `--settle-ms`, allow_x -> `--allow-x`, capture_mode -> mode selection). Env vars remain the fallback. |
+
+Verified on rebuilt container (x-research-research-ui): all three
+endpoints respond (/, /static/app.js, /api/capture/activity); served
+bundle contains loadCapturePage + capture route, no modal remnants;
+CDP screenshot shows form + metric cards (Committed 3 / Working 4 /
+Failed 0) + 13 history rows + sidebar, no rendering problems.

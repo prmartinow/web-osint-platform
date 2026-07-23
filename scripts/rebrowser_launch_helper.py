@@ -157,7 +157,7 @@ def run_rendered_capture(payload: dict[str, Any], session_id: str) -> dict[str, 
         "--cdp-url",
         require_env("REBROWSER_CDP_URL"),
         "--settle-ms",
-        env("REBROWSER_LAUNCH_SETTLE_MS", "2500"),
+        str(payload.get("settle_ms") or env("REBROWSER_LAUNCH_SETTLE_MS", "2500")),
         "--timeout-ms",
         env("REBROWSER_LAUNCH_NAV_TIMEOUT_MS", "60000"),
         "--context-json",
@@ -166,7 +166,8 @@ def run_rendered_capture(payload: dict[str, Any], session_id: str) -> dict[str, 
         str(output_dir),
         "--keep-tab",
     ]
-    if env("REBROWSER_LAUNCH_ALLOW_X", "false").lower() in ("1", "true", "yes"):
+    allow_x = bool(payload.get("allow_x")) or env("REBROWSER_LAUNCH_ALLOW_X", "false").lower() in ("1", "true", "yes")
+    if allow_x:
         command.append("--allow-x")
 
     child_env = os.environ.copy()
@@ -234,7 +235,7 @@ def _run_capture_session(session_id: str, payload: dict[str, Any], seed_url: str
         ensure_browser(seed_url or "about:blank")
         target = open_tab(seed_url) if seed_url else {}
         state["target_url"] = target.get("url") or seed_url
-        mode = env("REBROWSER_LAUNCH_CAPTURE_MODE", "rendered-web").lower()
+        mode = str(payload.get("capture_mode") or env("REBROWSER_LAUNCH_CAPTURE_MODE", "rendered-web")).lower()
         if mode in ("rendered-web", "capture", "publish"):
             state["phase"] = "capturing"
             capture = run_rendered_capture(payload, session_id)

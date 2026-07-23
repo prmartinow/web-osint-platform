@@ -6337,6 +6337,23 @@ def launch_rebrowser_capture(payload):
         "requested_at": now_iso(),
         "actor": compact_text(payload.get("actor") or REVIEW_ACTOR, 200),
     }
+    # Per-capture options forwarded to the launch helper. Each maps to an
+    # env var on the helper side (REBROWSER_LAUNCH_CAPTURE_MODE / _ALLOW_X /
+    # _SETTLE_MS); they are optional and only included when the UI sends them.
+    capture_mode = compact_text(payload.get("capture_mode") or "", 64)
+    if capture_mode:
+        launch_payload["capture_mode"] = capture_mode
+    if payload.get("allow_x"):
+        launch_payload["allow_x"] = True
+    settle_ms_raw = payload.get("settle_ms")
+    if settle_ms_raw not in (None, ""):
+        try:
+            settle_ms = int(settle_ms_raw)
+        except (TypeError, ValueError):
+            raise ResearchUiError(400, "settle_ms must be an integer")
+        if settle_ms < 0 or settle_ms > 60000:
+            raise ResearchUiError(400, "settle_ms must be between 0 and 60000")
+        launch_payload["settle_ms"] = settle_ms
     event = persist_review_event(build_review_event("rebrowser.capture.launch_requested", {
         **payload,
         "project": project,

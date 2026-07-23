@@ -102,53 +102,53 @@ textarea { width: 100%; min-height: 180px; resize: vertical; }
 
 .theme-switch {
   position: relative;
-  width: 62px;
-  height: 32px;
+  width: 48px;
+  height: 26px;
   border: 2px solid #153241;
   border-radius: 999px;
   background: #ffffff;
   flex: 0 0 auto;
   padding: 0;
-  box-shadow: 0 1px 6px var(--shadow);
+  box-shadow: 0 1px 4px var(--shadow);
 }
 .theme-switch .knob {
   position: absolute;
-  width: 24px;
-  height: 24px;
+  width: 18px;
+  height: 18px;
   top: 2px;
   left: 2px;
   border-radius: 50%;
   background: #143142;
   border: 1px solid rgba(20,49,66,.35);
-  transform: translateX(30px);
+  transform: translateX(22px);
   transition: transform .18s ease;
   z-index: 2;
 }
 .theme-switch .sun, .theme-switch .moon {
   position: absolute;
-  top: 7px;
-  width: 14px;
-  height: 14px;
+  top: 5px;
+  width: 12px;
+  height: 12px;
   pointer-events: none;
   z-index: 1;
 }
 .theme-switch .sun {
-  left: 9px;
+  left: 6px;
   border-radius: 50%;
   background: #ffd629;
   box-shadow: inset 0 0 0 1px rgba(255, 214, 41, .22);
 }
 .theme-switch .moon {
-  right: 9px;
+  right: 6px;
   border-radius: 50%;
   background: #143142;
 }
 .theme-switch .moon::after {
   content: "";
   position: absolute;
-  width: 12px;
-  height: 12px;
-  left: -3px;
+  width: 10px;
+  height: 10px;
+  left: -2px;
   top: 0;
   border-radius: 50%;
   background: #fff;
@@ -596,16 +596,16 @@ body.rail-collapsed .primary-nav {
 }
 .global-search input {
   width: 100%;
-  min-height: 42px;
-  border-radius: 11px;
-  padding-left: 42px;
+  min-height: 38px;
+  border-radius: 9px;
+  padding-left: 38px;
   background:
-    linear-gradient(90deg, transparent 0 34px, var(--line) 34px 35px, transparent 35px),
+    linear-gradient(90deg, transparent 0 30px, var(--line) 30px 31px, transparent 31px),
     var(--input);
 }
 .top-action {
-  min-height: 42px;
-  padding-inline: 18px;
+  min-height: 38px;
+  padding-inline: 16px;
   font-weight: 750;
 }
 .capture-status {

@@ -582,17 +582,81 @@ body.rail-collapsed .primary-nav {
   backdrop-filter: blur(10px);
 }
 .topbar-project-select {
-  min-height: 38px;
   min-width: 180px;
   max-width: 280px;
-  padding: 6px 10px;
+}
+/* Custom dropdown component (replaces native <select> in sticky headers
+   where the browser flips the popup upward). The list always opens BELOW
+   the trigger via top:100%. */
+.custom-select {
+  position: relative;
+  display: inline-block;
+}
+.custom-select-btn {
+  width: 100%;
+  min-height: 38px;
+  padding: 6px 30px 6px 10px;
   border-radius: 9px;
   border: 1px solid var(--line);
   background: var(--input);
   color: var(--text);
   font-weight: 700;
   font-size: 13px;
+  text-align: left;
   cursor: pointer;
+  position: relative;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.custom-select-btn::after {
+  content: "";
+  position: absolute;
+  right: 10px;
+  top: 50%;
+  width: 7px;
+  height: 7px;
+  border-right: 2px solid var(--muted);
+  border-bottom: 2px solid var(--muted);
+  transform: translateY(-65%) rotate(45deg);
+}
+.custom-select-btn[aria-expanded="true"]::after {
+  transform: translateY(-15%) rotate(-135deg);
+}
+.custom-select-list {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  min-width: 100%;
+  max-width: 320px;
+  max-height: 280px;
+  overflow-y: auto;
+  margin: 0;
+  padding: 4px;
+  list-style: none;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: var(--panel);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, .18);
+  z-index: 300;
+}
+.custom-select-list[hidden] { display: none; }
+.custom-select-opt {
+  padding: 7px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 13px;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.custom-select-opt:hover {
+  background: var(--panel-2);
+}
+.custom-select-opt.selected {
+  font-weight: 700;
+  color: var(--accent);
 }
 .global-search input {
   width: 100%;

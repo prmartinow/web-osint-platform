@@ -85,7 +85,10 @@
           <input id="searchInput" type="search" placeholder="Search sources, claims, entities...">
         </label>
         <div class="top-actions">
-          <select id="projectSelect" aria-label="Switch active project" class="topbar-project-select"><option value="">All projects</option></select>
+          <div id="projectSelect" class="custom-select topbar-project-select" aria-label="Switch active project">
+            <button class="custom-select-btn" type="button" aria-haspopup="listbox" aria-expanded="false">All projects</button>
+            <ul class="custom-select-list" role="listbox" hidden></ul>
+          </div>
           <span id="captureLaunchStatus" class="capture-status" aria-live="polite"></span>
           <button id="newNoteButton" class="secondary top-action" type="button">New note</button>
           <button id="captureTopButton" class="top-action primary-action" type="button" title="Launch Rebrowser capture">Capture</button>

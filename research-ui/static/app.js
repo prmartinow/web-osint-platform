@@ -6561,6 +6561,83 @@ function wirePreviewDrawerGlobals() {
   });
 }
 
+// ---- Custom dropdown component ----
+// Replaces a native <select> inside a sticky/transformed ancestor where
+// the browser would flip the dropdown upward. Provides a select-like API
+// (.value, .innerHTML accepting <option> markup, 'change' event) so
+// existing code works unchanged. The option list always opens BELOW the
+// trigger button via top:100% positioning.
+function enhanceCustomSelect(el) {
+  if (!el || el.__enhanced) return;
+  el.__enhanced = true;
+  const btn = el.querySelector('.custom-select-btn');
+  const list = el.querySelector('.custom-select-list');
+  if (!btn || !list) return;
+
+  let _value = '';
+  let _options = []; // [{value, label, selected}]
+
+  // Parse option HTML markup (same format a native select accepts).
+  const parseOptions = (html) => {
+    const tmp = document.createElement('div');
+    tmp.innerHTML = html;
+    return Array.from(tmp.querySelectorAll('option')).map((opt) => ({
+      value: opt.getAttribute('value') || '',
+      label: opt.textContent,
+    }));
+  };
+
+  const renderList = () => {
+    list.innerHTML = _options.map((opt) => `
+      <li class="custom-select-opt ${opt.value === _value ? 'selected' : ''}" role="option" data-value="${escapeHtml(opt.value)}" ${opt.value === _value ? 'aria-selected="true"' : ''}>${escapeHtml(opt.label)}</li>
+    `).join('');
+    btn.textContent = (_options.find((o) => o.value === _value) || _options[0] || { label: '' }).label;
+  };
+
+  const open = () => {
+    list.hidden = false;
+    btn.setAttribute('aria-expanded', 'true');
+  };
+  const close = () => {
+    list.hidden = true;
+    btn.setAttribute('aria-expanded', 'false');
+  };
+
+  btn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    if (list.hidden) open(); else close();
+  });
+  list.addEventListener('click', (e) => {
+    const item = e.target.closest('.custom-select-opt');
+    if (!item) return;
+    _value = item.dataset.value || '';
+    renderList();
+    close();
+    el.dispatchEvent(new Event('change', { bubbles: true }));
+  });
+  document.addEventListener('click', (e) => {
+    if (!el.contains(e.target)) close();
+  });
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && !list.hidden) { close(); btn.focus(); }
+  });
+
+  // Select-compatible API.
+  Object.defineProperty(el, 'value', {
+    get() { return _value; },
+    set(v) { _value = String(v); renderList(); },
+  });
+  Object.defineProperty(el, 'innerHTML', {
+    get() {
+      return _options.map((o) => `<option value="${o.value}">${o.label}</option>`).join('');
+    },
+    set(html) {
+      _options = parseOptions(html);
+      renderList();
+    },
+  });
+}
+
 async function loadFacets() {
   renderFacets(await fetchJson('/api/facets'));
 }
@@ -7876,6 +7953,7 @@ function wireEvents() {
 
 async function init() {
   wireEvents();
+  enhanceCustomSelect($('projectSelect'));
   const { route } = currentHashParts();
   state.route = routeConfig[route] ? route : 'home';
   applyHashParams();

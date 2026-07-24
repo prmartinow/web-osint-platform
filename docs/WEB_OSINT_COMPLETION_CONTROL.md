@@ -243,3 +243,14 @@ endpoints respond (/, /static/app.js, /api/capture/activity); served
 bundle contains loadCapturePage + capture route, no modal remnants;
 CDP screenshot shows form + metric cards (Committed 3 / Working 4 /
 Failed 0) + 13 history rows + sidebar, no rendering problems.
+
+### Capture sidebar entry (2026-07-21)
+
+| Commit | Fix |
+|--------|-----|
+| 0dea29f | Added Capture as the first child of the Inbox nav group in the sidebar (Capture -> Inbox -> Projects -> Library), matching the intake-stage ordering. Camera icon, same stroke style as the other nav icons. Also registered in `navGroupRoutes.inbox` so the Inbox group auto-expands and the item highlights when the Capture route is active. Previously the Capture page was only reachable via the topbar Capture button. |
+
+Verified on rebuilt container: DOM check confirms the three Inbox children
+(Capture/Projects/Library) all present with icons; CDP screenshot shows
+the Capture item highlighted when `#capture` is active and the Capture
+page rendering correctly.

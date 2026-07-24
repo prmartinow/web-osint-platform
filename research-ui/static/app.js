@@ -8024,7 +8024,7 @@ function wireEvents() {
   // closed. The chevron carries data-nav-group (NOT data-route) so the
   // route-click binder and active-state sync above ignore it.
   const navGroupRoutes = {
-    inbox: ['inbox', 'projects', 'library'],
+    inbox: ['capture', 'inbox', 'projects', 'library'],
     evidence: ['evidence', 'entities', 'claims', 'timeline', 'compare'],
     draft: ['draft', 'reviews', 'publishing', 'taxonomy'],
   };

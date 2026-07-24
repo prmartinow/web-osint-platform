@@ -254,3 +254,25 @@ Verified on rebuilt container: DOM check confirms the three Inbox children
 (Capture/Projects/Library) all present with icons; CDP screenshot shows
 the Capture item highlighted when `#capture` is active and the Capture
 page rendering correctly.
+
+### Capture page: design-research-driven refinements (2026-07-21)
+
+Based on cross-tool research (Wayback SPN, Apify Console, Archive.today,
+Maltego, Bright Data, Hunchly, ArchiveWeb.page, Forensic OSINT), applied
+two of the highest-leverage patterns:
+
+| Commit | Change |
+|--------|--------|
+| 48b608e | **Advanced options disclosure**: Capture mode + Allow X.com + Settle delay moved into a collapsed `<details class=capture-advanced>` below the prominent URL + Project + Start row. Apify input-schema pattern — beginners skim a 3-field form, power users click to expand rare config. One-line hint inside explains when each option matters. Animated chevron via CSS, no JS for the toggle. **Re-run on every history row**: every row (any status) now carries a Re-run button that refills the URL + project fields and scrolls the form into view (Archive.today paste-and-go / Apify resurrect pattern). Failed rows are no longer dead-ends. Committed rows keep Open-in-Inbox alongside Re-run. **Refactor**: history-row template was duplicated between initial render and 10s auto-refresh (already diverging — auto-refresh copy had dropped capture-event-id + project lines); extracted shared `captureHistoryRowsHtml(items)` + `wireCaptureHistoryButtons()` (idempotent). |
+
+Verified via CDP: form shows only Source URL + Project at top level,
+Advanced collapsed by default (contains mode/allowX/settleMs/hint);
+13 history rows each have a Re-run button (3 also have Open-in-Inbox);
+clicking Re-run fills the URL field and focuses it; Advanced disclosure
+expands/collapses cleanly. No rendering problems.
+
+#### Known pre-existing data issue surfaced
+`/api/home` returns no `projects` key (only `active_project`), so the
+Project `<select>` on the Capture page (and elsewhere) only ever shows
+"All projects" + no real options. Pre-dates this work; flagged for a
+separate fix in the home payload.

@@ -5222,6 +5222,35 @@ function renderCaptureMonitor(session) {
   `;
 }
 
+// Render the history list as rows. Shared by renderCapturePage (initial
+// render) and the 10s auto-refresh so they never diverge. Each row carries
+// a Re-run button (every status) plus an Open-in-Inbox button (committed only).
+function captureHistoryRowsHtml(items) {
+  if (!items.length) return '<p class="muted">No capture attempts yet. Start one above.</p>';
+  const row = (item) => `
+    <div class="capture-history-row" data-status="${escapeHtml(item.status || '')}">
+      ${captureStatusBadge(item.status)}
+      <div class="capture-history-main">
+        <a class="capture-history-url" href="${escapeHtml(item.seed_url || '')}" target="_blank" rel="noreferrer">${escapeHtml(item.seed_url || item.source_id || '(no url)')}</a>
+        <div class="capture-history-meta">
+          <span class="muted">${escapeHtml(fmtDate(item.requested_at) || '')}</span>
+          ${item.session_id ? `<span class="muted">session: <code>${escapeHtml(item.session_id)}</code></span>` : ''}
+          ${item.capture_event_id ? `<span class="muted">capture: <code>${escapeHtml(item.capture_event_id)}</code></span>` : ''}
+          ${item.project ? `<span class="muted">${escapeHtml(item.project)}</span>` : ''}
+        </div>
+        ${item.error ? `<div class="capture-history-error">${escapeHtml(item.error)}</div>` : ''}
+      </div>
+      <div class="capture-history-actions">
+        <button class="text-button capture-history-rerun" type="button"
+                data-rerun-url="${escapeHtml(item.seed_url || '')}"
+                data-rerun-project="${escapeHtml(item.project || '')}"
+                title="Re-run this capture with the same URL">Re-run</button>
+        ${item.status === 'committed' ? `<button class="text-button capture-history-open" data-capture-open="inbox">Open in Inbox</button>` : ''}
+      </div>
+    </div>`;
+  return items.map(row).join('');
+}
+
 function renderCapturePage(data) {
   const items = data.items || data || [];
   const summary = data.summary || {};
@@ -5246,18 +5275,24 @@ function renderCapturePage(data) {
           <span>Project</span>
           <select id="captureProjectSelect"><option value="">All projects</option>${projects}</select>
         </label>
-        <label class="capture-field">
-          <span>Capture mode</span>
-          <select id="captureMode">
-            <option value="rendered-web" selected>Rendered web (full capture)</option>
-            <option value="capture">Capture only (no extraction)</option>
-            <option value="publish">Publish only (skip capture)</option>
-          </select>
-        </label>
-        <div class="capture-form-row">
-          <label class="capture-checkbox"><input type="checkbox" id="captureAllowX"> Allow X.com captures</label>
-          <label class="capture-field compact"><span>Settle delay (ms)</span><input type="number" id="captureSettleMs" value="2500" min="0" max="30000" step="500"></label>
-        </div>
+        <details class="capture-advanced">
+          <summary>Advanced options</summary>
+          <div class="capture-advanced-body">
+            <label class="capture-field">
+              <span>Capture mode</span>
+              <select id="captureMode">
+                <option value="rendered-web" selected>Rendered web (full capture)</option>
+                <option value="capture">Capture only (no extraction)</option>
+                <option value="publish">Publish only (skip capture)</option>
+              </select>
+            </label>
+            <div class="capture-form-row">
+              <label class="capture-checkbox"><input type="checkbox" id="captureAllowX"> Allow X.com captures</label>
+              <label class="capture-field compact"><span>Settle delay (ms)</span><input type="number" id="captureSettleMs" value="2500" min="0" max="30000" step="500"></label>
+            </div>
+            <p class="capture-advanced-hint muted">Capture mode and settle delay are rarely changed; defaults work for most pages. Allow X.com is required only for x.com / twitter.com URLs.</p>
+          </div>
+        </details>
         <div class="capture-form-actions">
           <button type="submit" id="captureSubmit" class="primary-action">Start capture</button>
           <span id="captureFormStatus" class="capture-form-status" aria-live="polite"></span>
@@ -5271,22 +5306,7 @@ function renderCapturePage(data) {
     <section class="panel capture-history-panel">
       <div class="panel-title-row"><h2>Recent captures</h2><span class="muted">${items.length} sessions</span></div>
       <div id="captureHistoryList">
-        ${items.length ? items.map((item) => `
-          <div class="capture-history-row" data-status="${escapeHtml(item.status || '')}">
-            ${captureStatusBadge(item.status)}
-            <div class="capture-history-main">
-              <a class="capture-history-url" href="${escapeHtml(item.seed_url || '')}" target="_blank" rel="noreferrer">${escapeHtml(item.seed_url || item.source_id || '(no url)')}</a>
-              <div class="capture-history-meta">
-                <span class="muted">${escapeHtml(fmtDate(item.requested_at) || '')}</span>
-                ${item.session_id ? `<span class="muted">session: <code>${escapeHtml(item.session_id)}</code></span>` : ''}
-                ${item.capture_event_id ? `<span class="muted">capture: <code>${escapeHtml(item.capture_event_id)}</code></span>` : ''}
-                ${item.project ? `<span class="muted">${escapeHtml(item.project)}</span>` : ''}
-              </div>
-              ${item.error ? `<div class="capture-history-error">${escapeHtml(item.error)}</div>` : ''}
-            </div>
-            ${item.status === 'committed' ? `<button class="text-button capture-history-open" data-capture-open="inbox">Open in Inbox</button>` : ''}
-          </div>
-        `).join('') : '<p class="muted">No capture attempts yet. Start one above.</p>'}
+        ${captureHistoryRowsHtml(items)}
       </div>
     </section>
   `;
@@ -5340,10 +5360,8 @@ function wireCapturePage() {
     }
   });
 
-  // Open-in-inbox buttons.
-  document.querySelectorAll('[data-capture-open="inbox"]').forEach((btn) => {
-    btn.addEventListener('click', () => setRoute('inbox'));
-  });
+  // Wire Re-run + Open-in-Inbox buttons (shared by initial render + auto-refresh).
+  wireCaptureHistoryButtons();
 
   // Auto-refresh history every 10s while on the page.
   if (__captureRefreshTimer) clearInterval(__captureRefreshTimer);
@@ -5351,30 +5369,41 @@ function wireCapturePage() {
     if (state.route !== 'capture') { clearInterval(__captureRefreshTimer); return; }
     try {
       const data = await fetchJson('/api/capture/activity?limit=20');
-      // Only re-render the history list, not the whole page.
       const listEl = $('captureHistoryList');
       if (listEl && data.items) {
-        const items = data.items;
-        listEl.innerHTML = items.length ? items.map((item) => `
-          <div class="capture-history-row" data-status="${escapeHtml(item.status || '')}">
-            ${captureStatusBadge(item.status)}
-            <div class="capture-history-main">
-              <a class="capture-history-url" href="${escapeHtml(item.seed_url || '')}" target="_blank" rel="noreferrer">${escapeHtml(item.seed_url || item.source_id || '(no url)')}</a>
-              <div class="capture-history-meta">
-                <span class="muted">${escapeHtml(fmtDate(item.requested_at) || '')}</span>
-                ${item.session_id ? `<span class="muted">session: <code>${escapeHtml(item.session_id)}</code></span>` : ''}
-              </div>
-              ${item.error ? `<div class="capture-history-error">${escapeHtml(item.error)}</div>` : ''}
-            </div>
-            ${item.status === 'committed' ? `<button class="text-button capture-history-open" data-capture-open="inbox">Open in Inbox</button>` : ''}
-          </div>
-        `).join('') : '<p class="muted">No capture attempts yet.</p>';
-        document.querySelectorAll('[data-capture-open="inbox"]').forEach((btn) => {
-          btn.addEventListener('click', () => setRoute('inbox'));
-        });
+        listEl.innerHTML = captureHistoryRowsHtml(data.items);
+        wireCaptureHistoryButtons();
       }
     } catch {}
   }, 10000);
+}
+
+// Wire history-row action buttons. Idempotent — safe to call after every
+// history re-render (initial + each 10s refresh).
+function wireCaptureHistoryButtons() {
+  document.querySelectorAll('[data-capture-open="inbox"]').forEach((btn) => {
+    if (btn.dataset.wired) return;
+    btn.dataset.wired = '1';
+    btn.addEventListener('click', () => setRoute('inbox'));
+  });
+  document.querySelectorAll('.capture-history-rerun').forEach((btn) => {
+    if (btn.dataset.wired) return;
+    btn.dataset.wired = '1';
+    btn.addEventListener('click', () => {
+      const url = btn.dataset.rerunUrl;
+      const project = btn.dataset.rerunProject;
+      const urlInput = $('captureUrl');
+      const projectSel = $('captureProjectSelect');
+      if (url && urlInput) {
+        urlInput.value = url;
+        if (project && projectSel) projectSel.value = project;
+        urlInput.focus();
+        urlInput.select();
+        // Scroll the form into view (history sits below it).
+        document.querySelector('.capture-form-panel')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }
+    });
+  });
 }
 
 // Poll a capture session and render into the dedicated Capture page monitor.

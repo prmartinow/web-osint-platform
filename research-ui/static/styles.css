@@ -5462,6 +5462,89 @@ body.rail-collapsed .nav-row {
 .capture-form-status.ok { color: var(--ok); }
 .capture-form-status.error { color: var(--danger); }
 
+/* Advanced options disclosure (Capture mode + Allow X + Settle delay).
+   Pattern from Apify input schemas: high-frequency fields stay visible;
+   rare config goes under a collapsed summary so the form stays skim-able. */
+.capture-advanced {
+  border: 1px solid var(--soft-line);
+  border-radius: 10px;
+  background: var(--panel-2);
+}
+.capture-advanced > summary {
+  list-style: none;
+  cursor: pointer;
+  padding: 10px 14px;
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .08em;
+  color: var(--muted);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  user-select: none;
+}
+.capture-advanced > summary::-webkit-details-marker { display: none; }
+.capture-advanced > summary::before {
+  content: "";
+  width: 0; height: 0;
+  border-left: 5px solid var(--muted);
+  border-top: 4px solid transparent;
+  border-bottom: 4px solid transparent;
+  transition: transform .15s ease;
+}
+.capture-advanced[open] > summary::before { transform: rotate(90deg); }
+.capture-advanced > summary:hover { color: var(--text); }
+.capture-advanced-body {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 4px 14px 16px;
+}
+.capture-advanced-hint {
+  font-size: 11px;
+  line-height: 1.5;
+  margin: 0;
+}
+
+/* History-row action cluster: Re-run (always) + Open in Inbox (committed). */
+.capture-history-actions {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 4px;
+  flex-shrink: 0;
+  padding-top: 2px;
+}
+.capture-history-rerun {
+  font-size: 12px;
+  font-weight: 600;
+  padding: 4px 10px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: transparent;
+  color: var(--text);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.capture-history-rerun:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+}
+.capture-history-open {
+  font-size: 12px;
+  font-weight: 600;
+  padding: 4px 10px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.capture-history-open:hover { color: var(--text); border-color: var(--text); }
+
 /* Live session monitor */
 .capture-monitor-panel { padding: 20px; }
 .capture-monitor {
@@ -5546,8 +5629,8 @@ body.rail-collapsed .nav-row {
 .capture-history-panel { padding: 20px; }
 .capture-history-row {
   display: flex;
-  align-items: flex-start;
-  gap: 12px;
+  align-items: center;
+  gap: 14px;
   padding: 12px 0;
   border-bottom: 1px solid var(--soft-line);
 }
